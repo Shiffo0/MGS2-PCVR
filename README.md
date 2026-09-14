@@ -82,7 +82,7 @@ The illustration shows the core controls. The table covers contextual actions fo
 
 The two eyes are therefore not freshly rendered together from one simulation frame. At 60 game frames per second, this means roughly **30 fresh images per eye per second**. A higher headset refresh rate or compositor reprojection does not increase the number of fresh game-rendered images. Motion can reveal temporal differences between the eyes, ghosting or judder.
 
-This beta does not claim native simultaneous stereo or KHARVOX's specific AER implementation. Keep the game frame rate stable and use settings your PC can sustain. AER comfort varies between players.
+This beta does not claim native simultaneous stereo. Keep the game frame rate stable and use settings your PC can sustain. AER comfort varies between players.
 
 ## Roadmap: Raiden and Plant
 
@@ -116,6 +116,5 @@ This repository contains public documentation and images only. Playable download
 
 - [Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader) by ThirteenAG — MIT license; notice included in the download.
 - [OpenXR SDK / loader](https://github.com/KhronosGroup/OpenXR-SDK) by Khronos and contributors — license included in the download.
-- Presentation references: [MGSPatriotFix](https://github.com/ShizCalev/MGSPatriotFix) and [KHARVOX](https://github.com/CactusVRStudios/KHARVOX). These are independent projects, not dependencies or compatibility endorsements.
 
 Controller reference artwork was generated with AI and checked against the selected build's mappings. Use the written control table for contextual details.
