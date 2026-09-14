@@ -35,7 +35,7 @@ Quest 3 and Tanker playability are based on the developer's playtesting of mod b
 
 1. Install and launch your own Steam copy of **MGS2 — Master Collection Version** once, then close the game.
 2. Connect your Quest 3 to your PC, start your PC VR connection software and make sure its OpenXR runtime is active. Confirm that PC VR works before starting the game.
-3. Download **`MGS2-PCVR-v0.1.0-beta.1-12683251.zip`** from [Public Beta 1](https://github.com/Shiffo0/MGS2-PCVR-Beta/releases/tag/v0.1.0-beta.1). GitHub's automatic **Source code** ZIP/TAR links contain only the public documentation; they are not the playable mod.
+3. Download **`MGS2-PCVR-v0.1.0-beta.1-12683251.zip`** from [Public Beta 1](https://github.com/Shiffo0/MGS2-PCVR-Beta/releases/tag/v0.1.0-beta.1). GitHub's automatic **Source code** ZIP/TAR links are repository snapshots, not the playable mod package.
 4. In Steam, right-click the game → **Manage → Browse local files**. The destination is the folder containing **`METAL GEAR SOLID2.exe`**, normally `steamapps/common/MGS2`.
 5. Back up any existing files with the same names. Extract the release ZIP directly into that folder. Keep its folder structure. If another mod already provides `winmm.dll` or `openxr_loader.dll`, keep a backup and test this beta on a clean mod setup; combinations have not been validated.
 6. Start the game normally through Steam with your headset connected. Use the left controller's **Menu** button for Start. In gameplay, **A** switches VR / Third Person. Face forward in your normal playing position and **hold Y** to recenter.
@@ -112,7 +112,7 @@ Open an [issue](https://github.com/Shiffo0/MGS2-PCVR-Beta/issues) with the mod b
 
 Created by **Shiffo0**. Unofficial fan project; not affiliated with or endorsed by Konami or Meta. You must own the game.
 
-This repository contains public documentation and images only. Playable downloads are binary releases. No mod source code or development history is published here.
+The mod implementation is available in [src/](https://github.com/Shiffo0/MGS2-PCVR-Beta/tree/main/src), with build instructions. Playable downloads are provided separately through Releases.
 
 - [Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader) by ThirteenAG — MIT license; notice included in the download.
 - [OpenXR SDK / loader](https://github.com/KhronosGroup/OpenXR-SDK) by Khronos and contributors — license included in the download.
