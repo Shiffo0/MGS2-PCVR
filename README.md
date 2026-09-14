@@ -114,6 +114,8 @@ Created by **Shiffo0**. Unofficial fan project; not affiliated with or endorsed 
 
 The mod implementation is available in [src/](https://github.com/Shiffo0/MGS2-PCVR-Beta/tree/main/src), with build instructions. Playable downloads are provided separately through Releases.
 
+The original mod code and accompanying documentation are licensed under the **[MIT License](LICENSE)**. This grant covers the contributors' own work only. The game, game assets and trademarks are not covered. Third-party components retain their respective licenses; their notices are included in the release package.
+
 - [Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader) by ThirteenAG — MIT license; notice included in the download.
 - [OpenXR SDK / loader](https://github.com/KhronosGroup/OpenXR-SDK) by Khronos and contributors — license included in the download.
 
