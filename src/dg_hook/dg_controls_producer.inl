@@ -353,6 +353,22 @@ static void controls_route_frame(const DG_XR_FRAME *frame, int allowed,
                 frame->right_hand.thumbstick_x,frame->right_hand.thumbstick_y);
         g_controls.diagnostic_clicks=clicks;
     }
+    m9_sample_from_frame(frame,native_allowed && !special_allowed &&
+        !(radial && (owned.deny_new_fire || !owned.route_valid)) &&
+        !(frame && (frame->left_hand.primary_button || frame->left_hand.secondary_button ||
+        frame->left_hand.menu_button || frame->right_hand.primary_button ||
+        frame->right_hand.secondary_button || frame->right_hand.menu_button ||
+        frame->left_hand.thumbstick_click || frame->right_hand.thumbstick_click)),&out->m9);
+    blade_sample_from_frame(frame,native_allowed && generation &&
+        !(radial && (owned.deny_new_fire || !owned.route_valid)) &&
+        !(frame && (frame->left_hand.primary_button || frame->left_hand.secondary_button ||
+        frame->left_hand.menu_button || frame->right_hand.primary_button ||
+        frame->right_hand.secondary_button || frame->right_hand.menu_button ||
+        frame->left_hand.thumbstick_click || frame->right_hand.thumbstick_click ||
+        frame->right_hand.trigger_click || frame->right_hand.trigger_value>.1f ||
+        frame->left_hand.trigger_click || frame->left_hand.trigger_value>.1f ||
+        frame->left_hand.squeeze_click)),
+        now_ms,g_controls.context,&out->blade);
     out->fire_available=fire_from_frame(frame,&out->fire);
     if (fire_idle && (!native_allowed || (radial && owned.deny_new_fire)))
         out->fire.valid=0;
@@ -404,6 +420,7 @@ static void controls_provide(void *user, int allowed, int fire_idle,
         controls_catalog_build(&native,weapon_hand);
     }
     controls_route_frame(have ? &frame : NULL,allowed,fire_idle,now_ms,generation,out);
+    dg_xr_m9_feedback(dg_bridge_m9_events());
     memset(&view,0,sizeof view);
     if ((allowed==DG_CONTROLS_GAMEPLAY || allowed==DG_CONTROLS_TURN_ONLY ||
          allowed==DG_CONTROLS_RADIAL_ONLY) && have && generation &&

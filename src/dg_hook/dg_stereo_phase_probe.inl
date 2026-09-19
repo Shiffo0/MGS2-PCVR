@@ -135,6 +135,9 @@ static int phase_context(CONTEXT *c)
     if(pp_return_context(c))return 1;
     bit=phase_owned(c);
     if(!bit)return 0;
+#ifdef DG_CAPTURE_IDENTITY
+    ci_native(bit,c);
+#endif
     render_link_event(bit,c);
     pp_shared_event(bit,c); /* observes; never changes debug slots or context */
     if(InterlockedCompareExchange(&g_phase_enabled,0,0)) {

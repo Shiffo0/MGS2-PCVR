@@ -102,6 +102,25 @@ static int hand_pose_quat(ULONGLONG base,int id,int stride,const DG_ADJ_FRAME *f
         rows[r][c]=((volatile float *)(ULONG_PTR)address)[r*4+c];
     return dg_ik_basis_quat(rows,world) && world_quat_to_adjust(frame,world,q);
 }
+/* Left -> right mirror of a LOCAL rotation (negate y and z). Under the live
+   adjust frame every quaternion here is conjugated by the actor heading f, so
+   a local rotation reads f* L f and negating ITS y,z mirrors about a plane that
+   turns with the body: the stored rest came out rotated by twice the heading at
+   capture (fine at 0/180 degrees, fingers bent backwards at 90/270, curls
+   turned into long-axis twists in between - measured 2026-09-18 from the
+   existing `hand joint:` lines, 152.1 and -89.5 degrees in two sessions).
+   Mirror the heading-free rotation and express the result in the caller's
+   frame again. The legacy frame has no heading in it and is left as it was. */
+static int hand_pose_mirror_local(const DG_ADJ_FRAME *frame,const double local[4],double out[4])
+{
+    double m[4];
+    if(frame && frame->live) { if(!adjust_quat_to_world(frame,local,m))return 0; }
+    else memcpy(m,local,sizeof m);
+    m[1]=-m[1];m[2]=-m[2];
+    if(!dg_ik_quat_normalize(m))return 0;
+    if(frame && frame->live)return world_quat_to_adjust(frame,m,out);
+    memcpy(out,m,sizeof m);return 1;
+}
 static void hand_pose_now(ULONGLONG arm,const DG_BRIDGE_ARM_TARGET *t)
 {
     ULONGLONG current=0,pw=0,objs,mc,adj,base,mask;
@@ -147,16 +166,19 @@ static void hand_pose_now(ULONGLONG arm,const DG_BRIDGE_ARM_TARGET *t)
        g_hand_pose_rest.objs!=objs || g_hand_pose_rest.mc!=mc || g_hand_pose_rest.adj!=adj) {
         double rest[17][4],fore[4],inv_fore[4],wrist[4];
         if(!hand_pose_quat(base,9,stride,&frame,fore))goto refuse;
-        hand_pose_inv(fore,inv_fore);dg_ik_quat_mul(inv_fore,left[0],wrist);
-        wrist[1]=-wrist[1];wrist[2]=-wrist[2];
-        if(!dg_ik_quat_normalize(wrist))goto refuse;
+        memcpy(wrist,left[0],sizeof wrist);
+        if(g_left.wrist_seen[3]!=0 || g_left.wrist_seen[0]!=0 ||
+           g_left.wrist_seen[1]!=0 || g_left.wrist_seen[2]!=0) {
+            hand_pose_inv(g_left.wrist_seen,inv_fore);dg_ik_quat_mul(inv_fore,wrist,wrist);
+        }
+        hand_pose_inv(fore,inv_fore);dg_ik_quat_mul(inv_fore,wrist,wrist);
+        if(!hand_pose_mirror_local(&frame,wrist,wrist))goto refuse;
         for(j=0;j<17;j++) {
             int p=hand_pose_parents[j]==6?0:hand_pose_parents[j]-20;
             double inv[4];
             hand_pose_inv(left[p],inv);
             dg_ik_quat_mul(inv,left[j+1],rest[j]);
-            rest[j][1]=-rest[j][1];rest[j][2]=-rest[j][2];
-            if(!dg_ik_quat_normalize(rest[j]))goto refuse;
+            if(!hand_pose_mirror_local(&frame,rest[j],rest[j]))goto refuse;
         }
         memcpy(g_hand_pose_rest.local,rest,sizeof rest);
         memcpy(g_hand_pose_rest.wrist,wrist,sizeof wrist);

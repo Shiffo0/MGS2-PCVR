@@ -2,6 +2,10 @@
 #define DG_AIM_REPLAY_H
 #include "dg_pose.h"
 
+/* pose_flags bit 4 selects the HF Blade axis correction. Older records
+ * have it clear. Raw AIM and the binary layout remain unchanged. */
+#define DG_AIM_REPLAY_BLADE 16u
+
 /* DGREC6 absolute-direction input, before quaternion construction or filtering.
    Matrices are camera axes in world. View and AIM are exact LOCAL xyzw/xyz.
    Selection IDs describe the bounded live guard's result, never replay pointers. */

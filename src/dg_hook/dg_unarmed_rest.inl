@@ -17,6 +17,10 @@ static int unarmed_hand_rest(ULONGLONG arm,const double root_inv[4],
     if(!plausible_ptr(objs)||region_end(objs)<base+10*(ULONGLONG)stride+64 ||
        !hand_pose_quat(base,10,stride,frame,left) ||
        !hand_pose_quat(base,0,stride,frame,root))return 0;
+    if(g_left.wrist_active) {
+        for(k=0;k<4;k++)aq[k]=g_left.wrist_cached[k];
+        hand_pose_inv(aq,inv);dg_ik_quat_mul(inv,left,left);
+    }
     if(g_left.active) {
         if(g_left.arm!=arm || !left_owner(&mc,&adj) ||
            (*(volatile ULONGLONG *)(ULONG_PTR)(mc+0x38)&DG_LEFT_MASK)!=DG_LEFT_MASK ||
@@ -33,7 +37,7 @@ static int unarmed_hand_rest(ULONGLONG arm,const double root_inv[4],
     }
     hand_pose_inv(root,inv);
     dg_ik_quat_mul(inv,left,relative);
-    relative[1]=-relative[1];relative[2]=-relative[2];
+    if(!hand_pose_mirror_local(frame,relative,relative))return 0;   /* heading-free mirror, see dg_hand_pose.inl */
     dg_ik_quat_mul(root,relative,mirrored);
     if(!adjust_quat_to_world(frame,mirrored,world))return 0;
     quat_rebase(root_inv,world,out);
@@ -55,8 +59,12 @@ static int unarmed_wrist_target(ULONGLONG arm,const DG_ADJ_FRAME *frame,
        !hand_pose_quat(base,10,stride,frame,left) ||
        !hand_pose_quat(base,9,stride,frame,lf) ||
        !hand_pose_quat(base,5,stride,frame,rf))return 0;
+    if(g_left.wrist_active) {
+        for(k=0;k<4;k++)a[k]=g_left.wrist_cached[k];
+        hand_pose_inv(a,inv);dg_ik_quat_mul(inv,left,left);
+    }
     hand_pose_inv(lf,inv);dg_ik_quat_mul(inv,left,local);
-    local[1]=-local[1];local[2]=-local[2];
+    if(!hand_pose_mirror_local(frame,local,local))return 0;
     /* The palm must not inherit a later native wrist animation either. The
        None finger writer captures the complete local rest on this rig. */
     if(g_hand_pose_rest.valid && g_hand_pose_rest.arm==arm &&

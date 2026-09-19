@@ -4,6 +4,8 @@
 #define DG_BRIDGE_H
 #include <stdint.h>
 #include "dg_position_target.h"
+#include "dg_m9_runtime.h"
+#include "dg_free_wrist.h"
 #include "dg_interact_adapter.h"
 
 /* MAT is the camera matrix shared with the hook.  Keeping it here makes the
@@ -165,6 +167,9 @@ typedef struct {
        session - repeats, refusals, lost tracking mid-aim - without spending a
        magazine to find out. */
     int fire_mode;
+    int pistol_reload; /* startup-only USP/SOCOM gesture reload */
+    int m9_slide; /* startup-only opt-in; native adapter must validate */
+    int hf_blade; /* startup-only gesture adapter, default off */
     /* The kick, which is ours to invent - the game animates recoil onto the
        arm joints and we overwrite those joints every camera frame, so a shot
        has no physical consequence unless we give it one. Both are peaks for a
@@ -404,6 +409,9 @@ typedef struct {
     unsigned pose_flags;        /* DG_POSE_F_* copied for diagnostics only */
     int absolute_aim;           /* opt-in right-hand pistol root basis */
     DG_POSITION_INPUT position;
+    DG_POSITION_INPUT left_position; /* Independent camera/raw left-grip sample. */
+    DG_M9_SAMPLE m9_pose; /* Raw pair used by this exact arm solve. */
+    DG_FREE_WRIST_INPUT free_right,free_left;
     int aim_write;
     double aim_world[4];
     double aim_weight;
@@ -1200,7 +1208,16 @@ void dg_bridge_move_now(const DG_BRIDGE_MOVE *cmd);
    Provider still runs with allowed=0 to preserve an already active fire
    gesture. Only an idle fire owner may reject a new gesture for radial UI.
    Register/unregister only from a control thread, never a VEH callback. */
+#include "dg_m9_runtime.h"
+#include "dg_blade.h"
+int dg_bridge_blade_enabled(void);
+int dg_bridge_stinger_enabled(void);
+#ifdef DG_HOOK_TEST
+void dg_bridge_test_stinger_available(int available);
+#endif
 typedef struct {
+    DG_M9_SAMPLE m9;
+    DG_BLADE_SAMPLE blade;
     DG_BRIDGE_FIRE fire;
     DG_BRIDGE_MOVE move;
     DG_INTERACT_SAMPLE interact;
@@ -1330,5 +1347,8 @@ int dg_bridge_self_test(void);
    other. */
 void dg_bridge_test_tick(void);
 #endif
+
+/* Hide original LIFE/radar frame only while the VR FPS bridge is active. */
+void dg_bridge_native_hud_configure(int enabled);
 
 #endif

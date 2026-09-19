@@ -92,6 +92,18 @@ void dg_fire_step(DG_FIRE *f, const DG_FIRE_IN *in, DG_FIRE_OUT *out)
 
     aiming = (f->state == DG_FIRE_DRAW || f->state == DG_FIRE_HOLD);
 
+    if (aiming && !current && in->wtype == DG_FIRE_WP_COOLANT) {
+        /* A spray uses held status, even at low pressure. The pistol abort
+           window would keep spraying. Release immediately and consume this
+           pull so tracking recovery cannot restart it without a new press. */
+        out->release = 1;
+        out->pressure = 0;
+        out->flags |= DG_FIRE_F_BLOCKED_INPUT | DG_FIRE_F_ABORTING;
+        enter(f, DG_FIRE_IDLE);
+        out->state = f->state;
+        return;
+    }
+
     if (aiming && !current) {
         if (f->gap <= DG_FIRE_GRACE_TICKS) {
             /* Coast. The crossing went quiet for a tick or two, which the

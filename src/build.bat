@@ -17,7 +17,7 @@ if errorlevel 1 (
 )
 pushd "%~dp0dg_hook"
 if errorlevel 1 exit /b 1
-cl /nologo /W3 /O2 /I "%OPENXR_INCLUDE_DIR%" /LD dg_hook.c dg_radial.c dg_radial_owner.c dg_radial_view.c dg_radial_overlay.c dg_aim_target.c dg_aim_probe.c dg_aim_capture.c dg_script_gate.c dg_xr.c dg_xr_script.c dg_present.c dg_proj.c dg_bridge.c dg_radial_inventory.c dg_radial_native_read.c dg_radial_phase.c dg_radial_commit.c dg_radial_ready.c dg_pose.c dg_ik.c dg_arm_map.c dg_fire.c dg_recoil.c dg_move.c dg_menu.c dg_rec.c dg_policy.c dg_policy_table.c ^
+cl /nologo /W3 /O2 /EHsc /I "%OPENXR_INCLUDE_DIR%" /LD dg_hook.c dg_radial.c dg_radial_owner.c dg_radial_view.c dg_radial_overlay.c dg_aim_target.c dg_aim_probe.c dg_aim_capture.c dg_script_gate.c dg_xr.c dg_xr_script.c dg_present.c dg_draw_trial.cpp dg_proj.c dg_bridge.c dg_radial_inventory.c dg_radial_native_read.c dg_radial_phase.c dg_radial_commit.c dg_radial_ready.c dg_pose.c dg_ik.c dg_arm_map.c dg_fire.c dg_recoil.c dg_move.c dg_menu.c dg_rec.c dg_policy.c dg_policy_table.c ^
     /link /OUT:dg_hook.asi d3d11.lib dxgi.lib dxguid.lib user32.lib
 set "pcvr_build_rc=%ERRORLEVEL%"
 popd

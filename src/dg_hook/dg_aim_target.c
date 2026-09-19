@@ -57,3 +57,18 @@ int dg_aim_target_build(const double camera_world[3][3],
     for (i = 0; i < 4; i++) hand_world[i] = result[i];
     return 1;
 }
+
+/* Retail Blade0->Blade1 axis, RVAs 97b350/97b360. The shortest local
+ * rotation maps it to -Y; the AIM builder maps -Y to the controller ray. */
+int dg_aim_target_blade(double hand_world[4]) {
+    double axis[3]={3.454840660095215,-383.86553955078125,759.2001342773438};
+    double correction[4],n;int k;
+    if(!hand_world || !aim_unit(hand_world))return 0;
+    n=sqrt(axis[0]*axis[0]+axis[1]*axis[1]+axis[2]*axis[2]);
+    for(k=0;k<3;k++)axis[k]/=n;
+    correction[0]=axis[2];correction[1]=0;correction[2]=-axis[0];
+    correction[3]=1-axis[1];
+    if(!dg_ik_quat_normalize(correction))return 0;
+    dg_ik_quat_mul(hand_world,correction,hand_world);
+    return dg_ik_quat_normalize(hand_world);
+}

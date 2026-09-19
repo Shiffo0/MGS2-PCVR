@@ -1,21 +1,29 @@
-# Public Beta 1 — build 12683251
+# Public Beta 2 — build E4267D3E
 
-First public beta of MGS2 PCVR for the Steam Master Collection version on Windows.
+Updated mod binary, buildable source baseline and configuration for MGS2 Master Collection on Windows/OpenXR.
 
-- **Tested on Meta Quest 3.**
-- **Tanker fully playable**, with the documented Third Person workaround and VR limitations.
-- OpenXR with **AER (Alternate Eye Rendering)**.
-- Controller guide and installation instructions included.
-- **Raiden / Plant remains in development:** SOCOM, coolant, scope, sniper rifle, Stinger and Nikita require further work.
+## Included
 
-**Limitations:** use Third Person to get past security cameras. Hanging, moving while hanging and grenades do not work in VR yet.
+- Combined HF Blade, Stinger, native HUD and coolant work.
+- Stinger first-person model/controller integration and aim-directed lock-on adapter; native animation, ammunition, damage and missile guidance are retained.
+- M9 slide handling, pistol reload and wrist-radar/UI settings from the selected baseline.
+- Full shipping implementation and local include dependencies in src/, including the C++ draw-trial module.
+- Matching release settings in config/; recording, diagnostic probes and capture requests are disabled for the package.
 
-Download **MGS2-PCVR-v0.1.0-beta.1-12683251.zip**, not GitHub's automatically generated Source code archives. Read the [installation and controller guide](https://github.com/Shiffo0/MGS2-PCVR-Beta#installation).
+## Validation and limitations
 
-The mod binary is the unchanged developer-selected Quest 3 build:
+The selected baseline has recorded passes for the main, IK, recorder, Stinger (56 checks), Blade (470 checks), aim-capture (2408 checks) and aim-target desk suites. Its source manifest and binary hash were verified before packaging. The curated source copy also builds successfully; existing f2l compiler warnings remain.
 
-`12683251D2C666C02EC319074828B6A5DF59DBF8C381C8D68EBCD81D8933C58B`
+**A new headset acceptance test for this combined build has not been recorded.** Quest 3/Tanker playability was reported for the earlier beta; it is not a completed regression test for E4267D3E. Stinger alignment/lock-on/firing, HF Blade gestures, regular weapons/reload, wrist HUD and coolant still need live validation.
 
-The release configuration preserves gameplay settings and disables development recording and diagnostic probes. That configuration cleanup was reviewed at the desk; no additional headset playthrough was performed during packaging. The tested one-hour session limit is retained.
+Use Third Person to get past security-camera sections. Hanging, movement while hanging and grenades remain listed limitations. Raiden/Plant is not yet a complete supported VR campaign.
 
-See SHA256SUMS.txt for downloadable-asset checksums. No source files, game files, saves, PDBs or development history are included.
+## Download
+
+Download **MGS2-PCVR-v0.2.0-beta.2-E4267D3E.zip** for installation. GitHub's Source code archives contain the source snapshot for this release, not the playable package. See the [installation guide](https://github.com/Shiffo0/MGS2-PCVR-Beta#installation).
+
+The packaged dg_hook.asi is unchanged:
+
+E4267D3E8D856B1563229444020B718C49FA4596B0934A7403E33C9BAD1FEAD7
+
+The curated source differs only in documentation comments and three optional diagnostic path strings; a rebuild is a separate artifact. MIT applies to the contributors' own work, with third-party licenses retained separately. No game files, saves or debug symbols are bundled.

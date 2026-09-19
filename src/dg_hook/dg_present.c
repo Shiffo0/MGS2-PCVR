@@ -15,6 +15,27 @@
 #include <string.h>
 
 #include "dg_present.h"
+#include "dg_draw_trial.h"
+#include "dg_state_roundtrip.h"
+
+/* Worker publishes once; Present owns all D3D access. No probe I/O in Present. */
+static volatile LONG g_state_request;
+void dg_present_poll_state_probe(const char *marker) {
+    char path[MAX_PATH], text[32], *leaf;
+    FILE *f=NULL;
+    size_t n;
+    if(!marker || InterlockedCompareExchange(&g_state_request,0,0)!=0) return;
+    if(strcpy_s(path,sizeof path,marker)) return;
+    leaf=strrchr(path,'\\');
+    if(leaf) {
+        if(strcpy_s(leaf+1,sizeof(path)-(leaf+1-path),"dg_state_probe.on")) return;
+    } else strcpy_s(path,sizeof path,"dg_state_probe.on");
+    if(fopen_s(&f,path,"rb") || !f) return;
+    n=fread(text,1,sizeof(text),f);
+    fclose(f);
+    if(n==9 && memcmp(text,"roundtrip",9)==0)
+        InterlockedCompareExchange(&g_state_request,1,0);
+}
 
 typedef HRESULT (WINAPI *CREATE_FACTORY_FN)(REFIID, void **);
 typedef HRESULT (WINAPI *CREATE_DEVICE_FN)(
@@ -176,6 +197,7 @@ static void remember_device(ID3D11Device *device) {
     AcquireSRWLockExclusive(&g_lock);
     if (!g_device) { device->lpVtbl->AddRef(device); g_device = device; }
     ReleaseSRWLockExclusive(&g_lock);
+    dg_draw_trial_attach(device,log_msg);
 }
 
 static void remember_swap_chain(IDXGISwapChain *sc) {
@@ -249,6 +271,7 @@ static HRESULT STDMETHODCALLTYPE hook_present(IDXGISwapChain *sc,
                 memset(&tex, 0, sizeof(tex));
                 back->lpVtbl->GetDesc(back, &tex);
                 metadata_ok = 1;
+                dg_ui2d_backbuffer(tex.Width, tex.Height);
                 back->lpVtbl->Release(back);
             }
             if (SUCCEEDED(hr) && metadata_ok)
@@ -261,6 +284,17 @@ static HRESULT STDMETHODCALLTYPE hook_present(IDXGISwapChain *sc,
         AcquireSRWLockShared(&g_lock);
         callback = g_callback;
         ReleaseSRWLockShared(&g_lock);
+        if (!(flags & DXGI_PRESENT_TEST) &&
+            InterlockedCompareExchange(&g_state_request,2,1)==1) {
+            ID3D11Device *probe_device=NULL;
+            int result=-2;
+            if(sc && SUCCEEDED(sc->lpVtbl->GetDevice(sc,&IID_ID3D11Device,(void**)&probe_device))) {
+                result=dg_state_roundtrip(probe_device);
+                probe_device->lpVtbl->Release(probe_device);
+            }
+            log_msg("state_roundtrip: result=%d thread=%lu boundary=pre_capture_present sampled_bindings_only=1 extra_draws=0\r\n",result,GetCurrentThreadId());
+        }
+        if (!(flags & DXGI_PRESENT_TEST)) dg_draw_trial_present();
         if (callback) callback(sc);
         g_inside_present = 0;
     } else {
@@ -333,6 +367,7 @@ static HRESULT WINAPI hook_create_factory(REFIID iid, void **factory) {
 
 static void rollback(void) {
     int i;
+    dg_draw_trial_stop();
     AcquireSRWLockExclusive(&g_lock);
     restore_pointer(&g_present_patch);
     restore_pointer(&g_factory_patch);
@@ -391,6 +426,7 @@ fail:
 
 void dg_present_stop(void) {
     HANDLE event;
+    dg_draw_trial_stop();
     AcquireSRWLockExclusive(&g_lock);
     if (!g_started && !g_iat_count && !g_present_patch.slot && !g_factory_patch.slot) {
         ReleaseSRWLockExclusive(&g_lock); return;

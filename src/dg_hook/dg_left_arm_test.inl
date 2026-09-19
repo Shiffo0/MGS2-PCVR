@@ -57,6 +57,18 @@ static void tl_engine(unsigned char *blob,int stride,const float *adjust,
     }
     memcpy(slots+16,adjust+32,8*sizeof(float));
     tq_engine(scratch,stride,slots,0,rig,wrist);
+    { /* Joint 10 rotates the wrist basis, not its position. */
+        double q[4],world[4],basis[3][3],live[4];int r,k;
+        DG_ADJ_FRAME frame=ADJ_FRAME_LEGACY;frame.live=1;
+        frame.valid=arm_frame_yaw(0,frame.q);
+        float *m=(float *)(scratch+DG_OBJS_ARRAY+6*stride);
+        for(k=0;k<4;k++)q[k]=adjust[40+k];
+        for(r=0;r<3;r++)for(k=0;k<3;k++)basis[r][k]=m[r*4+k];
+        if(dg_ik_quat_normalize(q) && adjust_quat_to_world(&frame,q,world) &&
+           dg_ik_basis_quat(basis,live)) {
+            dg_ik_quat_mul(world,live,q);th_write_basis(m,q);
+        }
+    }
     for(j=0;j<3;j++) memcpy(blob+DG_OBJS_ARRAY+(8+j)*stride,
                            scratch+DG_OBJS_ARRAY+(4+j)*stride,64);
 }
@@ -161,6 +173,58 @@ static int t_left_seam(void)
     LH_CHECK(*(ULONGLONG *)(mc+0x38)&(1ULL<<8));
     *(ULONGLONG *)(mc+0x38)=right_mask;
     for(j=8;j<=9;j++) for(k=0;k<4;k++) adjust[j*4+k]=(k==3)?1.0f:0.0f;
+    /* Camera/raw-space position must stay independent of the old shoulder
+       mapping. The synthetic hierarchy actually applies published slots. */
+    t.left_position.enabled=t.left_position.valid=1;
+    t.left_position.units=1000;
+    t.left_position.camera[0]=t.left_position.camera[5]=
+        t.left_position.camera[10]=t.left_position.camera[15]=1;
+    t.left_position.view[3]=1;
+    for(i=0;i<12;i++) {
+        tl_engine(blob,STRIDE,adjust,&rig,wrist);g_b.c_ticks++;t.pair_id++;
+        left_arm_now(arm,&t,0);
+    }
+    LH_CHECK(g_left.active && g_left.camera_position.ready);
+    tl_engine(blob,STRIDE,adjust,&rig,first);
+    /* Camera moves 40 mm right with controller stationary in raw space. */
+    t.left_position.camera[12]=40;
+    t.pair_id++;g_b.c_ticks++;left_arm_now(arm,&t,0);
+    tl_engine(blob,STRIDE,adjust,&rig,wrist);
+    memcpy(expected,first,sizeof expected);expected[0]+=40;
+    LH_CHECK(g_left.active && vdist3(wrist,expected)<.02);
+    /* Physical head translation cancels camera translation at full scale. */
+    t.left_position.view[4]=.04;
+    t.pair_id++;g_b.c_ticks++;left_arm_now(arm,&t,0);
+    tl_engine(blob,STRIDE,adjust,&rig,wrist);
+    LH_CHECK(vdist3(wrist,first)<.02);
+    /* Left controller travel uses the arm scale (330/330 * .99). */
+    t.left_position.grip[0]=.05;
+    t.pair_id++;g_b.c_ticks++;left_arm_now(arm,&t,0);
+    tl_engine(blob,STRIDE,adjust,&rig,wrist);
+    memcpy(expected,first,sizeof expected);expected[0]+=49.5;
+    LH_CHECK(vdist3(wrist,expected)<.02);
+    /* Native left rest must not create a second camera-space offset when
+       both tracked hands use the already accepted right-hand calibration. */
+    t.position.enabled=1;
+    g_b.camera_position=g_left.camera_position;
+    g_b.camera_position.virtual0[0]+=.025;
+    t.pair_id++;g_b.c_ticks++;left_arm_now(arm,&t,1);
+    tl_engine(blob,STRIDE,adjust,&rig,wrist);
+    expected[0]+=25;
+    LH_CHECK(g_left.active && vdist3(wrist,expected)<.02);
+    /* None disables camera positioning only inside arm_ik_now's effective
+       right target. The left seam still receives the original enabled flag.
+       With no right camera calibration, it must keep its independent route
+       and keep the shared native arm object visible. */
+    g_b.arm_map_unarmed=1;g_b.camera_position.ready=0;
+    t.pair_id++;g_b.c_ticks++;left_arm_now(arm,&t,1);
+    LH_CHECK(g_left.active);
+    g_b.arm_map_unarmed=0;
+    t.position.enabled=0;
+    t.left_position.valid=0;left_arm_now(arm,&t,0);
+    LH_CHECK(!g_left.active && !g_left.camera_position.ready);
+    LH_CHECK(memcmp(right,adjust+16,sizeof right)==0 && memcmp(hand,adjust+40,sizeof hand)==0);
+    memset(&t.left_position,0,sizeof t.left_position);
     /* Support uses the newly committed right wrist, not the stale skeleton. */
     t.twohand_enabled=t.hands_coherent=t.aim_write=1;t.aim_weapon_id=1;
     t.hands_distance_m=.08;g_b.fire_mode=DG_FIRE_MODE_ON;g_b.fire.state=DG_FIRE_HOLD;
@@ -217,6 +281,83 @@ static int t_left_seam(void)
     dg_bridge_arm_seam_now(&t);
     LH_CHECK(!g_left.active && !(*(ULONGLONG *)(mc+0x38)&DG_LEFT_MASK));
     LH_CHECK(memcmp(right,adjust+16,sizeof right)==0 && memcmp(hand,adjust+40,sizeof hand)==0);
+    /* Free left wrist: drive the real seam through three-axis sweeps and
+       reconstruct the resulting hierarchy, independently of its solver. */
+    g_b.s_late_unsafe=0;
+    *(ULONGLONG *)(mc+0x38)&=~(1ULL<<10);
+    memset(adjust+40,0,16);adjust[43]=1;
+    t.free_left.enabled=t.free_left.valid=1;t.free_left.world[3]=1;
+    t.twohand_enabled=0;
+    g_b.arm_map_unarmed=1;
+    for(i=0;i<12;i++) {
+        tl_engine(blob,STRIDE,adjust,&rig,wrist);g_b.c_ticks++;t.pair_id++;left_arm_now(arm,&t,0);
+    }
+    LH_CHECK(g_left.active && g_left.wrist_active && g_left.wrist.ready);
+    { /* Independent neutral reference: render the solved arm with no wrist
+         adjustment. The initial free wrist must retain that local relation,
+         not the old animation's world direction. */
+        float neutral[55*4];double got[4],want[4],rows[3][3],neutral_pos[3];
+        int r,c;
+        tl_engine(blob,STRIDE,adjust,&rig,wrist);
+        for(r=0;r<3;r++)for(c=0;c<3;c++)rows[r][c]=
+            ((float *)(blob+DG_OBJS_ARRAY+10*STRIDE))[r*4+c];
+        LH_CHECK(dg_ik_basis_quat(rows,got));
+        memcpy(neutral,adjust,sizeof neutral);
+        memset(neutral+40,0,16);neutral[43]=1;
+        tl_engine(blob,STRIDE,neutral,&rig,neutral_pos);
+        for(r=0;r<3;r++)for(c=0;c<3;c++)rows[r][c]=
+            ((float *)(blob+DG_OBJS_ARRAY+10*STRIDE))[r*4+c];
+        LH_CHECK(dg_ik_basis_quat(rows,want));
+        LH_CHECK(th_angle_between(got,want)<.05);
+        LH_CHECK(vdist3(wrist,neutral_pos)<.001);
+        tl_engine(blob,STRIDE,adjust,&rig,wrist);
+    }
+    {
+        double rest[4],got[4],want[4],rows[3][3],worst=0;
+        int axis,step,r,c;
+        memcpy(rest,g_left.wrist.rest0,sizeof rest);
+        for(axis=0;axis<3;axis++)for(step=-6;step<=6;step++) {
+            th_axis(axis==0,axis==1,axis==2,step*10,t.free_left.world);
+            tl_engine(blob,STRIDE,adjust,&rig,wrist);g_b.c_ticks++;t.pair_id++;
+            left_arm_now(arm,&t,0);tl_engine(blob,STRIDE,adjust,&rig,wrist);
+            for(r=0;r<3;r++)for(c=0;c<3;c++)rows[r][c]=
+                ((float *)(blob+DG_OBJS_ARRAY+10*STRIDE))[r*4+c];
+            LH_CHECK(dg_ik_basis_quat(rows,got));
+            dg_ik_quat_mul(t.free_left.world,rest,want);
+            { double error=th_angle_between(got,want);if(error>worst)worst=error;
+              LH_CHECK(error<.05 && g_left.wrist_active); }
+        }
+        printf("  left free wrist: 39 three-axis hierarchy poses, worst %.6f deg\n",worst);
+    }
+    { /* Equip/None must establish a fresh reference even on the same rig. */
+        int mode;
+        for(mode=0;mode<=1;mode++) {
+            g_b.arm_map_unarmed=mode;
+            th_axis(0,1,0,mode?35:-25,t.free_left.world);
+            tl_engine(blob,STRIDE,adjust,&rig,wrist);g_b.c_ticks++;t.pair_id++;
+            left_arm_now(arm,&t,0);
+            LH_CHECK(g_left.wrist_active && g_left.wrist_unarmed==mode);
+            LH_CHECK(th_angle_between(g_left.wrist.controller0,t.free_left.world)<.001);
+        }
+    }
+    { /* Support mode relinquishes only wrist ownership, retaining position. */
+        double identity[4]={0,0,0,1};DG_ADJ_FRAME frame=ADJ_FRAME_LEGACY;
+        frame.live=1;frame.valid=arm_frame_yaw(0,frame.q);
+        left_wrist_now((ULONGLONG)(ULONG_PTR)blob+DG_OBJS_ARRAY,STRIDE,
+            (ULONGLONG)(ULONG_PTR)mc,(ULONGLONG)(ULONG_PTR)adjust,
+            &frame,&t,identity,identity,1,1);
+        LH_CHECK(!g_left.wrist_active && g_left.active);
+        for(i=0;i<3;i++) {tl_engine(blob,STRIDE,adjust,&rig,wrist);g_b.c_ticks++;t.pair_id++;left_arm_now(arm,&t,0);}
+        LH_CHECK(g_left.wrist_active);
+    }
+    t.free_left.valid=0;left_arm_now(arm,&t,0); /* same pair revokes */
+    LH_CHECK(!g_left.wrist_active && !g_left.wrist.ready && !(*(ULONGLONG *)(mc+0x38)&(1ULL<<10)));
+    t.free_left.valid=1;
+    for(i=0;i<3;i++) {tl_engine(blob,STRIDE,adjust,&rig,wrist);g_b.c_ticks++;t.pair_id++;left_arm_now(arm,&t,0);}
+    LH_CHECK(g_left.wrist_active);
+    adjust[40]=.123f;left_arm_release();LH_CHECK(adjust[40]==.123f);
+    LH_CHECK(*(ULONGLONG *)(mc+0x38)&(1ULL<<10)); /* foreign owner wins */
+    LH_CHECK(memcmp(right,adjust+16,sizeof right)==0);
     memcpy(&g_b,saved,sizeof g_b);free(saved);g_left=saved_left;
     printf("  %s left seam: asymmetric chain, feedback, isolated ownership, loss, support commit\n",bad?"FAIL":"ok");
     return bad != 0;

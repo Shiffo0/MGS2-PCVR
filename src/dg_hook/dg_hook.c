@@ -60,11 +60,13 @@
 
 #include "dg_xr.h"                      /* also supplies MAT and DG_PROJ_FOV */
 #include "dg_proj.h"                    /* S4c: per-eye projection retarget */
-#include "dg_present.h"                 /* S4a: D3D11 capture, no submission */
+#include "dg_present.h"
+#include "dg_draw_trial.h"                 /* S4a: D3D11 capture, no submission */
 #include "dg_bridge.h"                  /* F2: game-thread bridge, FPS toggle */
 #include "dg_pose.h"                    /* F5: stereo-latched controller pose */
 #include "dg_fire.h"                    /* F7: trigger to the weapon pad contract */
 #include "dg_rec.h"                     /* F8: flight recorder, replayed at a desk */
+#include "dg_weapon_aim.h"
 #include "dg_aim_capture.h"             /* optional coherent camera/weapon observation */
 #include "dg_aim_target.h"
 #include "dg_xr_script.h"
@@ -311,6 +313,102 @@ static volatile LONG g_stereo;
 static volatile LONG g_stereo_test;   /* 0 full, 1 projection-only, 2 position-only */
 static volatile LONG g_stereo_proj_x_sign; /* retail -1, +1 restores probe */
 static volatile LONG g_stereo_eye_x_sign;  /* -1 (default): right eye at camera -x; +1 swaps */
+/* Eye truth (2026-09-18). Present labels a frame with the eye of the NEWEST
+   camera handoff, but the GPU renders with a camera two updates old (measured
+   with dg_cb_probe). Usually the two agree; when the game skips or doubles a
+   frame they do not, and the frame is submitted under the other eye's pose and
+   frustum. Invisible while the HUD sat on the same pixels in both eyes; a
+   visible flash now that ui2d places it per eye. The constant-buffer upload
+   hook knows which frustum every frame was REALLY rendered with
+   (dg_ui2d_last_frame_sign). This learns which sign belongs to which eye
+   from the agreeing majority and counts the exceptions; vr_eye_truth=1 drops
+   a mislabelled frame (the store keeps that eye's last honest image), 2
+   relabels it with the rendered eye's own last handoff. 0 only observes. */
+static volatile LONG g_eye_truth_mode;
+static long g_eye_truth_n[2][2];            /* [label eye][sign < 0] */
+static volatile LONG g_eye_truth_none, g_eye_truth_mismatch, g_eye_truth_dropped, g_eye_truth_relabelled;
+/* Camera-less Presents (2026-09-18 evening). About one stereo Present in
+   fifteen carries no perspective uploads: the game drew no scene of its own,
+   yet the frame was captured under the STALE handoff's eye. If the back buffer
+   then holds an older image (the other eye's, with its HUD baked in) that is a
+   one-frame flash no sprite placement can repair. vr_eye_truth=3 does not
+   submit such a frame: the store keeps that eye's last honest image. Bounded
+   to DG_NOCAM_DROP_MAX in a row so a pause menu still reaches the headset. */
+#define DG_NOCAM_DROP_MAX 6
+static volatile LONG g_nocam_dropped, g_nocam_passed;
+/* Probe (2DF4AF87 live: camera-less frames average ~1000 draws, so they DO
+   hold a scene, and dropping them made play worse). What are they? The first
+   DG_NOCAM_LOG_MAX such stereo Presents are logged in full, then every 100th. */
+#define DG_NOCAM_LOG_MAX 40
+static long g_nocam_seen, g_nocam_small_seen, g_nocam_traps_last, g_nocam_seq_last;
+/* Object-eye probe: per stereo Present, the eye the scene's object shaders were
+   really drawn with (dg_ui2d_last_frame_obj), against the label and against the
+   PREVIOUS Present. Healthy alternate-eye rendering flips every Present; "same"
+   means two Presents in a row showed the same eye = the mono the desktop mirror
+   shows from the bad angles. Ticks per Present and Present spacing go with it. */
+static long g_obj_n[2][4];                 /* [label eye][+, -, mixed, none] */
+static long g_obj_same, g_obj_alt, g_obj_events, g_obj_run, g_obj_run_max;
+static int  g_obj_prev;
+/* Draw skip (2026-09-18, found with vr_eye_dump). From view angles with large
+   objects close by, the engine draws only every SECOND Present: the pictures
+   of Presents N (label L) and N+1 (label R) are byte-identical, consecutive
+   distinct pictures show no eye shift at all. The constant uploads still
+   alternate, which is why every matrix-level measurement looked healthy. With
+   the eye flipping on every Present, the drawn frames are then always the SAME
+   eye and the undrawn Present re-submits that picture under the other eye:
+   mono on the desktop mirror, double in the headset.
+   vr_draw_skip=1: a Present whose frame issued (almost) no draw calls is not
+   submitted and does not flip the eye, so drawn frames alternate eyes again.
+   vr_draw_skip=2: additionally a drawn frame is submitted under the eye it was
+   really rendered with (object-shader sign, mapping learned while no skipping
+   is going on), using that eye's own last handoff. 0 only counts. */
+static volatile LONG g_draw_skip_mode, g_feedback_skip = 1;
+static long g_draw_ema, g_draw_hist[4], g_draw_skipped, g_draw_held, g_draw_relabelled, g_draw_recent;
+static long g_draw_map[2][2];              /* [label eye][sign < 0], learned only while nothing is being skipped */
+static DG_HOOK_HANDOFF g_draw_last[2]; static int g_draw_have[2];
+/* Back-buffer probe: frames that drew nothing into the swap chain's back buffer
+   cannot have produced a new picture, whatever else they drew. */
+static long g_bb_hist[3], g_bb_seen, g_bb_empty, g_bb_src_same, g_bb_src_alt, g_bb_events;
+static void *g_bb_src_prev, *g_bb_src_prev2;
+/* 1 = this frame issued so few draws that the picture cannot be new. */
+static int draw_skip_detect(long draws, long *ema)
+{
+    if (draws >= 300) { *ema = *ema ? (*ema * 7 + draws) / 8 : draws; return 0; }
+    return *ema > 0 && draws * 5 < *ema;
+}
+/* The label eye that a rendered sign belongs to, or -1 while unknown. */
+static int draw_skip_label(long map[2][2], int sign)
+{
+    int s = sign < 0 ? 1 : 0; long l = map[0][s], r = map[1][s];
+    if (!sign || l + r < 50) return -1;
+    return l >= 4 * r ? 0 : r >= 4 * l ? 1 : -1;
+}
+static long g_obj_ticks[4], g_obj_dt[3];   /* camera updates per Present 0,1,2,3+; dt <20, <40, 40+ ms */
+static DWORD g_nocam_tick_last;
+static int g_nocam_run;
+static int nocam_drop_step(int sign, LONG mode, int *run)
+{
+    if (sign) { *run = 0; return 0; }
+    if (mode != 3) return 0;
+    if (*run >= DG_NOCAM_DROP_MAX) return 0;
+    (*run)++;
+    return 1;
+}
+static DG_HOOK_HANDOFF g_eye_truth_last[2];
+static int g_eye_truth_have[2];
+/* 0 = no opinion, 1 = the label matches the render, -1 = it does not. */
+static int eye_truth_step(int label_eye, int sign)
+{
+    int e = label_eye == DG_EYE_RIGHT ? 1 : 0, s = sign < 0 ? 1 : 0, verdict = 0;
+    long a, b;
+    if (!sign) { InterlockedIncrement(&g_eye_truth_none); return 0; }
+    a = g_eye_truth_n[e][0]; b = g_eye_truth_n[e][1];
+    if (a + b >= 50 && (a >= 4 * b || b >= 4 * a))
+        verdict = ((a > b) ? 0 : 1) == s ? 1 : -1;
+    if (g_eye_truth_n[e][s] < 1000000) g_eye_truth_n[e][s]++;
+    if (verdict < 0) InterlockedIncrement(&g_eye_truth_mismatch);
+    return verdict;
+}
 static volatile LONG g_eye_shift_applied, g_eye_shift_fallback;
 static volatile LONG g_eye_shift_half_x100; /* last half separation, 0.01 mm */
 static volatile LONG g_handoff_seq;
@@ -678,7 +776,7 @@ static void handoff_write(int valid, int eye, const DG_XR_RAW_POSE *raw,
     if (fov) g_handoff.fov = *fov;
     else memset(&g_handoff.fov, 0, sizeof(g_handoff.fov));
     InterlockedIncrement(&g_handoff_seq);       /* even: publish the record */
-    if (valid) phase_record(1,-1);
+    if (valid) { phase_record(1,-1); dg_ui2d_eye(eye); }
 }
 
 static int handoff_read(DG_HOOK_HANDOFF *out) {
@@ -695,6 +793,7 @@ static int handoff_read(DG_HOOK_HANDOFF *out) {
 }
 
 #include "dg_pair_probe.h"
+#include "dg_capture_identity.inl"
 #include "dg_render_link.inl"
 #include "dg_stereo_phase_probe.inl"
 #include "dg_zoom_projection.h"
@@ -753,6 +852,8 @@ static void apply_transform(void) {
         g_src_eye     = base_eye;
         InterlockedIncrement(&g_fresh);
     }
+    if(dg_aim_capture_native_enabled())
+        dg_aim_capture_native_observe((uintptr_t)g_base,&base_eye,pers);
     {
 
         double h;
@@ -856,6 +957,7 @@ static void apply_transform(void) {
                    live sign. A mode change drops both stores in dg_xr_configure,
                    so old and new projection rules can never share a pair. */
                 submit_fov = new_fov;
+                dg_ui2d_display(submit_fov.left, submit_fov.right);
                 if (mode != 2 &&
                     InterlockedCompareExchange(&g_stereo_proj_x_sign, 0, 0) < 0)
                     new_fov = mirror_fov_x(new_fov);
@@ -984,6 +1086,12 @@ static void apply_transform(void) {
 
     *eye_inv = n_eye_inv;
     *eye     = n_eye;
+    /* Constant-buffer capture (2026-09-18): the matrices exactly as the game
+       will read them from here on, so the desk analysis can search the
+       vertex-shader constant buffers for them. Read-only side channel. */
+    dg_cb_probe_camera(g_stereo ? eye_idx : -1, (const float *)eye_pers->m,
+                       (const float *)pers->m, (const float *)n_eye_inv.m,
+                       (const float *)n_eye.m);
 
     /* Keep the final transformed camera->world basis and the final projection
        beside the arm pair.  This is raw camera telemetry for the preceding
@@ -1008,7 +1116,7 @@ static void apply_transform(void) {
        existing hierarchy/model matrices; it does not issue a solve or claim
        that this camera seam is the final D3D draw. */
     if (g_source != SRC_SYNTHETIC && (probe_frame_flags & 1) &&
-        dg_aim_capture_enabled()) {
+        dg_aim_capture_enabled() && !dg_aim_capture_native_enabled()) {
         dg_aim_capture_observe((uintptr_t)g_base, (uint64_t)g_arm_pose_stream_id,
                                &n_eye, pers, &frame, probe_frame_flags,
                                use_raw ? use_raw : &frame.head_raw, probe_view_kind);
@@ -1168,7 +1276,10 @@ static struct {
     long long time;
     double distance;
     int coherent;
+    DG_POSITION_INPUT position;
+    DG_FREE_WRIST_INPUT wrist;
 } g_left_sample;
+static DG_FREE_WRIST_INPUT g_free_right;
 
 /* The marker's number and the controller button are two routes to the same
    request, so they are ADDED: a change to either changes the total, and the
@@ -1546,6 +1657,17 @@ static DG_REC_RING   g_rec;
 static volatile LONG g_rec_on = 1;
 static volatile LONG g_rec_cfg_on = 1;   /* parsed; the worker applies it */
 static volatile LONG g_rec_cfg_dump;     /* vr_rec_dump token; change dumps */
+/* vr_eye_dump=<n>: a token like vr_rec_dump. A CHANGE writes the next
+   DG_EYE_DUMP_FRAMES stereo Presents - the exact back buffer that is about to
+   be submitted under an eye label - to logs\dg_eye_<tick>_<k>_<L|R>.raw, quarter
+   size (16-byte header: width, height, eye, present; then BGRA rows). Numbers
+   could not explain "stereo breaks from some view angles, the desktop mirror
+   goes mono there" (camera seam, object eye and pass structure all check
+   out), so this looks at the pictures. Read-only: one staging copy per frame. */
+#define DG_EYE_DUMP_FRAMES 8
+static volatile LONG g_eye_dump_cfg, g_eye_dump_written, g_eye_dump_failed;
+static LONG g_eye_dump_seen; static int g_eye_dump_have_seen, g_eye_dump_left;
+static DWORD g_eye_dump_tick; static int g_eye_dump_pred;
 static volatile LONG g_rec_dumps, g_rec_dump_fail;
 static volatile LONG g_rec_snapshots, g_rec_snapshot_fail;
 static long          g_rec_last_torn;
@@ -1735,15 +1857,17 @@ static int arm_absolute_prepare(DG_AIM_SELECTION *selection)
         (g_arm_track != ARM_TRACK_R_GRIP && g_arm_track != ARM_TRACK_R_AIM)) return 0;
 #ifdef DG_HOOK_TEST
     if (g_test_aim_selection >= 0) {
-        if (!g_test_aim_selection) return 0;
+        if (!dg_weapon_hand_aim(g_test_aim_selection)) return 0;
         memset(selection, 0, sizeof *selection);
         selection->arm = g_aim_camera.gate.arm_body;
         selection->subobject = selection->subobjs = selection->hand = selection->model = 100;
         selection->weapon_id = (uint64_t)g_test_aim_selection;
     } else
 #endif
-    if (!dg_aim_capture_pistol_selection((uintptr_t)g_base,
+    if (!dg_aim_capture_hand_selection((uintptr_t)g_base,
                                      g_aim_camera.gate.arm_body, selection)) return 0;
+    if(selection->weapon_id==13 && !dg_bridge_blade_enabled())return 0;
+    if(selection->weapon_id==7 && !dg_bridge_stinger_enabled())return 0;
     if (g_absolute_stream != g_arm_pose_stream_id ||
         g_absolute_camera != g_aim_camera.gate.camera ||
         memcmp(selection, &g_absolute_selection, sizeof *selection)) {
@@ -1788,6 +1912,8 @@ static void absolute_aim_step(DG_AIM_REPLAY_STATE *state,
         input->age_ms <= 100 && input->sample_seq && input->sample_time > 0 &&
         input->sample_seq >= state->sample_seq && input->sample_time >= state->sample_time &&
         dg_aim_target_build(input->camera, input->view, input->aim, pose.quat);
+    if(pose.valid && (input->pose_flags & DG_AIM_REPLAY_BLADE))
+        pose.valid=dg_aim_target_blade(pose.quat);
     result->input_valid = pose.valid;
     if (!pose.valid) {
         dg_pose_init(&state->pose, NULL);
@@ -1814,6 +1940,25 @@ static int auto_recenter_step(DG_AUTO_RECENTER *s,int valid,long entry,ULONGLONG
 }
 static DG_AUTO_RECENTER g_auto_recenter;
 
+static DG_FREE_WRIST_INPUT free_wrist_input(const DG_XR_HAND_POSE *p,
+                                             const DG_XR_CONFIG *cfg,int enabled)
+{
+    DG_FREE_WRIST_INPUT out={0};DG_POSITION_INPUT f={0};double q[4],g[4];int i;
+    out.enabled=enabled;
+    if(!enabled || !g_aim_camera.valid || !p || !p->active || !p->tracked ||
+       !p->position_valid || !p->orientation_valid || !p->sample_seq ||
+       p->xr_time<=0 || p->pose_age_ms>100)return out;
+    f.valid=1;f.units=cfg->scale;
+    for(i=0;i<16;i++) f.camera[i]=g_aim_camera.camera.m[i/4][i%4];
+    f.view[0]=g_aim_camera.view.qx;f.view[1]=g_aim_camera.view.qy;
+    f.view[2]=g_aim_camera.view.qz;f.view[3]=g_aim_camera.view.qw;
+    f.view[4]=g_aim_camera.view.px;f.view[5]=g_aim_camera.view.py;f.view[6]=g_aim_camera.view.pz;
+    g[0]=p->raw_local.qx;g[1]=p->raw_local.qy;g[2]=p->raw_local.qz;g[3]=p->raw_local.qw;
+    if(!dg_position_frame(&f,q) || !dg_ik_quat_normalize(g))return out;
+    dg_ik_quat_mul(q,g,out.world);out.valid=dg_ik_quat_normalize(out.world);return out;
+}
+
+static void m9_sample_from_frame(const DG_XR_FRAME *,int,DG_M9_SAMPLE *);
 static int arm_pose_target(DG_BRIDGE_ARM_TARGET *target)
 {
     DG_XR_FRAME f;
@@ -2002,6 +2147,12 @@ static int arm_pose_target(DG_BRIDGE_ARM_TARGET *target)
     for (i = 0; i < 4; i++) target->hand_quat[i] = out.quat[i];
     target->weight = out.weight;
     target->pose_flags = out.flags;
+    {
+        DG_FREE_WRIST_INPUT fresh=free_wrist_input(&f.right_hand.grip,&cfg,absolute);
+        if(!(out.flags&DG_POSE_F_LATCHED))g_free_right=fresh;
+        target->free_right=g_free_right;
+        if(!fresh.valid)target->free_right.valid=0;
+    }
     target->unarmed_hand_write = target->hand_write;
     target->observed_right_trigger = f.right_hand.trigger_value;
     target->observed_right_stick_x = f.right_hand.thumbstick_x;
@@ -2026,6 +2177,7 @@ static int arm_pose_target(DG_BRIDGE_ARM_TARGET *target)
         ai->hand_tag = aim->hand; ai->kind_tag = aim->kind;
         ai->pose_flags = (aim->position_valid ? 1u : 0u) | (aim->orientation_valid ? 2u : 0u) |
                          (aim->active ? 4u : 0u) | (aim->tracked ? 8u : 0u);
+        if(selection.weapon_id==13)ai->pose_flags|=DG_AIM_REPLAY_BLADE;
         ai->source_valid = aim_ok; ai->reset = g_absolute_reset;
         ai->sample_seq = aim->sample_seq; ai->sample_time = aim->xr_time;
         ai->camera_id = g_aim_camera.gate.camera; ai->stream = target->stream_id;
@@ -2068,7 +2220,8 @@ static int arm_pose_target(DG_BRIDGE_ARM_TARGET *target)
     }
     target->left_enabled = g_left_arm &&
         (g_arm_track == ARM_TRACK_R_GRIP || g_arm_track == ARM_TRACK_R_AIM);
-    target->twohand_enabled = g_twohand;
+    target->twohand_enabled = g_twohand &&
+        dg_weapon_pistol_support((int)target->aim_weapon_id);
     if (target->left_enabled) {
         DG_POSE_IN li;
         DG_POSE_OUT lo;
@@ -2117,12 +2270,40 @@ static int arm_pose_target(DG_BRIDGE_ARM_TARGET *target)
             g_left_sample.time=lp->xr_time;
             g_left_sample.distance=sqrt(dx*dx + dy*dy + dz*dz);
             g_left_sample.coherent=coherent_now;
+            g_left_sample.wrist=free_wrist_input(lp,&cfg,absolute && target->unarmed_hand_write);
+            /* Keep camera, eye and raw grip from one observation together.
+               Left tracking does not depend on the right pistol aim gate. */
+            memset(&g_left_sample.position,0,sizeof g_left_sample.position);
+            g_left_sample.position.enabled=absolute;
+            g_left_sample.position.valid=absolute && li.valid && g_aim_camera.valid &&
+                cfg.positional && cfg.x_sign==1 && cfg.y_sign==1 && cfg.z_sign==1;
+            g_left_sample.position.units=cfg.scale;
+            for(i=0;i<16;i++) g_left_sample.position.camera[i]=
+                g_aim_camera.camera.m[i/4][i%4];
+            g_left_sample.position.view[0]=g_aim_camera.view.qx;
+            g_left_sample.position.view[1]=g_aim_camera.view.qy;
+            g_left_sample.position.view[2]=g_aim_camera.view.qz;
+            g_left_sample.position.view[3]=g_aim_camera.view.qw;
+            g_left_sample.position.view[4]=g_aim_camera.view.px;
+            g_left_sample.position.view[5]=g_aim_camera.view.py;
+            g_left_sample.position.view[6]=g_aim_camera.view.pz;
+            g_left_sample.position.grip[0]=lp->raw_local.px;
+            g_left_sample.position.grip[1]=lp->raw_local.py;
+            g_left_sample.position.grip[2]=lp->raw_local.pz;
         }
+        target->free_left=g_left_sample.wrist;
+        if(!li.valid || !g_aim_camera.valid || !target->unarmed_hand_write)
+            target->free_left.valid=0;
+        target->left_position=g_left_sample.position;
+        if(!li.valid || !g_aim_camera.valid) target->left_position.valid=0;
         target->left_sample_seq=g_left_sample.seq;
         target->left_sample_time=g_left_sample.time;
         target->hands_distance_m=g_left_sample.distance;
         /* Fresh invalid input still revokes ownership before any replay. */
         target->hands_coherent=coherent_now && g_left_sample.coherent;
+        m9_sample_from_frame(&f,1,&target->m9_pose);
+        if(!target->hands_coherent || target->m9_pose.sequence!=target->left_sample_seq ||
+           target->m9_pose.sequence!=target->aim_sample_seq)target->m9_pose.valid=0;
     }
     return 1;
 }
@@ -2240,6 +2421,8 @@ static void action_from_frame(DG_ACTION_SAMPLE *out) {
     out->denied=InterlockedCompareExchange(&g_action_route_denied,0,0) ||
         l->thumbstick_click || r->thumbstick_click;
 }
+#include "dg_m9_input.inl"
+#include "dg_blade_input.inl"
 #include "dg_controls_producer.inl"
 #include "dg_controls_cleanup.inl"
 
@@ -2322,6 +2505,7 @@ static void script_primary_command(void)
 
 #include "dg_probe_health.inl"
 #include "dg_hud_watch.inl"
+static void capture_observed(int eye,uint64_t id) {hud_capture(eye,id);ci_published(eye,id);}
 
 static LONG CALLBACK veh(EXCEPTION_POINTERS *ep) {
     CONTEXT *c;
@@ -2533,11 +2717,11 @@ static int parse_config(char *buf, POSE *p, double *seconds,
     int arm_track_cfg = ARM_TRACK_OFF;
     int arm_qmap_cfg[4] = { -1, 2, -3, 4 };
     int arm_hand_cfg = 0;
-    int aim_probe_cfg = 0;
+    int aim_probe_cfg = 0, geometry_probe_cfg = 0;
     ARM_POS_CFG ap;
 
     /* Diagnostic opt-in never survives a missing/malformed configuration. */
-    dg_aim_capture_configure(0);
+    dg_aim_capture_configure(0);dg_aim_capture_native_configure(0);
     if (!parse_script_menu(buf, &g_script_menu_cfg)) return 0;
     arm_pos_cfg_defaults(&ap);
 
@@ -2553,6 +2737,14 @@ static int parse_config(char *buf, POSE *p, double *seconds,
     xc->scene_blur_fix = 1;
     xc->stereo_phase_fix = 1;
     xc->stereo_eye_x_sign = -1;
+    xc->ui2d = 0; xc->ui2d_scale_mils = 750; xc->ui2d_conv_e5 = 1200; xc->ui2d_sign = 1; xc->ui2d_hold = 0; xc->feedback_skip = 1;
+    /* Wrist radar: off, HUD radar left alone. The offset is a guess for a
+       Touch Plus left controller (grip +Y runs back toward the forearm, +X
+       out of the palm), meant to be tuned live. */
+    xc->radar_mode = 0; xc->radar_hud = 1; xc->radar_space_local = 0; xc->radar_size = 0.09;
+    xc->radar_offset[0] = 0.02; xc->radar_offset[1] = 0.08; xc->radar_offset[2] = 0.03;
+    xc->radar_rot[0] = 0.0; xc->radar_rot[1] = 90.0; xc->radar_rot[2] = -90.0;
+    xc->radar_gaze_deg = 20.0; xc->radar_gaze_pitch = 15.0;
 
     xc->stereo_proj_x_sign = -1;
     xc->trigger_deadzone = 0.10;
@@ -2621,12 +2813,46 @@ static int parse_config(char *buf, POSE *p, double *seconds,
             while (*s && *s != ' ' && *s != '\t' && *s != '\r' && *s != '\n') s++;
             continue;
         }
+        if (_stricmp(key, "vr_pistol_reload") == 0) {
+            char *e=s;
+            while(*e && *e!=' ' && *e!='\t' && *e!='\r' && *e!='\n')e++;
+            bc->pistol_reload=(e-s==2 && !_strnicmp(s,"on",2));
+            s=e;continue;
+        }
+        if (_stricmp(key, "vr_hf_blade") == 0) {
+            char *e=s;
+            while(*e && *e!=' ' && *e!='\t' && *e!='\r' && *e!='\n')e++;
+            if(e-s==2 && !_strnicmp(s,"on",2))bc->hf_blade=1;
+            else if(e-s==3 && !_strnicmp(s,"off",3))bc->hf_blade=0;
+            else return 0;
+            s=e;continue;
+        }
+        if (_stricmp(key, "vr_m9_slide") == 0) {
+            char *e=s;
+            while(*e && *e!=' ' && *e!='\t' && *e!='\r' && *e!='\n')e++;
+            bc->m9_slide=(e-s==2 && !_strnicmp(s,"on",2));
+            s=e;continue;
+        }
         if (_stricmp(key, "vr_arm_show") == 0) {
             /* F4 probe. Off unless the word is `on`, like every other switch
                here: the default is that we observe and change nothing. */
             bc->arm_show = (_strnicmp(s, "on", 2) == 0) ? 1 : 0;
             while (*s && *s != ' ' && *s != '\t' && *s != '\r' && *s != '\n') s++;
             continue;
+        }
+        if (_stricmp(key, "vr_grip_debug") == 0) {
+            char *e=s;while(*e && *e!=' ' && *e!='\t' && *e!='\r' && *e!='\n')e++;
+            if(e-s==2 && !_strnicmp(s,"on",2)) xc->grip_debug=1;
+            else if(e-s==3 && !_strnicmp(s,"off",3)) xc->grip_debug=0;
+            else return 0;
+            s=e;continue;
+        }
+        if (_stricmp(key, "vr_geometry_probe") == 0) {
+            char *e=s;while(*e && *e!=' ' && *e!='\t' && *e!='\r' && *e!='\n')e++;
+            if(e-s==2 && !_strnicmp(s,"on",2)) geometry_probe_cfg=1;
+            else if(e-s==3 && !_strnicmp(s,"off",3)) geometry_probe_cfg=0;
+            else return 0;
+            s=e;continue;
         }
         if (_stricmp(key, "vr_aim_probe") == 0) {
             char *e = s;
@@ -2635,6 +2861,18 @@ static int parse_config(char *buf, POSE *p, double *seconds,
             else if (e-s == 3 && _strnicmp(s, "off", 3) == 0) aim_probe_cfg = 0;
             else return 0;
             s = e;
+            continue;
+        }
+        if (_stricmp(key,"vr_ui2d_vs")==0) {
+            /* Comma-separated 64-bit hex hashes of the sprite vertex shaders. */
+            xc->ui2d_vs_count = 0;
+            if (_strnicmp(s, "any", 3) == 0) { xc->ui2d_vs[xc->ui2d_vs_count++] = ~0ull; s += 3; }
+            while (*s && *s!=' ' && *s!='\t' && *s!='\r' && *s!='\n') {
+                char *e2 = s; unsigned long long h = _strtoui64(s, &e2, 16);
+                if (e2 == s) return 0;
+                if (h && xc->ui2d_vs_count < 8) xc->ui2d_vs[xc->ui2d_vs_count++] = h;
+                s = e2; if (*s == ',') s++;
+            }
             continue;
         }
         if (_stricmp(key,"vr_stereo_phase_fix")==0) {
@@ -2650,6 +2888,11 @@ static int parse_config(char *buf, POSE *p, double *seconds,
                 InterlockedExchange(&g_rec_cfg_on, 1);
             else if (_strnicmp(s, "off", 3) == 0)
                 InterlockedExchange(&g_rec_cfg_on, 0);
+            while (*s && *s != ' ' && *s != '\t' && *s != '\r' && *s != '\n') s++;
+            continue;
+        }
+        if (_stricmp(key, "vr_eye_dump") == 0) {
+            InterlockedExchange(&g_eye_dump_cfg, strtol(s, &s, 10));
             while (*s && *s != ' ' && *s != '\t' && *s != '\r' && *s != '\n') s++;
             continue;
         }
@@ -3328,6 +3571,47 @@ static int parse_config(char *buf, POSE *p, double *seconds,
             while (*s && *s != ' ' && *s != '\t' && *s != '\r' && *s != '\n') s++;
             continue;
         }
+        if (_stricmp(key, "vr_radar_wrist") == 0 || _stricmp(key, "vr_radar_hud") == 0 ||
+            _stricmp(key, "vr_radar_wrist_space") == 0) {
+            /* Words, matched whole: a typo is the default (off / on / grip),
+               never a prefix of something else. */
+            size_t len = strcspn(s, " \t\r\n");
+            if (_stricmp(key, "vr_radar_wrist") == 0)
+                xc->radar_mode = (len == 5 && _strnicmp(s, "fixed", 5) == 0) ? 1
+                               : (len == 5 && _strnicmp(s, "wrist", 5) == 0) ? 2 : 0;
+            else if (_stricmp(key, "vr_radar_hud") == 0)
+                xc->radar_hud = (len == 3 && _strnicmp(s, "off", 3) == 0) ? 0 : 1;
+            else
+                xc->radar_space_local = (len == 5 && _strnicmp(s, "local", 5) == 0) ? 1 : 0;
+            s += len;
+            continue;
+        }
+        if (_stricmp(key, "vr_radar_wrist_offset") == 0 || _stricmp(key, "vr_radar_wrist_rot") == 0) {
+            /* x,y,z - all three or the default stays: a half-read pose puts
+               the quad somewhere nobody chose. Metres within +-0.30 of the
+               grip, degrees within +-360. */
+            int is_rot = _stricmp(key, "vr_radar_wrist_rot") == 0;
+            double lim = is_rot ? 360.0 : 0.30, v3[3];
+            char *e3 = s, *before;
+            int i, good = 1;
+            for (i = 0; i < 3 && good; i++) {
+                if (i && *e3++ != ',') { good = 0; break; }
+                before = e3;
+                v3[i] = strtod(e3, &e3);
+                if (e3 == before || !(v3[i] >= -lim && v3[i] <= lim)) good = 0;
+            }
+            if (good && (*e3 == 0 || *e3 == ' ' || *e3 == '\t' || *e3 == '\r' || *e3 == '\n'))
+                for (i = 0; i < 3; i++) (is_rot ? xc->radar_rot : xc->radar_offset)[i] = v3[i];
+            while (*s && *s != ' ' && *s != '\t' && *s != '\r' && *s != '\n') s++;
+            continue;
+        }
+        if (_stricmp(key, "vr_life") == 0) {
+            size_t len=strcspn(s," \t\r\n");
+            if(len==2 && _strnicmp(s,"on",2)==0) xc->life_disabled=0;
+            else if(len==3 && _strnicmp(s,"off",3)==0) xc->life_disabled=1;
+            else return 0;
+            s+=len; continue;
+        }
         if (_stricmp(key, "vr_hud") == 0) {
             /* Reversed sense on purpose: the KNOB is "vr_hud", so `on` means
                the HUD as the game draws it (default, write nothing) and only
@@ -3376,6 +3660,14 @@ static int parse_config(char *buf, POSE *p, double *seconds,
             xc->stereo_proj_x_sign = (v < 0.0) ? -1 : 1;
         else if (_stricmp(key, "stereo_eye_x_sign") == 0)
             xc->stereo_eye_x_sign = (v < 0.0) ? -1 : 1;
+        else if (_stricmp(key, "vr_ui2d") == 0) xc->ui2d = (v != 0.0);
+        else if (_stricmp(key, "vr_eye_truth") == 0) { if (v == 0.0 || v == 1.0 || v == 2.0 || v == 3.0) xc->eye_truth = (int)v; }
+        else if (_stricmp(key, "vr_feedback_skip") == 0) xc->feedback_skip = (v != 0.0);
+        else if (_stricmp(key, "vr_draw_skip") == 0) { if (v == 0.0 || v == 1.0 || v == 2.0) xc->draw_skip = (int)v; }
+        else if (_stricmp(key, "vr_ui2d_scale") == 0) { if (v >= 0.3 && v <= 1.0) xc->ui2d_scale_mils = (int)(v * 1000.0 + 0.5); }
+        else if (_stricmp(key, "vr_ui2d_conv") == 0) { if (v >= 0.0 && v <= 0.1) xc->ui2d_conv_e5 = (int)(v * 100000.0 + 0.5); }
+        else if (_stricmp(key, "vr_ui2d_sign") == 0) xc->ui2d_sign = (v < 0.0) ? -1 : 1;
+        else if (_stricmp(key, "vr_ui2d_hold") == 0) { if (v == 0.0 || v == 1.0 || v == 2.0) xc->ui2d_hold = (int)v; }
         else if (_stricmp(key, "vr_trigger_deadzone") == 0)
             xc->trigger_deadzone = v;
         else if (_stricmp(key, "vr_trigger_fire") == 0)
@@ -3384,6 +3676,10 @@ static int parse_config(char *buf, POSE *p, double *seconds,
             xc->theater_dist = v;
         else if (_stricmp(key, "vr_theater_width") == 0)
             xc->theater_width = v;
+        /* Out of range keeps the default, the theater's rule. */
+        else if (_stricmp(key, "vr_radar_wrist_size") == 0) { if (v >= 0.03 && v <= 0.50) xc->radar_size = v; }
+        else if (_stricmp(key, "vr_radar_gaze_deg") == 0) { if (v >= 0.0 && v <= 90.0) xc->radar_gaze_deg = v; }
+        else if (_stricmp(key, "vr_radar_gaze_pitch") == 0) { if (v >= -45.0 && v <= 60.0) xc->radar_gaze_pitch = v; }
     }
     if (!(xc->trigger_deadzone >= 0.0 && xc->trigger_deadzone < 1.0 &&
           xc->trigger_fire > xc->trigger_deadzone &&
@@ -3407,7 +3703,8 @@ static int parse_config(char *buf, POSE *p, double *seconds,
        and is reported back by the heartbeat like every other setting the
        bridge can refuse. */
     bc->arm_anchor = ap.anchor;
-    dg_aim_capture_configure(aim_probe_cfg);
+    dg_aim_capture_configure(aim_probe_cfg || geometry_probe_cfg);
+    dg_aim_capture_native_configure(geometry_probe_cfg);
     return 1;
 }
 
@@ -3425,7 +3722,7 @@ static int read_config(const char *marker, POSE *p, double *seconds,
        the buffer is now called out in the log instead of trimmed quietly. */
     char buf[4096];
     DWORD got = 0;
-    dg_aim_capture_configure(0);
+    dg_aim_capture_configure(0);dg_aim_capture_native_configure(0);
     h = CreateFileA(marker, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
                     OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (h == INVALID_HANDLE_VALUE) return 0;
@@ -4596,6 +4893,13 @@ static const char *run_once(const char *marker) {
     InterlockedExchange(&g_stereo_test, xc.stereo_test);
     InterlockedExchange(&g_stereo_proj_x_sign, xc.stereo_proj_x_sign);
     InterlockedExchange(&g_stereo_eye_x_sign, xc.stereo_eye_x_sign);
+    dg_ui2d_configure(xc.ui2d, xc.ui2d_scale_mils, xc.ui2d_conv_e5, xc.ui2d_sign, xc.ui2d_vs, (unsigned)xc.ui2d_vs_count);
+    InterlockedExchange(&g_eye_truth_mode, xc.eye_truth);
+    InterlockedExchange(&g_draw_skip_mode, xc.draw_skip);
+    InterlockedExchange(&g_feedback_skip, xc.feedback_skip);
+    dg_ui2d_hold(xc.ui2d_hold);
+    dg_radar_configure(xc.radar_mode != 0, xc.radar_hud == 0);
+    dg_bridge_native_hud_configure(xc.radar_mode != 0 && xc.radar_hud == 0);
     InterlockedExchange(&g_current_eye, DG_EYE_LEFT);
     handoff_write(0, DG_EYE_MONO, NULL, NULL);
     InterlockedExchange(&g_source, source);
@@ -4769,6 +5073,14 @@ static const char *run_once(const char *marker) {
               ? "  (INERT: the bridge is not armed, nothing will measure or"
                 " switch)" : "");
 
+    logf_("  radar wrist: %s  hud radar %s  size %.3f m  offset %.3f,%.3f,%.3f m  rot %.1f,%.1f,%.1f deg  space %s  gaze %.1f deg (pitch %.1f)%s\r\n",
+          xc.radar_mode == 1 ? "fixed" : xc.radar_mode == 2 ? "wrist" : "off",
+          xc.radar_hud ? "on" : "OFF while the wrist radar is up", xc.radar_size,
+          xc.radar_offset[0], xc.radar_offset[1], xc.radar_offset[2],
+          xc.radar_rot[0], xc.radar_rot[1], xc.radar_rot[2],
+          xc.radar_space_local ? "local" : "grip", xc.radar_gaze_deg, xc.radar_gaze_pitch,
+          xc.radar_mode && bc.hud_mode ? "  (vr_hud=off stops the game rendering its radar: nothing to show)" : "");
+
     controls_init();
     g_controls_turn_fallback=!bridge_on && !menu_session;
     if (bridge_on && !menu_session) {
@@ -4838,7 +5150,7 @@ static const char *run_once(const char *marker) {
     logf_("  render link: requested %ld anchors %s (buffer-linked pose/FOV; no guessed fallback)\r\n",
         g_link_requested,g_phase_stage_addr?"verified":"UNAVAILABLE");
     InterlockedExchange(&g_armed, 1);
-    dg_xr_set_capture_observer(hud_capture);
+    dg_xr_set_capture_observer(capture_observed);
     armed_threads = arm_all(1);
     if (menu_session && armed_threads <= 0) {
         reason = "script menu camera detector not armed";
@@ -4872,9 +5184,12 @@ static const char *run_once(const char *marker) {
         Sleep(1000);
         elapsed++;
         phase_poll();
+        dg_present_poll_state_probe(marker);
+        dg_draw_trial_poll(marker);
         if (!hud_active && pp_poll(logf_)) arm_all(1);
         pp_flush(0,logf_);
         hud_poll();
+        ci_drain();
         pd_drain(hud_active?1:(pp_status==PP_RECORDING?2:(g_phase_enabled?4:0)));
         if(g_render_link_active && (ULONG)(g_link_hits-g_link_last_hits)>100000u) {
             InterlockedExchange(&g_render_link_active,0);render_link_reset();arm_all(1);
@@ -4923,6 +5238,31 @@ static const char *run_once(const char *marker) {
                   g_eye_shift_applied, g_eye_shift_fallback,
                   (double)g_eye_shift_half_x100 / 100.0,
                   (long)g_stereo_eye_x_sign, g_stereo_eye_x_sign < 0 ? "-x" : "+x");
+        if (elapsed % 10 == 0 && g_stereo) {
+            char ui[1100]; dg_ui2d_stats(ui, sizeof ui); logf_("  %s\r\n", ui);
+            logf_("  eye truth: mode %ld  label L rendered +%ld/-%ld  label R rendered +%ld/-%ld  no-camera %ld"
+                  "  MISLABELLED %ld  dropped %ld  relabelled %ld  no-camera dropped %ld passed %ld\r\n",
+                  (long)g_eye_truth_mode, g_eye_truth_n[0][0], g_eye_truth_n[0][1],
+                  g_eye_truth_n[1][0], g_eye_truth_n[1][1], (long)g_eye_truth_none,
+                  (long)g_eye_truth_mismatch, (long)g_eye_truth_dropped, (long)g_eye_truth_relabelled,
+                  (long)g_nocam_dropped, (long)g_nocam_passed);
+            logf_("  draw skip: mode %ld  draws/present <50:%ld <300:%ld <1000:%ld 1000+:%ld  usual %ld  SKIPPED %ld held %ld relabelled %ld  map L +%ld/-%ld R +%ld/-%ld\r\n",
+                  (long)g_draw_skip_mode, g_draw_hist[0], g_draw_hist[1], g_draw_hist[2], g_draw_hist[3], g_draw_ema,
+                  g_draw_skipped, g_draw_held, g_draw_relabelled, g_draw_map[0][0], g_draw_map[0][1], g_draw_map[1][0], g_draw_map[1][1]);
+            { long fs = 0, fc = 0; dg_ui2d_feedback_stats(&fs, &fc);
+              logf_("  feedback skip: mode %ld  previous-frame sprites not forwarded %ld  (4-vertex draws into a final texture checked %ld)\r\n", (long)g_feedback_skip, fs, fc); }
+            logf_("  bb probe: back-buffer draws/present 0:%ld 1-7:%ld 8+:%ld  EMPTY (held as skipped) %ld  first source same-as-previous %ld changed %ld\r\n",
+                  g_bb_hist[0], g_bb_hist[1], g_bb_hist[2], g_bb_empty, g_bb_src_same, g_bb_src_alt);
+            logf_("  obj eye: label L drawn +%ld/-%ld mixed %ld none %ld  label R drawn +%ld/-%ld mixed %ld none %ld"
+                  "  alternated %ld SAME-AS-PREVIOUS %ld (longest run %ld)  ticks/present 0:%ld 1:%ld 2:%ld 3+:%ld  dt <20:%ld <40:%ld 40+:%ld\r\n",
+                  g_obj_n[0][0], g_obj_n[0][1], g_obj_n[0][2], g_obj_n[0][3], g_obj_n[1][0], g_obj_n[1][1], g_obj_n[1][2], g_obj_n[1][3],
+                  g_obj_alt, g_obj_same, g_obj_run_max, g_obj_ticks[0], g_obj_ticks[1], g_obj_ticks[2], g_obj_ticks[3],
+                  g_obj_dt[0], g_obj_dt[1], g_obj_dt[2]);
+        }
+        if (elapsed % 10 == 0 && g_xrcfg.radar_mode) {
+            char rx[420], rd[700]; dg_xr_radar_stats(rx, sizeof rx); dg_radar_stats(rd, sizeof rd);
+            logf_("  radar wrist: %s  hud radar %s  |  %s\r\n", rx, g_xrcfg.radar_hud ? "on" : "off", rd);
+        }
 
         {   /* The low bit latches "pressed since the last call", which is the
                only reason a 1 Hz poll can catch a quick tap at all. But it must
@@ -5107,6 +5447,13 @@ static const char *run_once(const char *marker) {
                 InterlockedExchange(&g_stereo_proj_x_sign,
                                     xc2.stereo_proj_x_sign);
                 InterlockedExchange(&g_stereo_eye_x_sign, xc2.stereo_eye_x_sign);
+                dg_ui2d_configure(xc2.ui2d, xc2.ui2d_scale_mils, xc2.ui2d_conv_e5, xc2.ui2d_sign, xc2.ui2d_vs, (unsigned)xc2.ui2d_vs_count);
+                InterlockedExchange(&g_eye_truth_mode, xc2.eye_truth);
+                InterlockedExchange(&g_draw_skip_mode, xc2.draw_skip);
+                InterlockedExchange(&g_feedback_skip, xc2.feedback_skip);
+                dg_ui2d_hold(xc2.ui2d_hold);
+                dg_radar_configure(xc2.radar_mode != 0, xc2.radar_hud == 0);
+                dg_bridge_native_hud_configure(xc2.radar_mode != 0 && xc2.radar_hud == 0);
                 dg_xr_configure(&xc2);
             }
         }
@@ -5331,11 +5678,91 @@ static void on_present(IDXGISwapChain *sc) {
     ReleaseSRWLockShared(&g_script_present_lock);
 }
 
+static void eye_dump_step(IDXGISwapChain *sc, int eye)
+{
+    LONG cfg = InterlockedCompareExchange(&g_eye_dump_cfg, 0, 0);
+    ID3D11Texture2D *bb = NULL, *st = NULL; ID3D11Device *dev = NULL; ID3D11DeviceContext *ctx = NULL;
+    D3D11_TEXTURE2D_DESC d; D3D11_MAPPED_SUBRESOURCE m; int ok = 0;
+    if (!g_eye_dump_have_seen) { g_eye_dump_seen = cfg; g_eye_dump_have_seen = 1; }
+    if (cfg != g_eye_dump_seen) {
+        g_eye_dump_seen = cfg; g_eye_dump_left = DG_EYE_DUMP_FRAMES; g_eye_dump_tick = GetTickCount();
+        dg_ui2d_trace(DG_EYE_DUMP_FRAMES - 1, g_bb_src_prev, g_bb_src_prev2);
+    }
+    if (g_eye_dump_left <= 0 || !sc) return;
+    g_eye_dump_left--;
+    if (FAILED(sc->lpVtbl->GetBuffer(sc, 0, &IID_ID3D11Texture2D, (void **)&bb)) || !bb) goto done;
+    bb->lpVtbl->GetDesc(bb, &d);
+    if (d.SampleDesc.Count != 1 || (d.Format != DXGI_FORMAT_B8G8R8A8_UNORM && d.Format != DXGI_FORMAT_R8G8B8A8_UNORM &&
+        d.Format != DXGI_FORMAT_B8G8R8A8_UNORM_SRGB && d.Format != DXGI_FORMAT_R8G8B8A8_UNORM_SRGB)) goto done;
+    bb->lpVtbl->GetDevice(bb, &dev); if (!dev) goto done;
+    d.Usage = D3D11_USAGE_STAGING; d.BindFlags = 0; d.CPUAccessFlags = D3D11_CPU_ACCESS_READ | D3D11_CPU_ACCESS_WRITE; d.MiscFlags = 0;
+    if (FAILED(dev->lpVtbl->CreateTexture2D(dev, &d, NULL, &st)) || !st) goto done;
+    dev->lpVtbl->GetImmediateContext(dev, &ctx); if (!ctx) goto done;
+    {   /* Validity of the dump itself: a fresh staging texture may reuse the previous dump's memory, so a copy the GPU
+           SKIPPED (predicated rendering) would look like a repeated picture. Poison first; and read the predicate. */
+        ID3D11Predicate *pred = NULL; BOOL pval = FALSE; unsigned yy;
+        if (SUCCEEDED(ctx->lpVtbl->Map(ctx, (ID3D11Resource *)st, 0, D3D11_MAP_WRITE, 0, &m))) {
+            for (yy = 0; yy < d.Height; yy++) memset((unsigned char *)m.pData + (size_t)yy * m.RowPitch, 0xAB, (size_t)d.Width * 4);
+            ctx->lpVtbl->Unmap(ctx, (ID3D11Resource *)st, 0);
+        }
+        ctx->lpVtbl->GetPredication(ctx, &pred, &pval);
+        g_eye_dump_pred = pred ? 1 + (pval ? 1 : 0) : 0;
+        if (pred) pred->lpVtbl->Release(pred);
+    }
+    ctx->lpVtbl->CopyResource(ctx, (ID3D11Resource *)st, (ID3D11Resource *)bb);
+    if (SUCCEEDED(ctx->lpVtbl->Map(ctx, (ID3D11Resource *)st, 0, D3D11_MAP_READ, 0, &m))) {
+        char path[MAX_PATH]; FILE *f = NULL; size_t dir = rec_log_dir(path, sizeof path);
+        unsigned w = d.Width / 4, h = d.Height / 4, x, y, head[4];
+        _snprintf_s(path + dir, sizeof path - dir, _TRUNCATE, "dg_eye_%lu_%d_%s.raw", (unsigned long)g_eye_dump_tick,
+                    DG_EYE_DUMP_FRAMES - 1 - g_eye_dump_left, eye == DG_EYE_RIGHT ? "R" : "L");
+        if (w && h && fopen_s(&f, path, "wb") == 0 && f) {
+            head[0] = w; head[1] = h; head[2] = (unsigned)(eye == DG_EYE_RIGHT); head[3] = (unsigned)g_present_frame;
+            if (d.Format == DXGI_FORMAT_R8G8B8A8_UNORM || d.Format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB) head[2] |= 0x100;   /* RGBA order */
+            fwrite(head, sizeof head, 1, f);
+            for (y = 0; y < h; y++) {
+                const unsigned char *row = (const unsigned char *)m.pData + (size_t)(y * 4) * m.RowPitch;
+                for (x = 0; x < w; x++) fwrite(row + (size_t)x * 16, 4, 1, f);
+            }
+            fclose(f); ok = 1;
+            {   /* picture fingerprint, so identical Presents show up in the log itself */
+                unsigned long long fp = 1469598103934665603ull; long bbi = 0; void *bbsrc = NULL; long bbd = dg_ui2d_last_frame_bb(&bbi, &bbsrc);
+                for (y = 0; y < h; y += 4) {
+                    const unsigned char *row = (const unsigned char *)m.pData + (size_t)(y * 4) * m.RowPitch;
+                    for (x = 0; x < w; x += 4) { fp ^= row[(size_t)x * 16]; fp *= 1099511628211ull; fp ^= row[(size_t)x * 16 + 1]; fp *= 1099511628211ull; fp ^= row[(size_t)x * 16 + 2]; fp *= 1099511628211ull; }
+                }
+                {   unsigned long poisoned = 0, total = 0;
+                    for (y = 0; y < h; y += 4) { const unsigned char *row = (const unsigned char *)m.pData + (size_t)(y * 4) * m.RowPitch;
+                        for (x = 0; x < w; x += 4) { const unsigned char *px = row + (size_t)x * 16; total++; if (px[0] == 0xAB && px[1] == 0xAB && px[2] == 0xAB && px[3] == 0xAB) poisoned++; } }
+                    logf_("  eye dump %d: present %ld label %s  picture %016llX  blit source %p (bb draws %ld)  all draws %ld  POISON left %lu of %lu  predicate %s\r\n",
+                          DG_EYE_DUMP_FRAMES - 1 - g_eye_dump_left, (long)g_present_frame, eye == DG_EYE_RIGHT ? "R" : "L", fp, bbsrc, bbd, dg_ui2d_last_frame_draws(),
+                          poisoned, total, g_eye_dump_pred == 0 ? "none" : g_eye_dump_pred == 1 ? "SET (value FALSE)" : "SET (value TRUE)");
+                }
+            }
+        }
+        ctx->lpVtbl->Unmap(ctx, (ID3D11Resource *)st, 0);
+    }
+done:
+    InterlockedIncrement(ok ? &g_eye_dump_written : &g_eye_dump_failed);
+    if (ctx) ctx->lpVtbl->Release(ctx);
+    if (st) st->lpVtbl->Release(st);
+    if (dev) dev->lpVtbl->Release(dev);
+    if (bb) bb->lpVtbl->Release(bb);
+    if (!g_eye_dump_left) logf_("  eye dump: done, written %ld failed %ld (logs\\dg_eye_%lu_*.raw)\r\n",
+                               (long)g_eye_dump_written, (long)g_eye_dump_failed, (unsigned long)g_eye_dump_tick);
+}
+
 static void on_present_body(IDXGISwapChain *sc) {
     DG_HOOK_HANDOFF handoff;
+    int keep_eye = 0;
     DG_HOOK_HANDOFF linked_handoff;
     int linked_seq=0,linked_have=render_link_take(&linked_handoff,&linked_seq);
     int stereo = InterlockedCompareExchange(&g_stereo, 0, 0) != 0;
+    if (sc) {   /* identity only: buffer 0 is the current back buffer of every swap effect */
+        ID3D11Texture2D *bbt = NULL;
+        if (SUCCEEDED(sc->lpVtbl->GetBuffer(sc, 0, &IID_ID3D11Texture2D, (void **)&bbt)) && bbt) {
+            dg_ui2d_backbuffer_ptr((void *)bbt); bbt->lpVtbl->Release(bbt);
+        }
+    }
     int armed  = g_armed;
     int eye = (InterlockedCompareExchange(&g_current_eye, 0, 0) == DG_EYE_RIGHT)
         ? DG_EYE_RIGHT : DG_EYE_LEFT;
@@ -5439,6 +5866,8 @@ static void on_present_body(IDXGISwapChain *sc) {
        overriding stereo: the director's frame is one flat image, read per
        frame because cutscenes animate the projection. */
     dg_xr_screen(screen);
+    /* Only while alternate-eye gameplay is what reaches the headset; cutscenes (theater), menus and mono keep their blur. */
+    dg_ui2d_feedback(InterlockedCompareExchange(&g_feedback_skip, 0, 0) && stereo && armed && have && !screen && g_source == SRC_XR);
     if(screen||!armed||!stereo||g_source!=SRC_XR)render_link_reset();
     if (screen) {
         const MAT *pers = (const MAT *)(g_chan0 + O_PERS);
@@ -5486,7 +5915,103 @@ static void on_present_body(IDXGISwapChain *sc) {
             InterlockedIncrement(&g_link_accepted);
             phase_link_record(&handoff,linked_seq);
         }
+        if (g_source == SRC_XR) {
+            int label = handoff.eye == DG_EYE_RIGHT ? 1 : 0;
+            int frame_sign = dg_ui2d_last_frame_sign();
+            {
+                long traps = (long)InterlockedCompareExchange(&g_traps, 0, 0);
+                long seq = (long)InterlockedCompareExchange(&g_handoff_seq, 0, 0);
+                DWORD now = GetTickCount();
+                char det[400]; long scene = frame_sign ? 0 : dg_ui2d_last_frame_detail(det, sizeof det);
+                /* a paused game (a handful of draws) must not use up the budget */
+                if (!frame_sign && (scene >= 300 ? (++g_nocam_seen <= DG_NOCAM_LOG_MAX || g_nocam_seen % 100 == 0)
+                                                 : ++g_nocam_small_seen <= 10)) {
+                    logf_("  nocam frame #%ld: present %ld label %s  camera-updates since last Present %ld  handoff writes %ld  dt %lu ms  %s\r\n",
+                          g_nocam_seen, (long)g_present_frame, handoff.eye == DG_EYE_RIGHT ? "R" : "L",
+                          traps - g_nocam_traps_last, (seq - g_nocam_seq_last) / 2, (unsigned long)(now - g_nocam_tick_last), det);
+                }
+                {
+                    long op = 0, on = 0, ticks = traps - g_nocam_traps_last; DWORD dtm = now - g_nocam_tick_last;
+                    int os = dg_ui2d_last_frame_obj(&op, &on), lab = handoff.eye == DG_EYE_RIGHT ? 1 : 0;
+                    g_obj_n[lab][os == 1 ? 0 : os == -1 ? 1 : os == 2 ? 2 : 3]++;
+                    g_obj_ticks[ticks < 0 ? 0 : ticks > 3 ? 3 : ticks]++;
+                    g_obj_dt[dtm < 20 ? 0 : dtm < 40 ? 1 : 2]++;
+                    if (os == 1 || os == -1) {
+                        if (g_obj_prev == os) {
+                            g_obj_same++; g_obj_run++; if (g_obj_run > g_obj_run_max) g_obj_run_max = g_obj_run;
+                            if (++g_obj_events <= 60 || g_obj_events % 50 == 0)
+                                logf_("  obj-eye SAME #%ld: present %ld label %s  objects +%ld/-%ld  c29 sign %+d  ticks %ld  dt %lu ms  run %ld\r\n",
+                                      g_obj_events, (long)g_present_frame, lab ? "R" : "L", op, on, frame_sign, ticks, (unsigned long)dtm, g_obj_run);
+                        } else { if (g_obj_prev) g_obj_alt++; g_obj_run = 0; }
+                        g_obj_prev = os;
+                    }
+                }
+                g_nocam_traps_last = traps; g_nocam_seq_last = seq; g_nocam_tick_last = now;
+            }
+            {
+                long fd = dg_ui2d_last_frame_draws(), dop = 0, don = 0;
+                int dos = dg_ui2d_last_frame_obj(&dop, &don);
+                LONG dmode = InterlockedCompareExchange(&g_draw_skip_mode, 0, 0);
+                int skipped = draw_skip_detect(fd, &g_draw_ema);
+                {
+                    long bbi = 0; void *bbsrc = NULL; long bbd = dg_ui2d_last_frame_bb(&bbi, &bbsrc);
+                    if (bbd >= 0) {
+                        g_bb_hist[bbd + bbi == 0 ? 0 : bbd + bbi < 8 ? 1 : 2]++;
+                        if (bbd + bbi > 0) { if (g_bb_seen < 1000000) g_bb_seen++; }
+                        if (bbsrc) { if (bbsrc == g_bb_src_prev) g_bb_src_same++; else { g_bb_src_alt++; g_bb_src_prev2 = g_bb_src_prev; } g_bb_src_prev = bbsrc; }
+                        if (bbd + bbi == 0 && g_bb_seen >= 100) {
+                            skipped = 1; g_bb_empty++;
+                        }
+                        if ((bbd + bbi == 0 || g_bb_events < 12) && (++g_bb_events <= 40 || g_bb_events % 500 == 0))
+                            logf_("  bb probe #%ld: present %ld label %s  back-buffer draws %ld (+%ld sampled indexed)  source %p  all draws %ld  objects +%ld/-%ld\r\n",
+                                  g_bb_events, (long)g_present_frame, label ? "R" : "L", bbd, bbi, bbsrc, fd, dop, don);
+                    }
+                }
+                g_draw_hist[fd < 50 ? 0 : fd < 300 ? 1 : fd < 1000 ? 2 : 3]++;
+                if (skipped) {
+                    g_draw_recent = 120;
+                    if (++g_draw_skipped <= 20 || g_draw_skipped % 500 == 0)
+                        logf_("  draw skip #%ld: present %ld label %s  draws %ld (usual %ld)  objects +%ld/-%ld  mode %ld\r\n",
+                              g_draw_skipped, (long)g_present_frame, label ? "R" : "L", fd, g_draw_ema, dop, don, (long)dmode);
+                    if (dmode >= 1) {
+                        g_draw_held++;
+                        dg_xr_capture(sc, eye, NULL, NULL);
+                        keep_eye = 1;
+                        goto present_done;
+                    }
+                } else {
+                    if (g_draw_recent > 0) g_draw_recent--;
+                    if (!g_draw_recent && (dos == 1 || dos == -1) && g_draw_map[label][dos < 0] < 1000000) g_draw_map[label][dos < 0]++;
+                    if (dmode == 2 && (dos == 1 || dos == -1)) {
+                        int want = draw_skip_label(g_draw_map, dos);
+                        if (want >= 0 && want != label && g_draw_have[want]) {
+                            handoff = g_draw_last[want]; label = want; g_draw_relabelled++;
+                        } else if (want < 0 || want == label) { g_draw_last[label] = handoff; g_draw_have[label] = 1; }
+                    } else { g_draw_last[label] = handoff; g_draw_have[label] = 1; }
+                }
+            }
+            int verdict = eye_truth_step(handoff.eye, frame_sign);
+            LONG mode = InterlockedCompareExchange(&g_eye_truth_mode, 0, 0);
+            if (nocam_drop_step(frame_sign, mode, &g_nocam_run)) {
+                InterlockedIncrement(&g_nocam_dropped);
+                dg_xr_capture(sc, eye, NULL, NULL);
+                goto present_done;
+            }
+            if (!frame_sign) InterlockedIncrement(&g_nocam_passed);
+            if (mode == 3) mode = 1;
+            if (verdict >= 0) { g_eye_truth_last[label] = handoff; g_eye_truth_have[label] = 1; }
+            else if (mode == 1) {
+                InterlockedIncrement(&g_eye_truth_dropped);
+                dg_xr_capture(sc, eye, NULL, NULL);
+                goto present_done;
+            } else if (mode == 2 && g_eye_truth_have[!label]) {
+                handoff = g_eye_truth_last[!label];
+                InterlockedIncrement(&g_eye_truth_relabelled);
+            }
+        }
         handoff.near_meta.present_id = (unsigned)g_present_frame;
+        ci_record(3,-1,-1,&handoff,0); /* exact arguments, not latest mailbox */
+        eye_dump_step(sc, handoff.eye);
         dg_xr_capture_measured(sc, handoff.eye, &handoff.raw, &handoff.fov, &handoff.near_meta);
     }
     else if (have && !stereo)
@@ -5524,7 +6049,7 @@ static void on_present_body(IDXGISwapChain *sc) {
        aligned to the real frame sequence too. */
 present_done:
     InterlockedIncrement(&g_present_frame);
-    InterlockedExchange(&g_current_eye, next_eye(eye));
+    if (!keep_eye) InterlockedExchange(&g_current_eye, next_eye(eye));
 }
 
 /* The game builds its device some time after our hooks go in, so this waits
@@ -6219,6 +6744,42 @@ static int test_render_link_config(void) {
     printf("  %s render-link config: default/on/off and malformed-token refusal\n",bad?"FAIL":"PASS");
     return bad;
 }
+/* vr_radar_*: defaults (everything off, HUD radar left alone), whole-word
+   switches, all-or-nothing triples, out-of-range keeps the default. */
+static int test_radar_config(void) {
+    static const struct { const char *text; int mode, hud, local; double size, off[3], rot[3], gaze, pitch; } t[] = {
+        { "source=xr",                                   0, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 20, 15 },
+        { "source=xr vr_radar_wrist=fixed",              1, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 20, 15 },
+        { "source=xr vr_radar_wrist=wrist vr_radar_hud=off vr_radar_wrist_space=local", 2, 0, 1, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 20, 15 },
+        { "source=xr vr_radar_wrist=WRIST vr_radar_hud=on vr_radar_wrist_space=grip",   2, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 20, 15 },
+        { "source=xr vr_radar_wrist=wristy vr_radar_hud=offf vr_radar_wrist_space=loc", 0, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 20, 15 },
+        { "source=xr vr_radar_wrist=on",                 0, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 20, 15 },
+        { "source=xr vr_radar_wrist=wrist vr_radar_wrist=off", 0, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 20, 15 },
+        { "source=xr vr_radar_wrist_size=0.12 vr_radar_wrist_offset=0.03,-0.01,0.09 vr_radar_wrist_rot=10,-80.5,180 vr_radar_gaze_deg=0 vr_radar_gaze_pitch=-5 vr_radar_wrist=wrist",
+                                                         2, 1, 0, 0.12, { 0.03, -0.01, 0.09 }, { 10, -80.5, 180 }, 0, -5 },
+        { "source=xr vr_radar_wrist_size=5 vr_radar_gaze_deg=91 vr_radar_gaze_pitch=61", 0, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 20, 15 },
+        { "source=xr vr_radar_wrist_size=0.02 vr_radar_gaze_deg=-1",                     0, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 20, 15 },
+        { "source=xr vr_radar_wrist_offset=0.03,0.01 vr_radar_wrist_rot=1,2",            0, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 20, 15 },
+        { "source=xr vr_radar_wrist_offset=0.03,0.01,0.5 vr_radar_wrist_rot=1,2,400",    0, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 20, 15 },
+        { "source=xr vr_radar_wrist_offset=0.03,0.01,0.05,7 vr_radar_wrist_rot=1,2,3x",  0, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 20, 15 },
+        { "source=xr vr_radar_wrist_offset=0.03,x,0.05 vr_radar_wrist=fixed stereo=1",   1, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 20, 15 },
+    };
+    int i, j, bad = 0, stereo_kept = 0;
+    for (i = 0; i < (int)(sizeof t / sizeof t[0]); i++) {
+        char b[320]; POSE pose; double seconds = 600; int source, track, map[4], hand, ok, row = 0;
+        ARM_POS_CFG ap; DG_XR_CONFIG cfg; DG_BRIDGE_CONFIG bridge;
+        strcpy_s(b, sizeof b, t[i].text);
+        ok = parse_config(b, &pose, &seconds, &source, &cfg, &bridge, &track, map, &hand, &ap);
+        if (!ok || cfg.radar_mode != t[i].mode || cfg.radar_hud != t[i].hud || cfg.radar_space_local != t[i].local ||
+            cfg.radar_size != t[i].size || cfg.radar_gaze_deg != t[i].gaze || cfg.radar_gaze_pitch != t[i].pitch) row = 1;
+        for (j = 0; j < 3; j++) if (cfg.radar_offset[j] != t[i].off[j] || cfg.radar_rot[j] != t[i].rot[j]) row = 1;
+        if (ok && cfg.stereo) stereo_kept = 1;          /* a refused triple must not swallow the keys after it */
+        if (row) { printf("  FAIL radar config row %d: %s\n", i, t[i].text); bad++; }
+    }
+    if (!stereo_kept) bad++;
+    printf("  %s radar config: defaults off, whole words, all-or-nothing triples, ranges\n", bad ? "FAIL" : "PASS");
+    return bad;
+}
 /* The eye shift: the pair must end up exactly the separation apart along
    the finished camera's x-axis, with zero vertical/depth component in that
    camera's own basis, on a rolled AND pitched camera - the case the old
@@ -6281,6 +6842,47 @@ static int test_stereo_eye_shift(void) {
         if (memcmp(&left, &world, sizeof world) != 0) bad++;
     }
     printf("  %s stereo eye shift: pair along camera x, symmetric, inverse kept, sign knob, plausibility\n", bad ? "FAIL" : "PASS");
+    return bad;
+}
+static int test_eye_truth(void) {
+    int bad = 0, i;
+    memset(g_eye_truth_n, 0, sizeof g_eye_truth_n);
+    g_eye_truth_none = g_eye_truth_mismatch = 0;
+    /* no camera this frame: no opinion, counted apart */
+    if (eye_truth_step(DG_EYE_LEFT, 0) != 0 || g_eye_truth_none != 1) bad++;
+    /* still learning: no verdict before 50 samples, not even on a stray */
+    for (i = 0; i < 49; i++) if (eye_truth_step(DG_EYE_LEFT, +1) != 0) bad++;
+    if (eye_truth_step(DG_EYE_LEFT, -1) != 0) bad++;
+    /* learned: left renders +, a - frame under the left label is a mismatch */
+    if (eye_truth_step(DG_EYE_LEFT, +1) != 1) bad++;
+    if (eye_truth_step(DG_EYE_LEFT, -1) != -1 || g_eye_truth_mismatch != 1) bad++;
+    /* the right eye learns on its own and the other way round */
+    for (i = 0; i < 50; i++) eye_truth_step(DG_EYE_RIGHT, -1);
+    if (eye_truth_step(DG_EYE_RIGHT, -1) != 1 || eye_truth_step(DG_EYE_RIGHT, +1) != -1) bad++;
+    /* no clear majority (labels are noise): never call a frame mislabelled */
+    memset(g_eye_truth_n, 0, sizeof g_eye_truth_n);
+    for (i = 0; i < 200; i++) eye_truth_step(DG_EYE_LEFT, (i & 1) ? 1 : -1);
+    if (eye_truth_step(DG_EYE_LEFT, +1) != 0 || eye_truth_step(DG_EYE_LEFT, -1) != 0) bad++;
+    {   /* draw skip: a frame with almost no draws against a learned usual count; never before a usual count exists */
+        long ema = 0, map[2][2] = {{0,0},{0,0}}; int k;
+        if (draw_skip_detect(3, &ema)) bad++;
+        for (k = 0; k < 10; k++) if (draw_skip_detect(1700, &ema)) bad++;
+        if (ema != 1700 || !draw_skip_detect(3, &ema) || !draw_skip_detect(120, &ema) || draw_skip_detect(400, &ema)) bad++;
+        if (draw_skip_label(map, 1) != -1) bad++;
+        map[0][0] = 60; map[1][1] = 70; map[1][0] = 2;
+        if (draw_skip_label(map, 1) != 0 || draw_skip_label(map, -1) != 1 || draw_skip_label(map, 0) != -1) bad++;
+        map[1][0] = 40; if (draw_skip_label(map, 1) != -1) bad++;
+    }
+    {   /* camera-less frames: dropped only in mode 3, at most DG_NOCAM_DROP_MAX in a row, a voted frame rearms */
+        int run = 0, k, dropped = 0;
+        if (nocam_drop_step(0, 0, &run) || nocam_drop_step(0, 1, &run) || nocam_drop_step(1, 3, &run)) bad++;
+        for (k = 0; k < 10; k++) dropped += nocam_drop_step(0, 3, &run);
+        if (dropped != DG_NOCAM_DROP_MAX) bad++;
+        if (nocam_drop_step(-1, 3, &run) || run != 0 || !nocam_drop_step(0, 3, &run)) bad++;
+    }
+    memset(g_eye_truth_n, 0, sizeof g_eye_truth_n);
+    g_eye_truth_none = g_eye_truth_mismatch = 0;
+    printf("  %s eye truth: learns sign per label eye, flags the exception, silent without majority\n", bad ? "FAIL" : "PASS");
     return bad;
 }
 static int test_capture_gate(void) {
@@ -6597,7 +7199,16 @@ static int test_absolute_aim_transport(void)
         AIM_CHECK(arm_pose_target(&t));
     }
     AIM_CHECK(t.left_enabled && t.left_valid && t.hands_coherent);
+    {int saved_source=g_source;g_source=SRC_XR;
+     InterlockedIncrement(&g_present_frame);AIM_CHECK(arm_pose_target(&t));g_source=saved_source;}
+    AIM_CHECK(t.m9_pose.valid && t.m9_pose.sequence==t.left_sample_seq &&
+              t.m9_pose.source==t.stream_id && fabs(t.m9_pose.local[0]-.25)<1e-9);
     AIM_CHECK(t.position.valid && t.position.units==1000);
+    AIM_CHECK(t.left_position.enabled && t.left_position.valid);
+    AIM_CHECK(t.free_right.enabled && t.free_right.valid && t.free_left.enabled && t.free_left.valid);
+    AIM_CHECK(t.left_position.grip[0]==-.25);
+    AIM_CHECK(t.left_position.units==1000);
+    for(i=0;i<16;i++) AIM_CHECK(t.left_position.camera[i]==g_aim_camera.camera.m[i/4][i%4]);
     AIM_CHECK(t.position.grip[0]==g_aim_camera.frame.right_hand.grip.raw_local.px);
     for(i=0;i<16;i++) AIM_CHECK(t.position.camera[i]==g_aim_camera.camera.m[i/4][i%4]);
     AIM_CHECK(fabs(t.hands_distance_m-.25)<1e-9);
@@ -6609,14 +7220,17 @@ static int test_absolute_aim_transport(void)
     AIM_CHECK(memcmp(first.left_wrist_view,t.left_wrist_view,sizeof t.left_wrist_view)!=0);
     g_aim_camera.frame.left_hand.grip.tracked=0;
     AIM_CHECK(arm_pose_target(&t) && !t.left_valid && t.aim_write);
+    AIM_CHECK(!t.m9_pose.valid);
     g_aim_camera.frame.left_hand.grip.tracked=1;
     g_aim_camera.frame.right_hand.aim.tracked=0;
     InterlockedIncrement(&g_present_frame);
     AIM_CHECK(arm_pose_target(&t) && t.left_valid && !t.aim_write);
+    AIM_CHECK(t.left_position.valid); /* right tracking loss is independent */
     g_aim_camera.frame.right_hand.aim.tracked=1;
     g_aim_camera.frame.left_hand.grip.sample_seq=9;
     InterlockedIncrement(&g_present_frame);
     AIM_CHECK(arm_pose_target(&t) && t.left_valid && !t.hands_coherent && t.aim_write);
+    AIM_CHECK(!t.m9_pose.valid);
     {
         DG_TWOHAND latch;
         int n;
@@ -6637,7 +7251,11 @@ static int test_absolute_aim_transport(void)
             AIM_CHECK(arm_pose_target(&t));
             AIM_CHECK(t.left_sample_seq==t.aim_sample_seq &&
                       t.left_sample_time==t.aim_sample_time);
-            if(n&1) AIM_CHECK(t.hands_distance_m==first.hands_distance_m);
+            if(n&1) {
+                AIM_CHECK(t.hands_distance_m==first.hands_distance_m);
+                AIM_CHECK(memcmp(t.free_left.world,first.free_left.world,sizeof t.free_left.world)==0);
+                AIM_CHECK(memcmp(t.free_right.world,first.free_right.world,sizeof t.free_right.world)==0);
+            }
             else first=t;
             dg_twohand_step(&latch,t.left_valid,
                 t.hands_coherent && t.aim_write &&
@@ -6690,6 +7308,27 @@ static int test_absolute_aim_transport(void)
     AIM_CHECK(t.aim_weapon_id == 1 && t.stream_id != first.stream_id);
     AIM_CHECK(g_absolute_record.input.reset);
     for (i=0;i<4;i++) AIM_CHECK(fabs(t.aim_world[i]-first.aim_world[i]) < 1e-9);
+    {
+        const int weapons[]={3,15,18,5,14,12,7};
+        int w;
+        dg_bridge_test_stinger_available(1);
+        g_twohand=1;
+        for(w=0;w<7;w++) {
+            first=t;g_test_aim_selection=weapons[w];
+            AIM_CHECK(arm_pose_target(&t) && t.hand_write && t.aim_write);
+            AIM_CHECK(t.aim_weapon_id==(uint64_t)weapons[w] && t.stream_id!=first.stream_id);
+            AIM_CHECK(g_absolute_record.input.reset);
+            AIM_CHECK(t.twohand_enabled==(weapons[w]==3));
+        }
+        dg_bridge_test_stinger_available(0);
+        g_test_aim_selection=7;
+        AIM_CHECK(arm_pose_target(&t) && !t.hand_write && !t.aim_write);
+        g_twohand=0;
+        g_test_aim_selection=6;
+        AIM_CHECK(arm_pose_target(&t) && !t.hand_write && !t.aim_write);
+        g_test_aim_selection=1;
+        AIM_CHECK(arm_pose_target(&t) && t.aim_write);
+    }
     /* FPS/level replacement while looking sideways must reset native latches
        without redefining physical forward. No old actor writes are retained. */
     {
@@ -6772,8 +7411,9 @@ static int test_absolute_record_replay(void)
         input->frame=i; input->eye=(unsigned int)DG_POSE_EYE_MONO;
         input->dt=1.0/60; input->sample_seq=i+1; input->sample_time=(i+1)*1000;
         input->source_valid=1; input->pose_flags=15;
+        if(i>=120)input->pose_flags|=DG_AIM_REPLAY_BLADE;
         input->hand_tag=DG_XR_HAND_RIGHT; input->kind_tag=DG_XR_POSE_AIM;
-        input->reset=(i==0 || i==75); input->stream=i<75?7:8;
+        input->reset=(i==0 || i==75 || i==120); input->stream=i<75?7:(i<120?8:9);
         input->camera_id=1; input->arm=2; input->subobject=3;
         input->subobjs=4; input->hand=5; input->model=6;
         if(i==100) input->source_valid=0;
@@ -6785,8 +7425,17 @@ static int test_absolute_record_replay(void)
            move together; no production target builder used as the oracle. */
         if(record.absolute.observed.write) {
             const double *q=record.absolute.observed.pose.quat;
-            if(fabs(q[0])>1e-8 || fabs(q[3])>1e-8 ||
-               fabs(q[1]+sqrt(.5))>1e-8 || fabs(q[2]-sqrt(.5))>1e-8) bad++;
+            if(i<120) {
+                if(fabs(q[0])>1e-8 || fabs(q[3])>1e-8 ||
+                   fabs(q[1]+sqrt(.5))>1e-8 || fabs(q[2]-sqrt(.5))>1e-8) bad++;
+            } else {
+
+                double v[4]={3.454840660095215,-383.86553955078125,759.2001342773438,0};
+                double inverse[4],world[4],n=sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);
+                dg_ik_quat_conj(q,inverse);dg_ik_quat_mul(q,v,world);
+                dg_ik_quat_mul(world,inverse,world);
+                if(fabs(world[0]/n)>1e-8 || fabs(world[1]/n)>1e-8 || fabs(world[2]/n-1)>1e-8)bad++;
+            }
         }
         if((i==100 || i==110) && record.absolute.observed.write) bad++;
         /* Start mid-stream, as an overwritten ring does. The checkpoint must
@@ -6827,6 +7476,10 @@ static int test_aim_probe_config(void) {
         {"source=xr\nvr_aim_probe=on\n",1,1},
         {"source=xr\n",1,0},
         {"source=xr\nvr_aim_probe=ON\n",1,1},
+        {"source=synthetic\nvr_geometry_probe=on\n",1,1},
+        {"source=xr\nvr_grip_debug=on\n",1,0},
+        {"source=xr\nvr_grip_debug=onjunk\n",0,0},
+        {"source=xr\nvr_geometry_probe=offjunk\n",0,0},
         {"source=xr\nvr_aim_probe=off\n",1,0},
         {"source=xr\nvr_aim_probe=onjunk\n",0,0},
         {"source=xr\nvr_aim_probe=offjunk\n",0,0},
@@ -9128,6 +9781,9 @@ static int test_script_input_routes(void)
 }
 
 #include "dg_controls_producer_test.inl"
+#include "dg_m9_input_test.inl"
+#include "dg_blade_input_test.inl"
+#include "dg_reload_config_test.inl"
 #include "dg_position_turn_test.h"
 #include "dg_controller_buttons_test.h"
 int dg_bridge_test_position_turn(
@@ -9205,7 +9861,9 @@ int main(int argc, char **argv) {
     bad += test_stereo_projection_mirror();
     bad += test_scene_blur();
     bad += test_render_link_config();
+    bad += test_radar_config();
     bad += test_stereo_eye_shift();
+    bad += test_eye_truth();
 
     printf("\nF3 OpenXR motion publication\n");
     bad += dg_script_gate_self_test();
@@ -9289,6 +9947,9 @@ int main(int argc, char **argv) {
     printf("\nscript input integration\n");
     bad += test_script_source_parser();
     bad += test_controls_producer();
+    bad += test_m9_input();
+    bad += test_blade_input();
+    bad += test_reload_config();
     bad += test_script_input_routes();
     printf("\n%s\n", bad ? "FAILED" : "PASSED");
     return bad ? 1 : 0;

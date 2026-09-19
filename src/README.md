@@ -1,6 +1,6 @@
 # Building the mod
 
-This directory contains the mod implementation and its local include dependencies for the Public Beta 1 baseline, build `12683251`.
+This directory contains the mod implementation and its local include dependencies for the Public Beta 2 baseline, build `E4267D3E`.
 
 ## Requirements
 
@@ -19,8 +19,10 @@ The output is `src/dg_hook/dg_hook.asi`. Building does not install or start anyt
 
 This is the buildable mod baseline, not the full development workspace or a complete standalone test-tool distribution. Game files and SDK dependencies are not included.
 
-## Relationship to Public Beta 1
+## Relationship to Public Beta 2
 
 Documentation comments have been curated for this repository. Three optional diagnostic locations use relative paths under `logs/`: `pcvr_hud_watch.txt`, `pcvr_near/` and `pcvr_phase/`. The directories for optional captures must exist before using those diagnostics.
 
-The gameplay code tokens are unchanged from the selected baseline; the three diagnostic path literals are the only executable-token edits. A build from this directory is a separate artifact and is not claimed to be byte-identical to, or headset-tested as, release binary `12683251`.
+The gameplay code tokens are unchanged from the selected baseline; the three diagnostic path literals are the only executable-token edits. A build from this directory is a separate artifact and is not claimed to be byte-identical to, or headset-tested as, release binary `E4267D3E`.
+
+The build includes 158 C/C++ and local include files. The C++ draw-trial module is compiled with /EHsc. The release configuration is available in config/ at the repository root. All feature code from the selected shipping build and its transitive local includes is included.

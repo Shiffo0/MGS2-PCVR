@@ -13,6 +13,9 @@ static PVOID volatile g_capture_observer;
 void dg_xr_set_capture_observer(DG_XR_CAPTURE_OBSERVER observer) {
     InterlockedExchangePointer(&g_capture_observer,(PVOID)observer);
 }
+#ifdef DG_XR_NO_RUNTIME
+void dg_xr_m9_feedback(unsigned events) {(void)events;}
+#endif
 #include "dg_proj.h"
 /* Shared bridge types only. Physical button events go through the bounded
    context mailbox above; this runtime thread does not enqueue FPS directly. */
@@ -749,6 +752,8 @@ void dg_xr_capture(void *sc, int eye, const DG_XR_RAW_POSE *raw,
     (void)sc; (void)eye; (void)raw; (void)fov;
 }
 int  dg_xr_submitting(void) { return 0; }
+int  dg_xr_radar_capture(void *t) { (void)t; return -1; }
+void dg_xr_radar_stats(char *out, size_t n) { if (out && n) out[0] = 0; }
 /* No runtime, no quad: the desk build tests the POSE (shared above), the
    runtime half owns the submission - the same split as everything here. */
 void dg_xr_screen(int active) { (void)active; }
@@ -969,6 +974,10 @@ static volatile LONG g_bad_pose_logged;
 #include "dg_pixel_probe.inl"
 #include "dg_near_probe.inl"
 #include "dg_xr_radial.inl"
+static XrSwapchain health_radar_swap(void);
+#include "dg_xr_health.inl"
+#include "dg_xr_grip_debug.inl"
+static void radar_teardown(void);      /* dg_xr_radar.inl, included ahead of the frame loop */
 static double g_ref_qy, g_ref_qw;      /* yaw-only quaternion, (0,qy,0,qw) */
 static double g_ref_px, g_ref_py, g_ref_pz;
 /* Software-turn bookkeeping, sample thread only (the shared mirror in
@@ -1422,6 +1431,7 @@ static int xr_init(void) {
     sci.systemId = g_sys;
     XRCHK(pfn_CreateSession(g_inst, &sci, &g_sess), "xrCreateSession");
     radial_new_session();
+    health_new_session();gripdbg_new_session();
 
     memset(&rsci, 0, sizeof(rsci));
     rsci.type = XR_TYPE_REFERENCE_SPACE_CREATE_INFO;
@@ -1446,6 +1456,8 @@ static void xr_teardown(void) {
     pixel_probe_teardown();
     if (g_session_running && pfn_EndSession) stopped=pfn_EndSession(g_sess)==XR_SUCCESS;
     radial_stop(stopped);
+    health_stop(stopped);gripdbg_stop(stopped);
+    radar_teardown();
     g_session_running = 0;
     InterlockedExchange(&g_submitting, 0);
     InterlockedExchange(&g_have_capture, 0);
@@ -1492,7 +1504,10 @@ static void xr_teardown(void) {
     if (g_view_space  && pfn_DestroySpace) pfn_DestroySpace(g_view_space);
     if (g_local_space && pfn_DestroySpace) pfn_DestroySpace(g_local_space);
     g_view_space = g_local_space = XR_NULL_HANDLE;
-    if (g_sess && pfn_DestroySession) radial_parent_destroyed(pfn_DestroySession(g_sess)==XR_SUCCESS);
+    if (g_sess && pfn_DestroySession) {
+        int destroyed=pfn_DestroySession(g_sess)==XR_SUCCESS;
+        radial_parent_destroyed(destroyed);health_parent_destroyed(destroyed);gripdbg_parent_destroyed(destroyed);
+    }
     g_sess = XR_NULL_HANDLE;
     if (g_action_set && pfn_DestroyActionSet) pfn_DestroyActionSet(g_action_set);
     g_action_set = XR_NULL_HANDLE;
@@ -1836,7 +1851,9 @@ static void load_trigger_thresholds(float *deadzone, float *fire) {
     }
 }
 
+#include "dg_xr_m9.inl"
 static void poll_controller(void) {
+    xr_m9_haptic_drain();
     XrActiveActionSet active;
     XrActionsSyncInfo si;
     XrActionStateGetInfo gi;
@@ -2358,6 +2375,9 @@ static int submit_capture_images(DG_SUBMIT_CAPTURE *capture, const char **fatal)
     return copied && !*fatal;
 }
 
+#include "dg_xr_radar.inl"
+static XrSwapchain health_radar_swap(void) { return g_radar_swap; }
+
 static const char *xr_frame_loop(void) {
     while (g_run) {
         XrFrameWaitInfo fwi;
@@ -2366,13 +2386,14 @@ static const char *xr_frame_loop(void) {
         XrFrameEndInfo fei;
         XrCompositionLayerProjectionView pview[2];
         XrCompositionLayerProjection proj;
-        XrCompositionLayerQuad quad, radial_quad;
-        const XrCompositionLayerBaseHeader *layers[2];
+        XrCompositionLayerQuad quad, radial_quad, radar_quad, health_quad;
+        const XrCompositionLayerBaseHeader *layers[10];
+        XrCompositionLayerQuad grip_quads[6];
         XrView view[2];
         DG_XR_FRAME published;
         int published_status;
         int views_valid = 0;
-        int screen_on;
+        int screen_on, radar_ready;
         XrResult r;
 
         capture_diag_begin();
@@ -2624,7 +2645,17 @@ static const char *xr_frame_loop(void) {
                 }
             }
         }
+        /* Wrist radar (vr_radar_wrist, default off): decided and copied first,
+           slotted in between the projection and the radial menu afterwards -
+           the menu's own readiness test must still find the projection alone,
+           so its capacity stays 2 and the radar takes the third slot. */
+        radar_ready = radar_prepare(&fei,&radar_quad,fs.shouldRender,screen_on,&published,published_status,GetTickCount64());
         radial_append(&fei,layers,2,&radial_quad,fs.shouldRender,screen_on,GetTickCount64());
+        if (radar_ready) radar_insert(&fei,layers,4,&radar_quad);
+        health_append(&fei,layers,4,&health_quad,fs.shouldRender,screen_on,views_valid,
+                      fs.predictedDisplayTime,GetTickCount64());
+        gripdbg_append(&fei,layers,10,grip_quads,fs.shouldRender,screen_on,views_valid,
+                       fs.predictedDisplayTime,GetTickCount64());
         if (!fei.layerCount) capture_diag_inc(CD_ZERO);
         g_cd.end_attempted = 1;
         r = pfn_EndFrame(g_sess, &fei);

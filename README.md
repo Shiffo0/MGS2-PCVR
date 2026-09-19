@@ -1,28 +1,32 @@
 # MGS2 PCVR — Public Beta
 
-**Play the Tanker chapter in VR. Tested on Meta Quest 3.**
+**MGS2 in PC VR — Quest 3 development baseline.**
 
 An unofficial PC VR mod for **METAL GEAR SOLID 2: Sons of Liberty — Master Collection Version** on Windows, using OpenXR and **AER (Alternate Eye Rendering)**.
 
-**[Download Public Beta 1](https://github.com/Shiffo0/MGS2-PCVR-Beta/releases/tag/v0.1.0-beta.1)** · [Installation](#installation) · [Controls](#controls) · [Known limitations](#known-limitations) · [Report a problem](https://github.com/Shiffo0/MGS2-PCVR-Beta/issues)
+**[Download Public Beta 2](https://github.com/Shiffo0/MGS2-PCVR-Beta/releases/tag/v0.2.0-beta.2)** · [Installation](#installation) · [Controls](#controls) · [Known limitations](#known-limitations) · [Report a problem](https://github.com/Shiffo0/MGS2-PCVR-Beta/issues)
 
 > [!IMPORTANT]
-> **Tanker is fully playable with the workarounds below.** This beta focuses on Snake and the Tanker chapter. Raiden and the Plant chapter are still in development. This is not yet a complete VR conversion of both campaigns.
+> **The earlier Tanker beta was reported fully playable with the workarounds below.** This update includes experimental Raiden/weapon work and needs a fresh headset regression test. Plant is not yet supported as a complete VR campaign.
 
 ## Compatibility
 
 | Item | Beta status |
 | --- | --- |
-| Headset tested | **Meta Quest 3**, connected to a Windows gaming PC |
+| Headset baseline | **Meta Quest 3**, connected to a Windows gaming PC; new combined build awaits headset acceptance |
 | Controllers | Quest Touch Plus; default right-handed layout |
 | Game | Steam Master Collection version of MGS2 (App 2131640) |
 | Local game baseline | Steam build 21578573 |
-| Mod build | **12683251** — Public Beta 1 |
-| Tanker / Snake | Fully playable, subject to the limitations below |
+| Mod build | **E4267D3E** — Public Beta 2 |
+| Tanker / Snake | Earlier beta reported fully playable; this update needs a regression playthrough |
 | Plant / Raiden | In development; not supported as a complete campaign |
 | Other headsets / game versions | Not validated for this beta |
 
-Quest 3 and Tanker playability are based on the developer's playtesting of mod build 12683251. Packaging checks are separate from that gameplay testing. This is a PC mod, not a standalone Quest application.
+Quest 3 and Tanker playability were reported for the earlier beta build 12683251. Build E4267D3E passed its recorded build and desk checks and was deployed, but a new headset acceptance test for this combined build has not been recorded. This is a PC mod, not a standalone Quest application.
+
+## Included in build E4267D3E
+
+This release packages the complete selected mod binary and its matching buildable source baseline, including Stinger controller/aim integration, HF Blade support, native HUD and wrist-radar work, coolant changes, M9 slide handling and pistol-reload work. These inclusions describe implementation, not completed headset acceptance. HF Blade, M9 slide, pistol reload, wrist radar and UI settings are enabled in the supplied configuration; diagnostic recording/probes are disabled.
 
 ## Known limitations
 
@@ -35,7 +39,7 @@ Quest 3 and Tanker playability are based on the developer's playtesting of mod b
 
 1. Install and launch your own Steam copy of **MGS2 — Master Collection Version** once, then close the game.
 2. Connect your Quest 3 to your PC, start your PC VR connection software and make sure its OpenXR runtime is active. Confirm that PC VR works before starting the game.
-3. Download **`MGS2-PCVR-v0.1.0-beta.1-12683251.zip`** from [Public Beta 1](https://github.com/Shiffo0/MGS2-PCVR-Beta/releases/tag/v0.1.0-beta.1). GitHub's automatic **Source code** ZIP/TAR links are repository snapshots, not the playable mod package.
+3. Download **`MGS2-PCVR-v0.2.0-beta.2-E4267D3E.zip`** from [Public Beta 2](https://github.com/Shiffo0/MGS2-PCVR-Beta/releases/tag/v0.2.0-beta.2). GitHub's automatic **Source code** ZIP/TAR links are repository snapshots, not the playable mod package.
 4. In Steam, right-click the game → **Manage → Browse local files**. The destination is the folder containing **`METAL GEAR SOLID2.exe`**, normally `steamapps/common/MGS2`.
 5. Back up any existing files with the same names. Extract the release ZIP directly into that folder. Keep its folder structure. If another mod already provides `winmm.dll` or `openxr_loader.dll`, keep a backup and test this beta on a clean mod setup; combinations have not been validated.
 6. Start the game normally through Steam with your headset connected. Use the left controller's **Menu** button for Start. In gameplay, **A** switches VR / Third Person. Face forward in your normal playing position and **hold Y** to recenter.
@@ -51,7 +55,7 @@ Close the game before changing files. Back up your existing mod files and settin
 
 ![Quest 3 controller mappings](media/quest3-controls.png)
 
-The illustration shows the core controls. The table covers contextual actions for the **default right-handed** layout.
+The illustration shows the core controls. In this build, **Codec additionally requires the weapon hand near the corresponding ear**. The table covers contextual actions for the **default right-handed** layout.
 
 | Input | Action |
 | --- | --- |
@@ -65,7 +69,7 @@ The illustration shows the core controls. The table covers contextual actions fo
 | Right trigger | Weapon action; pistols follow their aim / fire / release behavior |
 | Left trigger | Melee / contextual choke action |
 | Left grip | Contextual grab / hold |
-| Right grip | Codec |
+| Right grip, with the right hand near the right ear | Codec; move the hand into position before pressing the grip |
 | Right trigger + **B** | Aim calibration; posture is suppressed during this chord |
 | Right stick click | Weapon selection radial |
 | Left stick click | Item selection radial |
@@ -89,10 +93,10 @@ This beta does not claim native simultaneous stereo. Keep the game frame rate st
 Future work includes, among other things:
 
 - Raiden's **SOCOM** mapping.
-- **Coolant** interaction.
+- **Coolant** validation and remaining interaction fixes; this build includes the current implementation and diagnostic work.
 - **Scope** support.
 - **Sniper rifle** support.
-- **Stinger and Nikita** support.
+- **Stinger** controller alignment, lock-on and firing validation; an experimental adapter is now included. **Nikita** remains future work.
 - Hanging, movement while hanging, and grenade support.
 - Further Plant campaign testing and polish.
 

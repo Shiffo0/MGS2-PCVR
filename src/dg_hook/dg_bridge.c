@@ -840,17 +840,36 @@ static int dg_detour_install_ex(DG_DETOUR *d, void *target, void *callback,
     }
     emit_jmp_abs(tramp + stolen, code + stolen);
 
-    {
+    if (original_stack==2) {
+        /* Function-entry replacement with a callable original trampoline. */
+        emit_jmp_abs(stub,callback);
+    } else {
         size_t n=sizeof(k_stub_head)-2;
         static const unsigned char stack_arg[]={0x48,0x8d,0x8b,0x80,0,0,0};
         ULONGLONG back=(ULONGLONG)(ULONG_PTR)tramp;
         memcpy(stub,k_stub_head,n);
+        if(original_stack==3) {
+            static const unsigned char save67[]={
+                0x0f,0x29,0xb4,0x24,0x80,0,0,0,
+                0x0f,0x29,0xbc,0x24,0x90,0,0,0,
+                0x48,0x8d,0x94,0x24,0x80,0,0,0};
+            /* k_stub_head's sub rsp,0x80 becomes 0xa0; GPR layout unchanged. */
+            stub[34]=0xa0;
+            memcpy(stub+n,save67,sizeof save67);n+=sizeof save67;
+        }
         /* RBX points at the saved context: 15 GPRs + RFLAGS = 128 bytes.
            Set RCX only after saving its original value. */
         if(original_stack){memcpy(stub+n,stack_arg,sizeof stack_arg);n+=sizeof stack_arg;}
         memcpy(stub+n,k_stub_head+sizeof(k_stub_head)-2,2);n+=2;
         memcpy(stub+n,&cb,sizeof cb);n+=sizeof cb;
-        memcpy(stub+n,k_stub_tail,sizeof k_stub_tail);n+=sizeof k_stub_tail;
+        if(original_stack==3) {
+            static const unsigned char load67[]={
+                0x0f,0x28,0xb4,0x24,0x80,0,0,0,
+                0x0f,0x28,0xbc,0x24,0x90,0,0,0};
+            memcpy(stub+n,k_stub_tail,2);n+=2; /* call before restoring XMM */
+            memcpy(stub+n,load67,sizeof load67);n+=sizeof load67;
+            memcpy(stub+n,k_stub_tail+2,sizeof k_stub_tail-2);n+=sizeof k_stub_tail-2;
+        } else {memcpy(stub+n,k_stub_tail,sizeof k_stub_tail);n+=sizeof k_stub_tail;}
         memcpy(stub+n,&back,sizeof back);
     }
 
@@ -866,7 +885,10 @@ static int dg_detour_install_ex(DG_DETOUR *d, void *target, void *callback,
     patch[0] = 0xE9;
     { LONG r32 = (LONG)rel; memcpy(patch + 1, &r32, sizeof(r32)); }
 
+    /* A replacement wrapper may enter as soon as patch_code resumes peers. */
+    if(original_stack==2)d->tramp=tramp;
     if (!patch_code(code, patch, stolen)) {
+        d->tramp=NULL;
         VirtualFree(page, 0, MEM_RELEASE);
         *why = "VirtualProtect refused the patch site";
         return 0;
@@ -1306,6 +1328,7 @@ static struct {
        interlocked publication pattern as the older IK telemetry. */
     DG_ARM_MAP_STATE arm_map;
     DG_POSITION_STATE camera_position;
+    DG_FREE_WRIST_STATE free_right;
     unsigned long arm_map_last_pair;
     unsigned long arm_map_stream;
     ULONGLONG arm_map_arm;
@@ -2090,7 +2113,22 @@ static uint64_t g_controls_lease;
 static int g_controls_allowed, g_controls_radial_allowed, g_controls_active, g_controls_ladder, g_controls_special;
 static volatile LONG g_controls_fire_retired;
 #include "dg_radial_game.inl"
+#include "dg_health_bridge.inl"
 #include "dg_action_bridge.inl"
+#include "dg_m9_bridge.inl"
+static void stinger_resolve(const LiveImage *im);
+static void stinger_install(void);
+static void stinger_stop(void);
+static void blade_resolve(const LiveImage *im);
+static void blade_install(int requested);
+static void blade_stop(void);
+static void blade_tick(int safe);
+static int blade_claim(void);
+#include "dg_native_hud.inl"
+static void coolant_resolve(const LiveImage *im);
+static void coolant_install(void);
+static void coolant_stop(void);
+#include "dg_pistol_reload.inl"
 static void controls_clear_legacy(void) {
     InterlockedExchange(&g_b.fire_valid,0);
     InterlockedExchange(&g_b.move_valid,0);
@@ -2326,6 +2364,7 @@ static void bridge_tick_body(void)
             InterlockedIncrement(&g_b.c_late_stale);
     }
 
+    health_tick(game_status,menu_status,status);
     in.game_status = game_status;
     in.menu_status = menu_status;
     in.safe_gameplay = (status & DG_PLAYER_UNSAFE_MASK) == 0 &&
@@ -2354,6 +2393,7 @@ static void bridge_tick_body(void)
             (!camera.arm_camera_on || replaced) &&
             !(status & 0x30901ULL); /* WATCH, attack, HOLD, ladder, enemy pull */
     }
+    m9_context_boundary(in.level_load || (game_status & 0x80004000u));
 
     /* A controller request belongs to its gameplay context. Never retain it
        through an unsafe/menu interval for delayed execution on return. */
@@ -2442,6 +2482,7 @@ static void bridge_tick_body(void)
        has just closed. */
     action_log_drain();
     controls_begin(in.safe_gameplay,GetTickCount64());
+    blade_tick(in.safe_gameplay);
     fire_tick(in.safe_gameplay);
     g_b.tick_status = status;
     move_tick(in.safe_gameplay);
@@ -2704,6 +2745,7 @@ int dg_bridge_start(void (*log)(const char *fmt, ...),
     InterlockedExchange(&g_b.ik_active, 0);
     dg_arm_map_reset(&g_b.arm_map);
     memset(&g_b.camera_position, 0, sizeof g_b.camera_position);
+    memset(&g_b.free_right, 0, sizeof g_b.free_right);
     g_b.arm_map_phase = 0;
     g_b.arm_map_cache_valid = 0;
     g_b.arm_map_last_pair = 0;
@@ -2746,10 +2788,17 @@ int dg_bridge_start(void (*log)(const char *fmt, ...),
     if (log) log("  interactions: general player anchor %s\r\n",
         (g_interact_player.valid_bits&DG_RINV_ACTOR)?"resolved":"unavailable");
     radial_game_resolve(&image);
+    health_resolve(&image);
     action_resolve(&image);
     camera_resolve(&image);
     zoom_resolve_image(&image,&g_camera_a,&g_zoom_a);
     move_resolve_workl(&image);
+    m9_resolve(&image);
+    blade_resolve(&image);
+    stinger_resolve(&image);
+    native_hud_resolve(&image);
+    coolant_resolve(&image);
+    reload_resolve(&image);
     /* The anchor addresses are image-relative; the copy is about to go away. */
     free_live_image(&image);
 
@@ -2792,6 +2841,13 @@ int dg_bridge_start(void (*log)(const char *fmt, ...),
         return 0;
     }
 
+    native_hud_install();
+    coolant_install();
+    m9_install(cfg && cfg->m9_slide);
+    stinger_install();
+    blade_install(cfg && cfg->hf_blade);
+    reload_install(cfg && cfg->pistol_reload);
+    InterlockedExchange(&g_m9_enabled,cfg && cfg->m9_slide ? 1:0);
     radial_game_install();
     /* The pad detour, installed only when its OPTIONAL anchor resolved and
        only when it has somewhere to write. Its failure is logged and
@@ -3220,6 +3276,12 @@ void dg_bridge_stop(void)
         g_radial_game.live=0;
     }
     dg_bridge_action_register(NULL);
+    reload_stop();
+    stinger_stop();
+    native_hud_stop();
+    coolant_stop();
+    m9_stop();
+    blade_stop();
     dg_detour_remove(&g_action_detour);
     dg_detour_remove(&g_camera_detour);
     dg_detour_remove(&g_b.detour);
@@ -4457,6 +4519,7 @@ static void arm_map_forget(void)
     arm_ik_release();
     dg_arm_map_reset(&g_b.arm_map);
     memset(&g_b.camera_position, 0, sizeof g_b.camera_position);
+    memset(&g_b.free_right, 0, sizeof g_b.free_right);
     g_b.arm_map_phase = 0;
     g_b.arm_map_cache_valid = 0;
     g_b.have_pred_wrist = 0;            /* nothing predicted across a pose loss */
@@ -4501,6 +4564,7 @@ static void arm_map_begin(ULONGLONG arm, ULONGLONG objs,
         InterlockedExchange(&g_b.hand_zero_pending, 1);
     dg_arm_map_reset(&g_b.arm_map);
     memset(&g_b.camera_position, 0, sizeof g_b.camera_position);
+    memset(&g_b.free_right, 0, sizeof g_b.free_right);
     /* A new identity or stream means a new calibration is coming; the old
        rest capture belongs to the old skeleton and must not survive into
        it. The calibration pair that follows re-captures. */
@@ -4590,8 +4654,8 @@ enum {
     DG_RESOLVE_MIC
 };
 
-static int resolve_player(ULONGLONG *arm_out, ULONGLONG *pwork_out,
-                          LONG *weapon_out)
+static int resolve_player_policy(ULONGLONG *arm_out, ULONGLONG *pwork_out,
+                          LONG *weapon_out, int motion)
 {
     ULONGLONG arm, work, trigger, pwork, end;
     LONG weapon;
@@ -4615,7 +4679,7 @@ static int resolve_player(ULONGLONG *arm_out, ULONGLONG *pwork_out,
         return DG_RESOLVE_OWNER_MISMATCH;
     weapon = RD32(pwork + 0xB90);
     if (weapon < 0 || weapon >= DG_WEAPON_COUNT) return DG_RESOLVE_BAD_WEAPON;
-    if (weapon == DG_WEAPON_MIC || weapon == DG_WEAPON_DEMO_MIC)
+    if ((weapon == DG_WEAPON_MIC && !motion) || weapon == DG_WEAPON_DEMO_MIC)
         return DG_RESOLVE_MIC;
 
     if (arm_out) *arm_out = arm;
@@ -4623,6 +4687,15 @@ static int resolve_player(ULONGLONG *arm_out, ULONGLONG *pwork_out,
     if (weapon_out) *weapon_out = weapon;
     return DG_RESOLVE_OK;
 }
+
+/* Microphone motion does not grant trigger or legacy camera-shift ownership. */
+static int resolve_player(ULONGLONG *a, ULONGLONG *p, LONG *w)
+{ return resolve_player_policy(a,p,w,0); }
+static int resolve_motion_player(ULONGLONG *a, ULONGLONG *p, LONG *w)
+{ return resolve_player_policy(a,p,w,1); }
+
+#include "dg_blade_bridge.inl"
+#include "dg_stinger_bridge.inl"
 
 static void interact_tick(int safe_gameplay)
 {
@@ -4635,8 +4708,12 @@ static void interact_tick(int safe_gameplay)
     ULONGLONG pad=g_b.a.player_pad;
     memset(&in,0,sizeof in);
     in.tick=(uint64_t)(DWORD)g_b.c_ticks;
-    if (g_controls_provider && g_controls_active)
+    if (g_controls_provider && g_controls_active) {
         in.input=g_controls_frame.interact;
+        /* The blade owns the right grip: raising a held sword past the ear
+         * must not open codec. Suppression retains release-to-rearm semantics. */
+        if(blade_claim())in.input.suppressed|=DG_IA_CODEC;
+    }
     if (in.input.sample) InterlockedIncrement(&g_interact_stats.samples);
     in.safe=safe_gameplay && g_controls_allowed &&
         GetTickCount64()>=g_controls_lease &&
@@ -5142,7 +5219,7 @@ static void move_tick(int safe_gameplay)
         in.x = 0.0;
         in.y = 0.0;
     }
-    in.turn_on = InterlockedCompareExchange(&g_b.turn_mode, 0, 0) ? 1 : 0;
+    in.turn_on = !blade_claim() && InterlockedCompareExchange(&g_b.turn_mode, 0, 0) ? 1 : 0;
     in.turn_x = cmd.turn_valid ? cmd.turn_x : 0.0;
     in.turn_gain = (double)InterlockedCompareExchange(&g_b.turn_gain_mils,
                                                       0, 0) / 1000.0;
@@ -5469,6 +5546,7 @@ void dg_bridge_move_probe_now(ULONGLONG image_base)
    can be flown with the trigger live in the log and no round spent, and the
    run that finally writes has already had its edges checked against a real
    player rather than against a test harness. */
+#include "dg_coolant_trace.inl"
 static void fire_tick(int safe_gameplay)
 {
     DG_BRIDGE_FIRE cmd;
@@ -5477,10 +5555,11 @@ static void fire_tick(int safe_gameplay)
     ULONGLONG pwork = 0, wp_set;
     LONG weapon = 0, now, age, tick = 0;
     LONG wmask = 0, pidx = -1;
+    int m9_block=0,reload_block=0;
     static unsigned long last_stream;
     int mode = (int)InterlockedCompareExchange(&g_b.fire_mode, 0, 0);
 
-    if (mode == DG_FIRE_MODE_OFF) {
+    if (blade_claim() || mode == DG_FIRE_MODE_OFF) {
         dg_fire_reset(&g_b.fire);
         dg_recoil_reset(&g_b.recoil);
         InterlockedExchange(&g_b.s_recoil_amp, 0);
@@ -5576,7 +5655,12 @@ static void fire_tick(int safe_gameplay)
     }
     if (!in.can_write) InterlockedIncrement(&g_b.c_fire_blocked_gate);
 
+    if(mode==DG_FIRE_MODE_ON)
+        m9_block=m9_fire_gate(safe_gameplay,in.can_write && wmask && pidx>=0 && pidx<12,pwork,weapon,in.physical_down,&in);
+    if(mode==DG_FIRE_MODE_ON)
+        reload_block = reload_tick(safe_gameplay,in.can_write && wmask && pidx>=0 && pidx<12,pwork,weapon,in.physical_down,&in);
     dg_fire_step(&g_b.fire, &in, &out);
+    if(reload_block)out.flags&=~DG_FIRE_F_RELEASED;
 
     if (out.flags & DG_FIRE_F_DREW) InterlockedIncrement(&g_b.c_fire_drawn);
     if (out.flags & DG_FIRE_F_RELEASED)
@@ -5604,9 +5688,12 @@ static void fire_tick(int safe_gameplay)
        Their input already holds the stance up, so there is nothing for us to
        add, and our release bit would end an aim we did not start. */
     if (mode == DG_FIRE_MODE_ON && in.can_write) {
-        if (in.physical_down) InterlockedIncrement(&g_b.c_fire_yielded);
+        if (reload_block) reload_pad(wmask,pidx);
+        else if (m9_block) m9_block_pad(wmask,pidx);
+        else if (in.physical_down) InterlockedIncrement(&g_b.c_fire_yielded);
         else fire_write(&out, wmask, pidx);
     }
+    coolant_trace_tick(safe_gameplay,mode,&in,&out,0); /* actual post-write pad */
 
     /* The kick. A shot is one impulse; the spring is stepped every tick
        whether or not one arrived, and deliberately including the ticks where
@@ -5971,7 +6058,7 @@ static void arm_ik_now(ULONGLONG arm, const DG_BRIDGE_ARM_TARGET *target)
             target->aim_stream_id == target->stream_id && target->aim_sample_seq &&
             target->aim_sample_time > 0 && target->aim_arm == arm &&
             g_b.a.gm_player_arm_body > 0x17df698 &&
-            dg_aim_capture_pistol_selection(
+            dg_aim_capture_hand_selection(
                 (uintptr_t)(g_b.a.gm_player_arm_body - 0x17df698), arm, &selection) &&
             selection.subobject == target->aim_subobject &&
             selection.subobjs == target->aim_subobjs && selection.hand == target->aim_hand &&
@@ -5988,6 +6075,10 @@ static void arm_ik_now(ULONGLONG arm, const DG_BRIDGE_ARM_TARGET *target)
     }
     /* Before every duplicate/constant replay return: invalid aim may never
        leave the previous command live in the next player Action tick. */
+    if(g_b.arm_map_unarmed && target->free_right.enabled && !target->free_right.valid) {
+        effective_target=*target;effective_target.hand_write=0;target=&effective_target;
+        memset(&g_b.free_right,0,sizeof g_b.free_right);
+    }
     if (!target->hand_write) hand_command_clear();
 
     /* The recorder's game-side half starts truthful-empty every pass and
@@ -6052,7 +6143,7 @@ static void arm_ik_now(ULONGLONG arm, const DG_BRIDGE_ARM_TARGET *target)
     if (InterlockedCompareExchange(&g_b.adjust_frame, 0, 0) == 1) {
         ULONGLONG current_arm = 0, player_work = 0, player_end = 0;
         double frame_q[4];
-        int frame_ok = resolve_player(&current_arm, &player_work, NULL) == DG_RESOLVE_OK &&
+        int frame_ok = resolve_motion_player(&current_arm, &player_work, NULL) == DG_RESOLVE_OK &&
                        current_arm == arm;
         if (frame_ok) player_end = region_end(player_work);
         frame_ok = frame_ok && player_end && player_work + 0x84 <= player_end &&
@@ -6166,7 +6257,7 @@ static void arm_ik_now(ULONGLONG arm, const DG_BRIDGE_ARM_TARGET *target)
         int live = InterlockedCompareExchange(&g_b.adjust_frame, 0, 0) == 1;
         g_b.pair_rot_ok = 0;
         g_b.pair_rot_vy = 0;
-        if (resolve_player(NULL, &pw, NULL) == DG_RESOLVE_OK)
+        if (resolve_motion_player(NULL, &pw, NULL) == DG_RESOLVE_OK)
             pe = region_end(pw);
         if (pw && pe && pw + 0x84 <= pe) {
             g_b.pair_rot_vy = *(volatile short *)(ULONG_PTR)(pw + 0x82);
@@ -6906,6 +6997,9 @@ static void arm_ik_now(ULONGLONG arm, const DG_BRIDGE_ARM_TARGET *target)
             if (g_b.arm_map_unarmed) {
                 if (!unarmed_wrist_target(arm,&g_b.pair_frame,q4,q5,
                                           recover_cached,unarmed_desired)) goto refuse_pair;
+                if(target->free_right.enabled &&
+                   !dg_free_wrist_step(&g_b.free_right,&target->free_right,
+                                       unarmed_desired,unarmed_desired)) goto refuse_pair;
                 hand_target=unarmed_desired;
             }
             have_hand = arm_hand_solve(hand_root_q, root_q, live_hand, q4, q5,
@@ -7107,7 +7201,7 @@ static void arm_ik_now(ULONGLONG arm, const DG_BRIDGE_ARM_TARGET *target)
        rests on - measured, not asserted. */
     if (g_b.pair_rot_ok) {
         ULONGLONG pw = 0, pe = 0;
-        if (resolve_player(NULL, &pw, NULL) == DG_RESOLVE_OK)
+        if (resolve_motion_player(NULL, &pw, NULL) == DG_RESOLVE_OK)
             pe = region_end(pw);
         if (pw && pe && pw + 0x84 <= pe) {
             short now_vy = *(volatile short *)(ULONG_PTR)(pw + 0x82);
@@ -7856,6 +7950,9 @@ void dg_bridge_arm_seam_now(const DG_BRIDGE_ARM_TARGET *target)
     /* All three are exclusive by design. The measurement, IK and fixed bend
        write MOTION_CONTROL.adjust; whichever path is selected first releases
        ownership left by the previous one before it writes. */
+    if (reload_native_animation()) {
+        arm_map_forget();arm_bend_release();left_arm_release();return;
+    }
     if (InterlockedCompareExchange(&g_b.adj_probe, 0, 0)) {
         arm_map_forget();
         arm_bend_release();
@@ -8063,6 +8160,7 @@ int dg_bridge_turn_probe_take(DG_TURN_PROBE_SAMPLE *out)
 
 void dg_bridge_stats(DG_BRIDGE_STATS *out)
 {
+    coolant_trace_flush();
     memset(out, 0, sizeof(*out));
     out->ticks = g_b.c_ticks;
     out->fps_requested = g_b.c_requested;
@@ -11390,6 +11488,8 @@ static int t_hand_tick_writer_is_fail_closed(void)
 
     shift[0] = 11;
     *(LONG *)(player.b + 0xB90) = DG_WEAPON_MIC;
+    if (resolve_motion_player(NULL,NULL,NULL) != DG_RESOLVE_OK ||
+        resolve_player(NULL,NULL,NULL) != DG_RESOLVE_MIC) bad++;
     n = g_b.c_arm_hand_tick_mic;
     hand_drive_write();
     if (shift[0] != 11 || g_b.c_arm_hand_tick_mic != n + 1) bad++;
@@ -17625,15 +17725,76 @@ static int t_camera_gate_now(void)
 #include "dg_hand_pose_test.inl"
 #include "dg_interact_bridge_test.inl"
 
+#include "dg_native_hud_fixture.h"
+static int t_native_hud_relocation(void) {
+    const unsigned char *data[]={hud_fixture_life,hud_fixture_frame,hud_fixture_coolant};
+    size_t lengths[]={sizeof hud_fixture_life,sizeof hud_fixture_frame,sizeof hud_fixture_coolant};
+    size_t offsets[]={0x5769da-0x576730,0x11e083-0x11df40,0x51f9b1-0x51f880};
+    unsigned char *code;DG_DETOUR detour;const char *why;int i,bad=0;
+    for(i=0;i<3;i++) {
+        code=VirtualAlloc(NULL,4096,MEM_RESERVE|MEM_COMMIT,PAGE_EXECUTE_READWRITE);
+        if(!code){bad++;continue;}
+        memcpy(code,data[i],lengths[i]);
+        if(!dg_detour_install_ex(&detour,code+offsets[i],native_hud_life,code,code+lengths[i],&why,1)) {
+            printf("  FAIL native hook %d relocation: %s\n",i,why);bad++;
+        } else {
+            dg_detour_remove(&detour);
+            if(memcmp(code,data[i],lengths[i]))bad++;
+        }
+        VirtualFree(code,0,MEM_RELEASE);
+    }
+    printf("  %s native HUD/coolant: all three retail seams install and restore\n",bad?"FAIL":"ok");
+    return bad;
+}
+static int t_coolant_pad_alignment(void) {
+    __declspec(align(8)) unsigned words[4]={0,0,0x80,0};
+    uint64_t p=(uint64_t)(ULONG_PTR)&words[1];int bad=0;
+    if((p&7)!=4 || coolant_pad_status(p)!=0x80)bad++;
+    if(coolant_pad_status(0)!=0xffffffffu || coolant_pad_status(p+1)!=0xffffffffu)bad++;
+    printf("  %s coolant pad: real four-byte alignment readable; null/misaligned rejected\n",bad?"FAIL":"ok");
+    return bad;
+}
+static int t_native_hud_selective(void) {
+    unsigned char gauge[0x60]={0},work[0x790]={0},sprites[5][0x40]={0};
+    uint64_t regs[16]={0};unsigned prim=0x22;int i,bad=0;
+    LONG armed=g_b.armed,late=g_b.s_late_unsafe,menu=g_b.script_menu_only,requested=g_native_hud_requested;
+    int fps=g_b.fps.state,live=g_native_hud_live;
+    g_b.armed=1;g_b.s_late_unsafe=0;g_b.script_menu_only=0;g_b.fps.state=DG_FPS_ACTIVE;
+    g_native_hud_requested=g_native_hud_live=1;
+    *(uint64_t *)(gauge+0x38)=(uint64_t)(ULONG_PTR)&prim;regs[11]=(uint64_t)(ULONG_PTR)gauge;
+    native_hud_life(regs+16);if(prim!=0x122)bad++;
+    prim=0x22;*(short *)(gauge+0x24)=1;native_hud_life(regs+16);if(prim!=0x22)bad++;
+    *(short *)(gauge+0x24)=0;
+    for(i=0;i<5;i++){*(unsigned *)(sprites[i]+0x30)=0x42;*(uint64_t *)(work+0x768+i*8)=(uint64_t)(ULONG_PTR)sprites[i];}
+    regs[11]=(uint64_t)(ULONG_PTR)work;native_hud_frame(regs+16);
+    for(i=0;i<5;i++)if(*(unsigned *)(sprites[i]+0x30)!=(i?0x8042:0x42))bad++;
+    for(i=0;i<5;i++) {
+        prim=0x22;regs[11]=(uint64_t)(ULONG_PTR)gauge;
+        g_native_hud_requested=i!=0;g_b.armed=i!=1;g_b.s_late_unsafe=i==2;
+        g_b.script_menu_only=i==3;g_b.fps.state=i==4?0:DG_FPS_ACTIVE;
+        native_hud_life(regs+16);if(prim!=0x22)bad++;
+        *(unsigned *)(sprites[1]+0x30)=0x42;regs[11]=(uint64_t)(ULONG_PTR)work;
+        native_hud_frame(regs+16);if(*(unsigned *)(sprites[1]+0x30)!=0x42)bad++;
+    }
+    g_b.armed=armed;g_b.s_late_unsafe=late;g_b.script_menu_only=menu;g_b.fps.state=fps;
+    g_native_hud_requested=requested;g_native_hud_live=live;
+    printf("  %s native HUD: LIFE only, exactly four frame sprites, inactive gates\n",bad?"FAIL":"ok");
+    return bad;
+}
+
 int dg_bridge_self_test(void)
 {
     int bad = 0;
+    bad += t_native_hud_relocation();
+    bad += t_native_hud_selective();
+    bad += t_coolant_pad_alignment();
     bad += t_twohand_latch();
     bad += t_interact_native_writer();
     bad += t_interact_codec_direct();
     bad += t_left_seam();
     bad += t_unarmed_right();
     bad += t_hand_pose_mirror();
+    bad += t_hand_pose_mirror_heading();
     bad += t_camera_pair_telemetry();
     bad += t_cutscene_reaches_the_safety_gate();
     bad += t_adjust_frame();

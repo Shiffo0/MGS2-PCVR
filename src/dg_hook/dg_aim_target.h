@@ -16,4 +16,7 @@ int dg_aim_target_build(const double camera_world[3][3],
                         const double view_raw[4], const double aim_raw[4],
                         double hand_world[4]);
 
+/* Post-compose the retail Blade0->Blade1 axis onto the controller AIM ray. */
+int dg_aim_target_blade(double hand_world[4]);
+
 #endif

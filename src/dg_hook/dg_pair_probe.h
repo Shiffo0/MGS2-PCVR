@@ -69,6 +69,8 @@ static int pp_signature(ULONG64 base) {
             !memcmp((void *)(base+0xDB30ull),consumer,sizeof consumer);
     } __except(EXCEPTION_EXECUTE_HANDLER) { return 0; }
 }
+static int cq_mode,cq_used,cq_pending,cp_mode;
+static void cp_prepare(void);
 static void pp_begin(ULONG64 base, const char *marker, const char *output,
                      void (*log)(const char *,...)) {
     FILE *f=NULL;
@@ -81,10 +83,12 @@ static void pp_begin(ULONG64 base, const char *marker, const char *output,
     n=fread(text,1,sizeof(text)-1,f);
     if (ferror(f) || !feof(f) || n==sizeof(text)-1 || strlen(text)!=n) text[0]=0;
     fclose(f);
-    pp_return_mode=!strcmp(text,"observe_return");pp_pending_tid=0;
+    cp_mode=!strcmp(text,"observe_payload");cp_prepare();
+    cq_mode=cp_mode||!strcmp(text,"observe_nodes");cq_used=0;cq_pending=-1;
+    pp_return_mode=cq_mode||!strcmp(text,"observe_return");pp_pending_tid=0;
     if(pp_return_mode)strcpy_s(text,sizeof text,"observe");
     if (!pp_marker(text)) {
-        log("  pair probe: refused marker; exact value observe or observe_return required\r\n");
+        log("  pair probe: refused marker; exact value observe, observe_return, observe_nodes or observe_payload required\r\n");
         return;
     }
     if (!pp_signature(base)) {
@@ -159,6 +163,7 @@ static int pp_native(PP_ROW *r) {
         return 1;
     } __except(EXCEPTION_EXECUTE_HANDLER) { return 0; }
 }
+#include "dg_command_census.inl"
 /* Called from phase_context AFTER the existing render-link event. The
  * host owns the execution trap; this observer must not consume/change it. */
 static void pp_shared_event(unsigned bit,const CONTEXT *c) {
@@ -190,6 +195,8 @@ static void pp_return_arm(CONTEXT *c) {
     }
     pp_pending_rsp=c->Rsp+8;pp_pending_which=(unsigned)c->Rcx;
     c->Dr3=target;
+    if(cq_mode) {PP_ROW r;memset(&r,0,sizeof r);r.which=pp_pending_which;
+        if(pp_native(&r))cq_entry(&r);else pp_fail("census_native_entry");}
 }
 static int pp_return_context(CONTEXT *c) {
     PP_ROW row;
@@ -198,7 +205,7 @@ static int pp_return_context(CONTEXT *c) {
     if(c->Rsp!=pp_pending_rsp)pp_fail("consumer_return_stack_mismatch");
     else if(pp_status==PP_RECORDING) {
         memset(&row,0,sizeof row);row.event=PP_CONSUMER_OUT;row.which=pp_pending_which;
-        if(pp_native(&row))pp_store(&row);else pp_fail("return_native_state_mismatch");
+        if(pp_native(&row)){cq_return(&row);pp_store(&row);}else pp_fail("return_native_state_mismatch");
     }
     c->Dr3=pp_base+0xdb30;c->Dr6&=~8ull;c->EFlags|=0x10000;
     InterlockedExchange(&pp_pending_tid,0);
@@ -237,6 +244,7 @@ static void pp_flush(int finish,void (*log)(const char *,...)) {
     QueryPerformanceFrequency(&frequency);
     fprintf(f,"# observation_only=1 capture_kind=%s status=%ld reason=%s qpc_hz=%lld base=0x%llx simulation_id=UNKNOWN\n",
         pp_return_mode?"shared_consumer_returns":"shared_entries",pp_status,pp_failure?pp_failure:"none",frequency.QuadPart,pp_base);
+    cq_dump(f);
     fprintf(f,"sequence,qpc,thread,event,present,stage,which,phase,channel,target,table,start,end,cursor,head,tail\n");
     for(i=0;i<pp_count;++i) {
         PP_ROW *r=&pp_rows[i];

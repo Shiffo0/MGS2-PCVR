@@ -21,6 +21,7 @@ static const rn_slice weapon_slice[]={
     {9,0x03800401,"C4"},
     {10,0x02122103,"CHAFF.G"},
     {11,0x02122103,"STUN.G"},
+    {12,0x00008062,"D.MIC"},
     {13,0x00428000,"HF.BLADE"},
     {14,0x00008062,"COOLANT"},
     {15,0x0834581e,"AKS-74U"},

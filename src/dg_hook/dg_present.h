@@ -18,5 +18,7 @@ int dg_present_get_device(ID3D11Device **dev, IDXGISwapChain **sc);
 /* The callback runs on the game's Present thread, before the chained Present. */
 void dg_present_set_callback(void (*on_present)(IDXGISwapChain *sc));
 void dg_present_stats(long *presents, long *errors);
+/* Worker-only marker polling; exactly one opt-in attempt per DLL lifetime. */
+void dg_present_poll_state_probe(const char *marker);
 
 #endif

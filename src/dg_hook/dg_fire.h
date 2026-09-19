@@ -23,6 +23,8 @@
 
 /* WeaponSet.type bits, read live from work->wp_set->type rather than kept in a
    table here - the game already carries that table and ours could drift. */
+/* Coolant uses held status in JetSpray, not the pistol release contract. */
+#define DG_FIRE_WP_COOLANT      0x00008062u
 #define DG_FIRE_WP_PRESSURE     0x0080u
 #define DG_FIRE_WP_CONSECUTIVE  0x0010u
 

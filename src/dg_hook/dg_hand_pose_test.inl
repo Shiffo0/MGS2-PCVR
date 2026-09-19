@@ -1,3 +1,78 @@
+/* The rest must not depend on the body heading at the moment it is captured.
+   One fixed physical left hand (local rotations given heading-free), captured
+   under the live frame at several headings: the stored rest, read back
+   heading-free, is always the plain y,z mirror of those local rotations. */
+static int t_hand_pose_mirror_heading(void)
+{
+    static unsigned char blob[DG_OBJS_ARRAY+55*0x180],actor[0x240],player[0xD40],mc[0x70];
+    static float adjust[55*4];
+    static const short headings[6]={0,512,1024,1539,-700,2047};
+    void *saved=malloc(sizeof g_b);
+    DG_LEFT_STATE saved_left=g_left;
+    ULONGLONG arm=(ULONGLONG)(ULONG_PTR)(actor+0x60);
+    DG_BRIDGE_ARM_TARGET t;
+    int h,j,bad=0;double worst=0;
+#define HH_CHECK(x) do{if(!(x)){bad++;printf("FAIL hand pose heading %d: %s\n",__LINE__,#x);}}while(0)
+    if(!saved)return 1;
+    memcpy(saved,&g_b,sizeof g_b);
+    for(h=0;h<6;h++) {
+        DG_ADJ_FRAME frame=ADJ_FRAME_LEGACY;
+        double left[18][4],local_free[17][4],wrist_free[4],fore[4],q[4],world[4],identity[4]={0,0,0,1};
+        memset(&g_b,0,sizeof g_b);memset(&g_hand_pose,0,sizeof g_hand_pose);memset(&g_hand_pose_rest,0,sizeof g_hand_pose_rest);
+        memset(&g_left,0,sizeof g_left);memset(blob,0,sizeof blob);memset(actor,0,sizeof actor);
+        memset(player,0,sizeof player);memset(mc,0,sizeof mc);memset(adjust,0,sizeof adjust);
+        *(ULONGLONG *)(actor+0x60)=(ULONGLONG)(ULONG_PTR)blob;
+        *(ULONGLONG *)(actor+0x68)=(ULONGLONG)(ULONG_PTR)mc;
+        *(ULONGLONG *)(actor+0x228)=(ULONGLONG)(ULONG_PTR)(player+0xCF4);
+        *(ULONGLONG *)(player+0xBA8)=arm;*(LONG *)(player+0xBB0)=6;
+        *(LONG *)(mc+0x14)=55;*(ULONGLONG *)(mc+0x48)=(ULONGLONG)(ULONG_PTR)adjust;
+        for(j=0;j<55;j++){float *m=(float *)(blob+DG_OBJS_ARRAY+j*0x180);m[0]=m[5]=m[10]=m[15]=1;adjust[j*4+3]=1;}
+        for(j=0;j<17;j++){int p=hand_pose_parents[j];g_b.skel_parents[21+j]=p;g_b.skel_parents[38+j]=p==6?10:p+17;}
+        g_b.a.gm_player_arm_body=(ULONGLONG)(ULONG_PTR)&arm;
+        g_b.skel_stride=0x180;g_b.skel_parents_read=55;g_b.ik_active=1;g_left.active=1;
+        g_b.adjust_frame=1;*(short *)(player+0x82)=headings[h];
+        frame.live=1;frame.valid=arm_frame_yaw(headings[h],frame.q);HH_CHECK(frame.valid);
+        memset(&t,0,sizeof t);t.left_enabled=t.left_valid=t.write=1;t.stream_id=1;t.pair_id=1;
+        /* the same physical hand at every heading: forearm, wrist and finger locals are heading-free */
+        th_axis(0.3,0.9,0.2,25,fore);th_axis(0.5,0.2,0.8,40,wrist_free);
+        HH_CHECK(world_quat_to_adjust(&frame,fore,fore));
+        HH_CHECK(world_quat_to_adjust(&frame,wrist_free,q));dg_ik_quat_mul(fore,q,left[0]);
+        for(j=0;j<17;j++) {
+            int p=hand_pose_parents[j]==6?0:hand_pose_parents[j]-20;
+            th_axis(1,0.3,-0.2,-18-j*3,local_free[j]);
+            HH_CHECK(world_quat_to_adjust(&frame,local_free[j],q));
+            dg_ik_quat_mul(left[p],q,left[j+1]);
+        }
+        HH_CHECK(adjust_quat_to_world(&frame,fore,world));th_write_basis((float *)(blob+DG_OBJS_ARRAY+9*0x180),world);
+        for(j=0;j<18;j++) {
+            HH_CHECK(adjust_quat_to_world(&frame,left[j],world));
+            th_write_basis((float *)(blob+DG_OBJS_ARRAY+(j?37+j:10)*0x180),world);
+            th_write_basis((float *)(blob+DG_OBJS_ARRAY+(j?20+j:6)*0x180),identity);
+        }
+        g_b.c_ticks=1;hand_pose_now(arm,&t);
+        HH_CHECK(g_hand_pose.active && g_hand_pose_rest.valid);
+        for(j=0;j<17;j++) {
+            double want[4],got[4],a;
+            memcpy(want,local_free[j],sizeof want);want[1]=-want[1];want[2]=-want[2];
+            HH_CHECK(adjust_quat_to_world(&g_hand_pose_rest.frame,g_hand_pose_rest.local[j],got));
+            a=th_angle_between(got,want);if(a>worst)worst=a;
+            HH_CHECK(a<0.05);
+        }
+        {
+            double want[4],got[4],a;
+            memcpy(want,wrist_free,sizeof want);want[1]=-want[1];want[2]=-want[2];
+            HH_CHECK(adjust_quat_to_world(&g_hand_pose_rest.frame,g_hand_pose_rest.wrist,got));
+            a=th_angle_between(got,want);if(a>worst)worst=a;
+            HH_CHECK(a<0.05);
+        }
+        hand_pose_release();
+    }
+    memset(&g_hand_pose_rest,0,sizeof g_hand_pose_rest);memset(&g_hand_pose,0,sizeof g_hand_pose);
+    memcpy(&g_b,saved,sizeof g_b);free(saved);g_left=saved_left;
+    printf("  %s hand pose mirror: rest captured at 6 body headings is the same heading-free mirror (worst %.4f deg)\n",bad?"FAIL":"ok",worst);
+#undef HH_CHECK
+    return bad!=0;
+}
 static int t_hand_pose_mirror(void)
 {
     static unsigned char blob[DG_OBJS_ARRAY+55*0x180],actor[0x240],player[0xD40],mc[0x70];

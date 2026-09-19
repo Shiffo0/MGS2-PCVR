@@ -90,9 +90,32 @@ typedef struct {
        per frame, so it tunes live. Both clamped to 0.5..10 by the reader. */
     double theater_dist;        /* eye to screen centre; default 2.0 */
     double theater_width;       /* physical quad width; default 2.0 */
+    int life_disabled;
+    int grip_debug; /* read-only M9 hit-test visualization */       /* vr_life=off; default wrist + event LIFE */
     int    scene_blur_fix;      /* hook-only: suppress scene-history alpha in VR */
     int    stereo_phase_fix;   /* hook-only: bind capture to consumed render buffer */
     int    stereo_eye_x_sign;  /* hook-only: -1 = right eye at camera -x (default, headset-proven 2026-09-09); +1 swaps */
+    /* hook-only, 2026-09-18: per-eye placement of the flat 2D sprites
+       (camera overlay, HUD). See dg_ui2d.inl. */
+    int    ui2d;               /* 0 = off (default), 1 = on */
+    int    ui2d_scale_mils;    /* 300..1000, default 750 */
+    int    ui2d_conv_e5;       /* convergence, 1e-5 NDC per eye, default 1200 */
+    int    ui2d_sign;          /* +1 default, -1 mirrors the shift */
+    int    ui2d_hold;          /* hook-only: camera-less frames 0 leave, 1 (default) hold, 2 opposite */
+    int    ui2d_vs_count;
+    int    feedback_skip;      /* hook-only: 1 (default) = do not forward the previous-frame feedback sprite in stereo */
+    int    draw_skip;          /* hook-only: 0 observe, 1 hold skipped Presents, 2 also label drawn frames by their rendered eye */
+    int    eye_truth;          /* hook-only: 0 observe, 1 drop mislabelled frames, 2 relabel them */
+    /* 2026-09-18: the Soliton radar on the inside of the left wrist (dg_radar.inl, dg_xr_radar.inl). */
+    int    radar_mode;         /* vr_radar_wrist: 0 off (default), 1 fixed (head-locked test quad), 2 wrist */
+    int    radar_hud;          /* hook-only, vr_radar_hud: 1 (default) = leave the HUD radar, 0 = withhold its composite draw while the wrist radar is up */
+    int    radar_space_local;  /* vr_radar_wrist_space: 0 (default) = the grip action space is the layer's space, 1 = pose composed in LOCAL */
+    double radar_size;         /* vr_radar_wrist_size: quad width in metres, default 0.09; height follows the texture */
+    double radar_offset[3];    /* vr_radar_wrist_offset: metres in the left grip space */
+    double radar_rot[3];       /* vr_radar_wrist_rot: degrees, q = Ry*Rx*Rz (dg_radar_gaze.h) */
+    double radar_gaze_deg;     /* vr_radar_gaze_deg: default 20; 0 = no gate, always shown */
+    double radar_gaze_pitch;   /* vr_radar_gaze_pitch: head forward pitched down by this, default 15 */
+    unsigned long long ui2d_vs[8];  /* sprite vertex-shader bytecode hashes */
 } DG_XR_CONFIG;
 
 /* ------------------------------------------------- S4d: stereo (plan 2.25) --
@@ -199,6 +222,14 @@ int  dg_xr_get_stereo(DG_XR_FRAME *out);
 
 int  dg_xr_adopt_device(void *d3d11_device);
 
+/* Wrist radar. Called by the draw hook with the ID3D11Texture2D the game's
+   radar composite draw samples, and with NO lock of the caller's held: it
+   takes the capture critical section itself and only then calls D3D, the
+   order the XR thread uses. -1 = not stored, 0 = stored, 1 = stored and the
+   wrist layer is up, so the HUD radar may be withheld. */
+int  dg_xr_radar_capture(void *d3d11_texture2d);
+void dg_xr_radar_stats(char *out, size_t n);
+
 /* Called from the game's Present. Copies the back buffer into that eye's store
    together with the pose and FOV the frame was ACTUALLY drawn with, so the
    image can still be submitted honestly once it is a frame old.
@@ -257,6 +288,8 @@ void dg_xr_screen_pose(const DG_XR_RAW_POSE *head, double dist_m,
 
 int  dg_xr_start(void (*log)(const char *fmt, ...));
 void dg_xr_stop(void);
+/* Optional manual M9 interaction feedback. */
+void dg_xr_m9_feedback(unsigned events);
 
 /* Live config update, called from the worker as the marker file is re-read. */
 void dg_xr_configure(const DG_XR_CONFIG *cfg);

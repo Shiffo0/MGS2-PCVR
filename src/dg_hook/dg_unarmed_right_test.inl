@@ -100,6 +100,18 @@ static int t_unarmed_right(void)
         th_write_basis((float *)(blob+DG_OBJS_ARRAY+10*STRIDE),left_world);
         UR_CHECK(unarmed_hand_rest(arm,identity,&native_frame,rest));
         UR_CHECK(th_angle_between(rest,expected_world)<0.05);
+        { /* Controller-owned left wrist must not change mirrored right rest. */
+            double twist[4],tracked[4];
+            th_axis(0,0,1,65,twist);
+            for(i=0;i<4;i++)g_left.wrist_cached[i]=(float)twist[i];
+            g_left.wrist_active=1;
+            dg_ik_quat_mul(twist,moved,tracked);
+            UR_CHECK(adjust_quat_to_world(&native_frame,tracked,left_world));
+            th_write_basis((float *)(blob+DG_OBJS_ARRAY+10*STRIDE),left_world);
+            UR_CHECK(unarmed_hand_rest(arm,identity,&native_frame,rest));
+            UR_CHECK(th_angle_between(rest,expected_world)<0.05);
+            g_left.wrist_active=0;
+        }
         adjust[32]=0.123f;
         UR_CHECK(!unarmed_hand_rest(arm,identity,&native_frame,rest));
         memcpy(adjust+32,saved_slots,sizeof saved_slots);*(ULONGLONG *)(mc+0x38)=saved_mask;
@@ -129,8 +141,26 @@ static int t_unarmed_right(void)
     t.hand_quat[2]=sin(0.2);t.hand_quat[3]=cos(0.2);
     for(i=0;i<5;i++) {tq_engine(blob,STRIDE,adjust,0,&rig,NULL);g_b.c_ticks++;t.pair_id++;arm_ik_now(arm,&t);}
     UR_CHECK(g_b.c_arm_hand_written>0);
+    {
+        double rest[4],first[4],want[4],result[4];DG_FREE_WRIST_STATE pure={0};
+        t.free_right.enabled=t.free_right.valid=1;t.free_right.world[3]=1;
+        for(i=0;i<5;i++){tq_engine(blob,STRIDE,adjust,0,&rig,NULL);g_b.c_ticks++;t.pair_id++;arm_ik_now(arm,&t);}
+        UR_CHECK(g_b.free_right.ready && g_b.hand_have_desired);
+        memcpy(rest,g_b.free_right.rest0,sizeof rest);memcpy(first,g_b.hand_desired,sizeof first);
+        UR_CHECK(dg_free_wrist_step(&pure,&t.free_right,rest,result));
+        th_axis(0,0,1,20,t.free_right.world);
+        for(i=0;i<5;i++){tq_engine(blob,STRIDE,adjust,0,&rig,NULL);g_b.c_ticks++;t.pair_id++;arm_ik_now(arm,&t);}
+        UR_CHECK(g_b.hand_have_desired && th_angle_between(first,g_b.hand_desired)>5);
+        dg_ik_quat_mul(t.free_right.world,rest,want);
+        UR_CHECK(dg_free_wrist_step(&pure,&t.free_right,rest,result));
+        UR_CHECK(th_angle_between(result,want)<.001);
+        t.free_right.valid=0;arm_ik_now(arm,&t);
+        UR_CHECK(!g_b.free_right.ready && !g_b.hand_command_valid);
+        t.free_right.valid=1;
+    }
     *(LONG *)(player+0xB90)=1;t.pair_id++;g_b.c_ticks++;arm_ik_now(arm,&t);
     UR_CHECK(!g_b.arm_map_unarmed && !g_b.ik_active); /* invalid pistol still refused */
+    UR_CHECK(!g_b.free_right.ready);
     *(LONG *)(player+0xB90)=0;
     for(i=0;i<10;i++) {tq_engine(blob,STRIDE,adjust,0,&rig,NULL);g_b.c_ticks++;t.pair_id++;arm_ik_now(arm,&t);}
     UR_CHECK(g_b.ik_active);
