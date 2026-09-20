@@ -73,9 +73,20 @@ static void tl_engine(unsigned char *blob,int stride,const float *adjust,
                            scratch+DG_OBJS_ARRAY+(4+j)*stride,64);
 }
 
+static void tl_m9_fingers(unsigned char *blob,int stride,double contact[3])
+{
+    static const int tips[5]={41,44,47,51,54};
+    float *hand=(float *)(blob+DG_OBJS_ARRAY+10*stride);int i,k;
+    for(k=0;k<3;k++)contact[k]=hand[12+k]+80*hand[8+k];
+    for(i=0;i<5;i++) {
+        float *tip=(float *)(blob+DG_OBJS_ARRAY+tips[i]*stride);
+        memcpy(tip,hand,64);
+        for(k=0;k<3;k++)tip[12+k]=(float)(contact[k]+(i-2)*10*hand[k]);
+    }
+}
 static int t_left_seam(void)
 {
-    enum { STRIDE=0x180, JOINTS=21 };
+    enum { STRIDE=0x180, JOINTS=55 };
     static unsigned char blob[DG_OBJS_ARRAY+JOINTS*STRIDE];
     static unsigned char actor[0x240],mc[0x70];
     static float adjust[55*4];
@@ -203,22 +214,40 @@ static int t_left_seam(void)
     tl_engine(blob,STRIDE,adjust,&rig,wrist);
     memcpy(expected,first,sizeof expected);expected[0]+=49.5;
     LH_CHECK(vdist3(wrist,expected)<.02);
-    /* Native left rest must not create a second camera-space offset when
-       both tracked hands use the already accepted right-hand calibration. */
+    /* Equipment must preserve an accepted independent left calibration,
+       even while the right arm recalibrates to a different native pose. */
     t.position.enabled=1;
     g_b.camera_position=g_left.camera_position;
     g_b.camera_position.virtual0[0]+=.025;
     t.pair_id++;g_b.c_ticks++;left_arm_now(arm,&t,1);
     tl_engine(blob,STRIDE,adjust,&rig,wrist);
-    expected[0]+=25;
     LH_CHECK(g_left.active && vdist3(wrist,expected)<.02);
-    /* None disables camera positioning only inside arm_ik_now's effective
-       right target. The left seam still receives the original enabled flag.
-       With no right camera calibration, it must keep its independent route
-       and keep the shared native arm object visible. */
+    /* Right-arm settling must not release the already calibrated left arm. */
+    g_b.camera_position.ready=0;
+    t.pair_id++;g_b.c_ticks++;left_arm_now(arm,&t,0);
+    tl_engine(blob,STRIDE,adjust,&rig,wrist);
+    LH_CHECK(g_left.active && vdist3(wrist,expected)<.02);
+    /* None retains its independent left mapping when the right camera
+       calibration is unavailable, including native crawl camera movement. */
     g_b.arm_map_unarmed=1;g_b.camera_position.ready=0;
     t.pair_id++;g_b.c_ticks++;left_arm_now(arm,&t,1);
     LH_CHECK(g_left.active);
+    {
+        DG_POSITION_STATE calibration=g_left.camera_position;
+        t.left_position.camera[13]=-40;
+        tl_engine(blob,STRIDE,adjust,&rig,wrist);
+        t.pair_id++;g_b.c_ticks++;left_arm_now(arm,&t,0);
+        tl_engine(blob,STRIDE,adjust,&rig,wrist);
+        expected[1]-=40;
+        LH_CHECK(g_left.active && vdist3(wrist,expected)<.02);
+        LH_CHECK(!memcmp(&calibration,&g_left.camera_position,sizeof calibration));
+        t.left_position.camera[13]=0;
+        tl_engine(blob,STRIDE,adjust,&rig,wrist);
+        t.pair_id++;g_b.c_ticks++;left_arm_now(arm,&t,0);
+        tl_engine(blob,STRIDE,adjust,&rig,wrist);
+        expected[1]+=40;
+        LH_CHECK(g_left.active && vdist3(wrist,expected)<.02);
+    }
     g_b.arm_map_unarmed=0;
     t.position.enabled=0;
     t.left_position.valid=0;left_arm_now(arm,&t,0);
@@ -329,26 +358,93 @@ static int t_left_seam(void)
         }
         printf("  left free wrist: 39 three-axis hierarchy poses, worst %.6f deg\n",worst);
     }
-    { /* Equip/None must establish a fresh reference even on the same rig. */
-        int mode;
+    { /* Equip/None transitions retain the calibrated free wrist.
+         Check rendered orientation, not just saved state. */
+        int mode,r,c;
+        DG_FREE_WRIST_STATE neutral=g_left.wrist;
+        double got[4],want[4],rows[3][3];
+        t.left_stream_id=t.stream_id;
         for(mode=0;mode<=1;mode++) {
+            t.stream_id++; /* actual weapon selection advances main pose stream */
             g_b.arm_map_unarmed=mode;
             th_axis(0,1,0,mode?35:-25,t.free_left.world);
             tl_engine(blob,STRIDE,adjust,&rig,wrist);g_b.c_ticks++;t.pair_id++;
             left_arm_now(arm,&t,0);
-            LH_CHECK(g_left.wrist_active && g_left.wrist_unarmed==mode);
-            LH_CHECK(th_angle_between(g_left.wrist.controller0,t.free_left.world)<.001);
+            LH_CHECK(g_left.wrist_active);
+            LH_CHECK(!memcmp(&g_left.wrist,&neutral,sizeof neutral));
+            tl_engine(blob,STRIDE,adjust,&rig,wrist);
+            for(r=0;r<3;r++)for(c=0;c<3;c++)rows[r][c]=
+                ((float *)(blob+DG_OBJS_ARRAY+10*STRIDE))[r*4+c];
+            LH_CHECK(dg_ik_basis_quat(rows,got));
+            LH_CHECK(dg_free_wrist_step(&neutral,&t.free_left,neutral.rest0,want));
+            LH_CHECK(th_angle_between(got,want)<.05);
         }
+    }
+    { /* Explicit physical recenter must still discard the accepted neutral. */
+        t.left_stream_id=t.stream_id+1;
+        tl_engine(blob,STRIDE,adjust,&rig,wrist);g_b.c_ticks++;t.pair_id++;
+        left_arm_now(arm,&t,0);
+        LH_CHECK(!g_left.active && !g_left.wrist.ready);
+        for(i=0;i<12;i++) {
+            tl_engine(blob,STRIDE,adjust,&rig,wrist);g_b.c_ticks++;t.pair_id++;
+            left_arm_now(arm,&t,0);
+        }
+        LH_CHECK(g_left.active && g_left.wrist.ready);
+        LH_CHECK(th_angle_between(g_left.wrist.controller0,t.free_left.world)<.001);
     }
     { /* Support mode relinquishes only wrist ownership, retaining position. */
         double identity[4]={0,0,0,1};DG_ADJ_FRAME frame=ADJ_FRAME_LEGACY;
         frame.live=1;frame.valid=arm_frame_yaw(0,frame.q);
         left_wrist_now((ULONGLONG)(ULONG_PTR)blob+DG_OBJS_ARRAY,STRIDE,
             (ULONGLONG)(ULONG_PTR)mc,(ULONGLONG)(ULONG_PTR)adjust,
-            &frame,&t,identity,identity,1,1);
+            &frame,&t,identity,identity,1,1,NULL);
         LH_CHECK(!g_left.wrist_active && g_left.active);
         for(i=0;i<3;i++) {tl_engine(blob,STRIDE,adjust,&rig,wrist);g_b.c_ticks++;t.pair_id++;left_arm_now(arm,&t,0);}
         LH_CHECK(g_left.wrist_active);
+    }
+    { /* Actual left seam -> independent engine hierarchy -> distal fingers.
+         The native input/grab tolerance must not persist as a visual gap. */
+        static const int parents[17]={10,38,39,40,38,42,43,38,45,46,38,48,49,50,48,52,53};
+        void *saved_m9=malloc(sizeof g_m9);LONG enabled=g_m9_enabled;
+        DG_FREE_WRIST_STATE neutral=g_left.wrist;
+        double contact[3],got[4],want[4],rows[3][3];int r,c;
+        LH_CHECK(saved_m9!=NULL);
+        if(saved_m9) {
+            memcpy(saved_m9,&g_m9,sizeof g_m9);memset(&g_m9,0,sizeof g_m9);
+            for(i=0;i<17;i++)g_b.skel_parents[38+i]=parents[i];
+            t.aim_weapon_id=1;g_b.arm_map_unarmed=0;
+            g_b.have_pred_wrist=g_b.hand_have_desired=1;
+            memset(g_b.hand_desired,0,sizeof g_b.hand_desired);g_b.hand_desired[3]=1;
+            tl_engine(blob,STRIDE,adjust,&rig,wrist);tl_m9_fingers(blob,STRIDE,contact);
+            for(k=0;k<3;k++)g_b.pred_wrist[k]=contact[k];g_b.pred_wrist[0]+=30;
+            g_m9_enabled=g_m9.active=g_m9.render=1;g_m9.state.source=t.stream_id;g_m9.out.attached=1;
+            g_m9.state.now_ms=GetTickCount64();g_b.c_ticks++;t.pair_id++;left_arm_now(arm,&t,1);
+            LH_CHECK(g_left.slide_contact.active && g_left.wrist_world_valid);
+            g_left.slide_contact.start_ms=GetTickCount64()-100;
+            for(i=0;i<4;i++) {
+                tl_engine(blob,STRIDE,adjust,&rig,wrist);tl_m9_fingers(blob,STRIDE,contact);
+                g_m9.state.now_ms=GetTickCount64();g_b.c_ticks++;t.pair_id++;left_arm_now(arm,&t,1);
+                tl_engine(blob,STRIDE,adjust,&rig,wrist);tl_m9_fingers(blob,STRIDE,contact);
+                LH_CHECK(g_left.wrist_world_valid && vdist3(contact,g_b.pred_wrist)<.05);
+            }
+            th_axis(0,1,0,30,g_b.hand_desired);
+            g_m9.state.now_ms=GetTickCount64();g_b.c_ticks++;t.pair_id++;left_arm_now(arm,&t,1);
+            tl_engine(blob,STRIDE,adjust,&rig,wrist);tl_m9_fingers(blob,STRIDE,contact);
+            for(r=0;r<3;r++)for(c=0;c<3;c++)rows[r][c]=((float *)(blob+DG_OBJS_ARRAY+10*STRIDE))[r*4+c];
+            LH_CHECK(dg_ik_basis_quat(rows,got));
+            dg_ik_quat_mul(g_b.hand_desired,g_left.slide_contact.wrist_relative,want);
+            LH_CHECK(th_angle_between(got,want)<.05 && vdist3(contact,g_b.pred_wrist)<.05);
+            LH_CHECK(!memcmp(&neutral,&g_left.wrist,sizeof neutral));
+            g_m9.out.attached=0;g_b.c_ticks++;t.pair_id++;left_arm_now(arm,&t,1);
+            LH_CHECK(g_left.slide_contact.releasing);
+            g_left.slide_contact.release_ms=GetTickCount64()-100;
+            tl_engine(blob,STRIDE,adjust,&rig,wrist);tl_m9_fingers(blob,STRIDE,contact);
+            g_b.c_ticks++;t.pair_id++;left_arm_now(arm,&t,1);
+            LH_CHECK(!g_left.slide_contact.active && !g_left.slide_contact.releasing);
+            LH_CHECK(!memcmp(&neutral,&g_left.wrist,sizeof neutral));
+            memcpy(&g_m9,saved_m9,sizeof g_m9);free(saved_m9);g_m9_enabled=enabled;
+            g_b.have_pred_wrist=g_b.hand_have_desired=0;
+        }
     }
     t.free_left.valid=0;left_arm_now(arm,&t,0); /* same pair revokes */
     LH_CHECK(!g_left.wrist_active && !g_left.wrist.ready && !(*(ULONGLONG *)(mc+0x38)&(1ULL<<10)));

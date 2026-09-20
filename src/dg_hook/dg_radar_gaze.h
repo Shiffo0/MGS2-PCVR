@@ -15,8 +15,8 @@
 
 typedef struct { double qx, qy, qz, qw, px, py, pz; } DG_RADAR_POSE;
 
-#define DG_RADAR_FACE_OPEN_DEG   50.0   /* quad normal vs quad->head, to open  */
-#define DG_RADAR_FACE_CLOSE_DEG  65.0   /* ... past this it closes             */
+#define DG_RADAR_FACE_OPEN_DEG   75.0   /* quad normal vs quad->head, to open  */
+#define DG_RADAR_FACE_CLOSE_DEG  85.0   /* ... past this it closes             */
 #define DG_RADAR_GAZE_CLOSE_ADD  10.0   /* closes at gaze_deg + this           */
 #define DG_RADAR_OPEN_HOLD_MS    120u
 #define DG_RADAR_CLOSE_HOLD_MS   250u

@@ -1,4 +1,5 @@
 /* CPU tests embedded in the shipping hook translation unit. */
+#include "dg_interact_adapter.inl"
 static int test_controls_producer(void) {
     DG_XR_FRAME frame;
     DG_BRIDGE_CONTROLS_FRAME out;
@@ -81,6 +82,16 @@ static int test_controls_producer(void) {
         CONTROL_CHECK(!out.move_available && !out.fire.valid && g_controls.ladder_move_claim);
     }
     frame.left_hand.squeeze_click=frame.right_hand.squeeze_click=0;
+    frame.left_hand.thumbstick_x=-1;
+    controls_route_frame(&frame,DG_CONTROLS_BEYOND,1,++now,0,&out);
+    CONTROL_CHECK(out.interact.valid && (out.interact.levels&DG_IA_PEEP_LEFT));
+    CONTROL_CHECK(!out.move_available && !out.fire.valid && g_controls.ladder_move_claim);
+    frame.left_hand.thumbstick_x=1;
+    controls_route_frame(&frame,DG_CONTROLS_BEYOND,1,++now,0,&out);
+    CONTROL_CHECK(out.interact.valid && (out.interact.levels&DG_IA_PEEP_RIGHT));
+    controls_route_frame(&frame,DG_CONTROLS_GAMEPLAY,1,++now,0,&out);
+    CONTROL_CHECK(g_controls.ladder_move_claim && out.move.x==0 && out.move.y==0);
+    frame.left_hand.thumbstick_x=0.5f;
     /* Test-only catalog: production has no catalog writer or selectable IDs. */
     for (h=0;h<2;h++) {
         int k;
@@ -449,7 +460,7 @@ static int test_controls_producer(void) {
     }
     /* A catalog retained from gameplay must not open on a ledge/in a locker.
      * Exercise both hands with fresh neutral and click samples. */
-    for (h=DG_CONTROLS_BEYOND;h<=DG_CONTROLS_LOCKER;h++) {
+    for (h=DG_CONTROLS_BEYOND;h<=DG_CONTROLS_DOWNED;h++) {
         int hand,phase;
         controls_init();
         g_controls.source=g_source;g_controls.stream=g_arm_pose_stream_id;
@@ -471,6 +482,49 @@ static int test_controls_producer(void) {
             CONTROL_CHECK(!g_controls.last_output.selection.intent && !out.move_available && !out.fire.valid);
         }
     }
+    /* Downed input still reaches interactions while walking/fire/radial stay
+       refused, even with a catalog retained from normal gameplay. */
+    frame.left_hand.thumbstick_click=frame.right_hand.thumbstick_click=0;
+    frame.right_hand.primary_button=1;
+    ++frame.left_hand.grip.sample_seq;++frame.right_hand.grip.sample_seq;
+    controls_route_frame(&frame,DG_CONTROLS_DOWNED,1,++now,1,&out);
+    CONTROL_CHECK(out.interact.valid && out.interact.special==DG_IA_DOWNED_CONTEXT &&
+        (out.interact.levels&DG_IA_ACTION) && !(out.interact.suppressed&DG_IA_ACTION));
+    CONTROL_CHECK(!out.move_available && !out.fire.valid && !g_controls.last_output.selection.intent);
+    frame.right_hand.primary_button=0;
+    {
+        DG_MOD_MENU saved_menu=g_mod_menu;
+        DG_INTERACT_ADAPTER adapter={0};
+        DG_INTERACT_NATIVE_INPUT native={0};
+        DG_INTERACT_NATIVE_OUTPUT pad;
+        int tick,recovered=0,progress=0,context;
+        memset(&g_mod_menu,0,sizeof g_mod_menu);
+        dg_mod_menu_step(&g_mod_menu,DG_MM_HOME,1,1,7,7);
+        CONTROL_CHECK(g_mod_menu.open && controls_menu_capture_allowed(DG_CONTROLS_GAMEPLAY));
+        /* Knocked down while Home was open and left stick remains held.
+           Raw menu rearm and radial axes stay claimed, but cannot steal
+           fresh face recovery input. This uses production routing+adapter. */
+        dg_mod_menu_step(&g_mod_menu,0,0,0,7,7);
+        frame.left_hand.thumbstick_x=.8f;
+        CONTROL_CHECK(!g_mod_menu.open && g_mod_menu.capture &&
+            !controls_menu_capture_allowed(DG_CONTROLS_DOWNED));
+        CONTROL_CHECK(g_controls.owner.axes!=0);
+        native.safe=1;native.player_identity=1;
+        for(tick=0;tick<80;tick++) {
+            frame.right_hand.primary_button=(tick%4)==1;
+            ++frame.left_hand.grip.sample_seq;++frame.right_hand.grip.sample_seq;
+            context=controls_menu_capture_allowed(DG_CONTROLS_DOWNED)?DG_CONTROLS_NONE:DG_CONTROLS_DOWNED;
+            controls_route_frame(&frame,context,1,++now,1,&out);
+            native.input=out.interact;native.tick=(uint64_t)tick+1;
+            ia_step(&adapter,&native,&pad);
+            progress++;if(pad.press&0xf0)progress+=4;
+            if(progress>60 && pad.press)recovered=1;
+            CONTROL_CHECK(!out.move_available && !out.fire.valid && !(pad.status&~0x10u));
+        }
+        CONTROL_CHECK(recovered && g_controls.owner.axes!=0 && g_mod_menu.capture);
+        frame.left_hand.thumbstick_x=0;frame.right_hand.primary_button=0;
+        g_mod_menu=saved_menu;
+    }
     /* Catalog toggle targets are actor-backed and eligibility checked. */
     {
         dg_radial_game_catalog n;
@@ -485,6 +539,41 @@ static int test_controls_producer(void) {
         n.eligible[0]=1;n.previous[1]=0;
         controls_catalog_build(&n,1);
         CONTROL_CHECK(g_controls.catalog.quick_id[0]==-1 && g_controls.catalog.quick_id[1]==-1);
+    }
+    {
+        LONG saved_third=g_move_third_live;
+        int mode;
+        /* Actual DOWNED -> standing producer transitions, in both camera
+           modes, without A/FPS-toggle input. Held/invalid sticks stay refused. */
+        for(mode=0;mode<3;mode++) {
+            int context=mode==0?DG_CONTROLS_GAMEPLAY:DG_CONTROLS_TURN_ONLY;
+            controls_init();memset(&frame,0,sizeof frame);
+            g_move_third_live=mode!=2;
+            frame.left_hand.grip.active=frame.right_hand.grip.active=1;
+            frame.left_hand.grip.tracked=frame.right_hand.grip.tracked=1;
+            frame.left_hand.grip.orientation_valid=frame.right_hand.grip.orientation_valid=1;
+            frame.left_hand.grip.sample_seq=frame.right_hand.grip.sample_seq=1;
+            frame.left_hand.thumbstick_y=.8f;
+            controls_route_frame(&frame,DG_CONTROLS_DOWNED,1,++now,0,&out);
+            CONTROL_CHECK(g_controls.ladder_move_claim && !out.move_available);
+            ++frame.left_hand.grip.sample_seq;++frame.right_hand.grip.sample_seq;
+            controls_route_frame(&frame,context,1,++now,0,&out);
+            CONTROL_CHECK(g_controls.ladder_move_claim && out.move.y==0);
+            frame.left_hand.thumbstick_y=0;frame.left_hand.grip.tracked=0;
+            ++frame.left_hand.grip.sample_seq;++frame.right_hand.grip.sample_seq;
+            controls_route_frame(&frame,context,1,++now,0,&out);
+            CONTROL_CHECK(g_controls.ladder_move_claim);
+            frame.left_hand.grip.tracked=1;
+            ++frame.left_hand.grip.sample_seq;++frame.right_hand.grip.sample_seq;
+            controls_route_frame(&frame,context,1,++now,0,&out);
+            CONTROL_CHECK(g_controls.ladder_move_claim==(mode==2));
+            frame.left_hand.thumbstick_y=.8f;
+            ++frame.left_hand.grip.sample_seq;++frame.right_hand.grip.sample_seq;
+            controls_route_frame(&frame,context,1,++now,0,&out);
+            CONTROL_CHECK(mode==2?!out.move_available:
+                (out.move_available && out.move.valid && out.move.y>.79));
+        }
+        g_move_third_live=saved_third;
     }
     input_turn_rate(0);
     g_fire_mode=saved_fire; g_move_mode=saved_move; g_turn_mode=saved_turn;

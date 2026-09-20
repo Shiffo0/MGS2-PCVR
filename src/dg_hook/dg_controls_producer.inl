@@ -36,6 +36,10 @@ static struct {
 } g_controls;
 
 static void controls_init(void) {
+    memset(&g_mod_menu,0,sizeof g_mod_menu);
+    InterlockedExchange(&g_mod_stereo_override,-1);
+    InterlockedExchange(&g_mod_input_capture,0);
+    dg_bridge_mod_menu_capture(0);
     memset(&g_controls,0,sizeof g_controls);
     dg_radial_owner_init(&g_controls.owner);
     g_controls.context=1;
@@ -147,6 +151,9 @@ static int controls_catalog_valid(int weapon_hand) {
 }
 static void controls_stop(void *user) {
     (void)user;
+    g_mod_menu.open=0;
+    InterlockedExchange(&g_mod_input_capture,0);
+    dg_bridge_mod_menu_capture(0);
     dg_bridge_radial_cancel();
     g_controls.navigate_hand=0;
     input_turn_rate(0.0);
@@ -168,7 +175,8 @@ static void controls_route_frame(const DG_XR_FRAME *frame, int allowed,
     unsigned age=0;
     int h, radial;
     int native_allowed=allowed==DG_CONTROLS_GAMEPLAY;
-    int special_allowed=allowed==DG_CONTROLS_LADDER || allowed==DG_CONTROLS_BEYOND || allowed==DG_CONTROLS_LOCKER;
+    int special_allowed=allowed==DG_CONTROLS_LADDER || allowed==DG_CONTROLS_BEYOND ||
+        allowed==DG_CONTROLS_LOCKER || allowed==DG_CONTROLS_DOWNED;
     int weapon_hand=(g_arm_track==ARM_TRACK_L_GRIP ||
                      g_arm_track==ARM_TRACK_L_AIM) ? 0 : 1;
     memset(out,0,sizeof *out);
@@ -377,7 +385,11 @@ static void controls_route_frame(const DG_XR_FRAME *frame, int allowed,
     if (g_controls.ladder_move_claim && frame) {
         const DG_XR_HAND_POSE *lp=&frame->left_hand.grip,*rp=&frame->right_hand.grip;
         double dz=(double)InterlockedCompareExchange(&g_turn_deadzone_mils_live,0,0)/1000.0;
-        if (native_allowed && lp->sample_seq>g_controls.ladder_claim_sample &&
+        /* Recovery releases the stick in either walking mode. Requiring FPS
+           here trapped third-person movement until A entered FPS again. */
+        if ((native_allowed || (allowed==DG_CONTROLS_TURN_ONLY &&
+             InterlockedCompareExchange(&g_move_third_live,0,0))) &&
+            lp->sample_seq>g_controls.ladder_claim_sample &&
             lp->sample_seq==rp->sample_seq && lp->active && rp->active &&
             lp->tracked && rp->tracked && lp->orientation_valid && rp->orientation_valid &&
             lp->pose_age_ms<=100 && rp->pose_age_ms<=100 && dz>=0 && dz<1 &&
@@ -399,27 +411,47 @@ static void controls_route_frame(const DG_XR_FRAME *frame, int allowed,
           InterlockedCompareExchange(&g_move_third_live,0,0)))
         out->move_available=0;
     controls_interact_from_frame(frame,allowed==DG_CONTROLS_RADIAL_ONLY ? DG_CONTROLS_NONE:allowed,
-        radial && (special_allowed ?
+        /* A retained radial axis claim cannot own downed face-button
+           recovery. Keep the axis claim for walking rearm after recovery. */
+        allowed!=DG_CONTROLS_DOWNED && radial && (special_allowed ?
             (g_controls.owner.axes || g_controls.owner.select.hand>=0) :
             (!owned.route_valid || owned.deny_new_fire)),weapon_hand,
         g_controls.context*16u+(unsigned)weapon_hand*8u+
         (unsigned)(special_allowed?allowed:0),&out->interact);
 }
+static int controls_menu_capture_allowed(int allowed) {
+    /* Raw capture is retained for rearming, but its gameplay ownership ends
+       immediately on knockdown, codec or another native special context. */
+    return g_mod_menu.capture && allowed==DG_CONTROLS_GAMEPLAY;
+}
 static void controls_provide(void *user, int allowed, int fire_idle,
     uint64_t now_ms, uint64_t tick, DG_BRIDGE_CONTROLS_FRAME *out) {
     DG_XR_FRAME frame;
     dg_radial_view view;
+    dg_radial_view mod_view;
     uint64_t generation=dg_xr_radial_generation();
     int have=input_get_frame(&frame)&1;
+    int menu_capture;
     dg_radial_game_catalog native;
     int weapon_hand=(g_arm_track==ARM_TRACK_L_GRIP || g_arm_track==ARM_TRACK_L_AIM) ? 0:1;
     (void)user; (void)tick;
+    mod_menu_input(allowed,have?&frame:NULL,generation,&mod_view);
+    menu_capture=controls_menu_capture_allowed(allowed);
+    if(menu_capture) {
+        allowed=DG_CONTROLS_NONE;
+        dg_bridge_radial_cancel();
+        input_turn_rate(0);
+    }
     memset(&g_controls.catalog,0,sizeof g_controls.catalog);
     if ((allowed==DG_CONTROLS_GAMEPLAY || allowed==DG_CONTROLS_TURN_ONLY ||
          allowed==DG_CONTROLS_RADIAL_ONLY) && dg_bridge_radial_catalog(now_ms,&native)) {
         controls_catalog_build(&native,weapon_hand);
     }
     controls_route_frame(have ? &frame : NULL,allowed,fire_idle,now_ms,generation,out);
+    if(menu_capture) {
+        out->fire.valid=0;out->move_available=0;
+        out->m9.allowed=0;out->blade.allowed=0;
+    }
     dg_xr_m9_feedback(dg_bridge_m9_events());
     memset(&view,0,sizeof view);
     if ((allowed==DG_CONTROLS_GAMEPLAY || allowed==DG_CONTROLS_TURN_ONLY ||
@@ -433,10 +465,11 @@ static void controls_provide(void *user, int allowed, int fire_idle,
         view.selected=g_controls.owner.select.hand<0 ? -1:g_controls.owner.select.selected;
     }
     InterlockedExchange(&g_action_route_denied,
-        g_controls.owner.axes || g_controls.owner.select.hand>=0 ||
+        menu_capture || g_controls.owner.axes || g_controls.owner.select.hand>=0 ||
         (out->interact.suppressed&DG_IA_ACTION));
     InterlockedExchange(&g_camera_route_denied,
-        (g_controls.owner.triggers&2u) || g_controls.owner.select.hand>=0);
+        menu_capture || (g_controls.owner.triggers&2u) || g_controls.owner.select.hand>=0);
+    if(mod_view.visible)view=mod_view;
     /* Cancellation is a lock-free fence, not a best-effort hidden mailbox
      * publication. A contended backend must never retain the old visible UI. */
     if (g_controls.overlay_open && !view.visible) {
@@ -446,7 +479,7 @@ static void controls_provide(void *user, int allowed, int fire_idle,
     }
     g_controls.overlay_open=view.visible;
     if (generation)
-        dg_xr_radial_publish(&view,generation,g_controls.context,g_controls.catalog.version);
+        dg_xr_radial_publish(&view,generation,g_controls.context,mod_view.visible?1:g_controls.catalog.version);
 }
 
 /* Only the explicitly bridge-off session uses the historical camera seam.

@@ -1,8 +1,8 @@
 {
-  "version": "v0.2.0-beta.2",
-  "baseline_build": "E4267D3E",
-  "binary_sha256": "E4267D3E8D856B1563229444020B718C49FA4596B0934A7403E33C9BAD1FEAD7",
-  "source_include_files": 158,
+  "version": "v0.3.0-beta.3",
+  "baseline_build": "5AC0F9C8",
+  "binary_sha256": "5AC0F9C8A55DC5EDDFC7588884FB99F196B21868768A0E427E5B442D7DA963CE",
+  "source_include_files": 177,
   "source_changes": [
     "Documentation comments curated",
     "Three optional diagnostic paths made relative"

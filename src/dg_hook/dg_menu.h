@@ -15,6 +15,10 @@
 #define DG_MENU_PAD_Y       0x00000080u  /* PS2 square   */
 #define DG_MENU_PAD_SEL     0x00000100u
 #define DG_MENU_PAD_STA     0x00000800u
+#define DG_MENU_PAD_TITLE_ENTER 0x00100000u /* retail title direct.press bit 20 */
+/* Bounded XR mailbox; confirmation intent is kept separate from mapped bits. */
+#define DG_MENU_ALLOW_XR 3
+#define DG_MENU_ALLOW_XR_CONFIRM 4
 
 /* Everything this module is ever allowed to name. A configured button outside
    this set is refused rather than written: the point of the marker is to pick
@@ -105,5 +109,14 @@ typedef struct {
 } DG_MENU_STATE;
 
 void dg_menu_step(DG_MENU_STATE *state, const DG_MENU_IN *in, DG_MENU_OUT *out);
+/* Retail title requires ENTER; Continue accepts PAD_OK or START. */
+static unsigned int dg_menu_native_confirm(unsigned int status,int confirm,int pregame,int gameover)
+{
+    status &= DG_MENU_PAD_ALLOWED;
+    if (!confirm) return status;
+    if (gameover) return (status & ~DG_MENU_PAD_SEL) | DG_MENU_PAD_STA;
+    if (pregame) return status | DG_MENU_PAD_TITLE_ENTER;
+    return status;
+}
 
 #endif

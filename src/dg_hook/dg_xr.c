@@ -20,6 +20,7 @@ void dg_xr_m9_feedback(unsigned events) {(void)events;}
 /* Shared bridge types only. Physical button events go through the bounded
    context mailbox above; this runtime thread does not enqueue FPS directly. */
 #include "dg_bridge.h"
+#include "dg_model_arm.h"
 
 #ifndef DG_XR_NO_RUNTIME
 #include <d3d11.h>
@@ -912,6 +913,7 @@ typedef struct {
     DG_PROJ_FOV fov;
     int valid;
     uint64_t capture_id, capture_ms;
+    DG_MODEL_ARM model_arm;
 } DG_CAPTURE_STORE;
 static DG_CAPTURE_STORE g_store[2];
 static ID3D11Multithread *g_mt;
@@ -1673,6 +1675,7 @@ void dg_xr_capture_measured(void *swapchain, int eye, const DG_XR_RAW_POSE *raw,
         store->valid = 1;
         store->capture_id = (uint64_t)InterlockedIncrement64(&g_cd_count[CD_STORED]);
         store->capture_ms = GetTickCount64();
+        dg_bridge_model_arm_snapshot(&store->model_arm);
         {
             DG_XR_CAPTURE_OBSERVER observer=(DG_XR_CAPTURE_OBSERVER)
                 InterlockedCompareExchangePointer(&g_capture_observer,NULL,NULL);
@@ -2269,6 +2272,7 @@ typedef struct {
     uint32_t width, height;
     DG_XR_RAW_POSE raw[2];
     DG_PROJ_FOV fov[2];
+    DG_MODEL_ARM model_arm[2];
 } DG_SUBMIT_CAPTURE;
 
 static void submit_capture_lock(void *unused) {
@@ -2318,6 +2322,7 @@ static void submit_capture_copy(void *ctx, int eye) {
     DG_SUBMIT_CAPTURE *cap = (DG_SUBMIT_CAPTURE *)ctx;
     cap->raw[eye] = g_store[eye].raw;
     cap->fov[eye] = g_store[eye].fov;
+    cap->model_arm[eye] = g_store[eye].model_arm;
     g_ctx->lpVtbl->CopyResource(g_ctx,
         (ID3D11Resource *)g_images[eye][cap->idx[eye]].texture,
         (ID3D11Resource *)g_store[eye].texture);
@@ -2391,6 +2396,7 @@ static const char *xr_frame_loop(void) {
         XrCompositionLayerQuad grip_quads[6];
         XrView view[2];
         DG_XR_FRAME published;
+        DG_MODEL_ARM submitted_arm={0};
         int published_status;
         int views_valid = 0;
         int screen_on, radar_ready;
@@ -2607,6 +2613,9 @@ static const char *xr_frame_loop(void) {
                               quad.size.width, quad.size.height,
                               g_screen_anchor_dist);
                 } else if (copied) {
+                    submitted_arm=capture.model_arm[0];
+                    if(stereo && capture.model_arm[1].ms>submitted_arm.ms)
+                        submitted_arm=capture.model_arm[1];
                     for (i = 0; i < 2; i++) {
                         DG_PROJ_FOV fov;
                         memset(&pview[i], 0, sizeof(pview[i]));
@@ -2649,7 +2658,7 @@ static const char *xr_frame_loop(void) {
            slotted in between the projection and the radial menu afterwards -
            the menu's own readiness test must still find the projection alone,
            so its capacity stays 2 and the radar takes the third slot. */
-        radar_ready = radar_prepare(&fei,&radar_quad,fs.shouldRender,screen_on,&published,published_status,GetTickCount64());
+        radar_ready = radar_prepare(&fei,&radar_quad,fs.shouldRender,screen_on,&published,published_status,GetTickCount64(),&submitted_arm);
         radial_append(&fei,layers,2,&radial_quad,fs.shouldRender,screen_on,GetTickCount64());
         if (radar_ready) radar_insert(&fei,layers,4,&radar_quad);
         health_append(&fei,layers,4,&health_quad,fs.shouldRender,screen_on,views_valid,

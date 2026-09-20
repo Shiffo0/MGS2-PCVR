@@ -101,7 +101,52 @@ static int t_interact_native_writer(void) {
     g_controls_frame.interact.ladder=0;g_controls_frame.interact.special=DG_CONTROLS_BEYOND;
     ++g_controls_frame.interact.epoch;IA_PASS(0,0);IA_PASS(DG_IA_PEEP_LEFT|DG_IA_PEEP_RIGHT,0);
     IA_CHECK(RD32(pad+4)==3 && padmem.b[4+0x18+10]==255 && padmem.b[4+0x18+11]==255);
+    IA_PASS(0,0);IA_PASS(DG_IA_PEEP_LEFT,0);
+    IA_CHECK(RD32(pad+4)==1 && padmem.b[4+0x18+10]==255);
+    player_status=0x1001; /* Hanging while in native WATCH. */
+    IA_CHECK(dg_bridge_controller_special_now()==DG_CONTROLS_BEYOND);
+    {
+        LONG active=1,moving=1;
+        double heading=-10;
+        g_b.a.gbp_active=(ULONGLONG)(ULONG_PTR)&active;
+        g_b.a.pl_subject_move=(ULONGLONG)(ULONG_PTR)&moving;
+        *(short *)(player.b+0x82)=1024;
+        IA_CHECK(dg_bridge_hanging_heading_now(&heading) && fabs(heading-1.5707963267948966)<1e-9);
+        moving=0;IA_CHECK(!dg_bridge_hanging_heading_now(&heading));moving=1;
+        active=0;IA_CHECK(!dg_bridge_hanging_heading_now(&heading));active=1;
+        player_status|=0x2000;IA_CHECK(!dg_bridge_hanging_heading_now(&heading));player_status=0x1000;
+        game_status=0x10000000;IA_CHECK(!dg_bridge_hanging_heading_now(&heading));game_status=0;
+        player_slot=0;IA_CHECK(!dg_bridge_hanging_heading_now(&heading));
+        player_slot=(ULONGLONG)(ULONG_PTR)player.b;
+        g_b.a.gbp_active=saved_anchors.gbp_active;
+        g_b.a.pl_subject_move=saved_anchors.pl_subject_move;
+    }
+    IA_PASS(0,0);IA_PASS(DG_IA_PEEP_RIGHT,0);
+    IA_CHECK(RD32(pad+4)==2 && padmem.b[4+0x18+11]==255);
+    IA_PASS(0,0);IA_PASS(DG_IA_ACTION,0);IA_CHECK(RD32(pad+4)==0x10);
+    IA_PASS(0,0);IA_PASS(DG_IA_POSTURE,0);IA_CHECK(RD32(pad+4)==0x40);
     player_status|=0x2000;IA_PASS(DG_IA_PEEP_LEFT,0);IA_CHECK(!RD32(pad+4));
+    {
+        int watch;
+        for(watch=0;watch<2;watch++) {
+            player_status=0x400u|(unsigned)watch;
+            IA_CHECK(dg_bridge_controller_special_now()==DG_CONTROLS_DOWNED);
+            IA_CHECK(!dg_bridge_controller_gameplay_now());
+            g_controls_special=DG_CONTROLS_DOWNED;
+            g_controls_frame.interact.special=DG_CONTROLS_DOWNED;
+            ++g_controls_frame.interact.epoch;
+            IA_PASS(DG_IA_ACTION,0);IA_CHECK(!RD32(pad+8));
+            IA_PASS(0,0);IA_PASS(DG_IA_ACTION,0);
+            IA_CHECK(RD32(pad+4)==0x10 && RD32(pad+8)==0x10);
+            IA_PASS(0,0);IA_PASS(DG_IA_POSTURE,0);IA_CHECK(RD32(pad+8)==0x40);
+            IA_PASS(0,0);IA_PASS(DG_IA_CAPTURE|DG_IA_MELEE|DG_IA_CODEC,0);
+            IA_CHECK(!RD32(pad+4) && !RD32(pad+8) && !g_interact_codec_pending);
+            player_status|=0x2000;IA_PASS(DG_IA_ACTION,0);IA_CHECK(!RD32(pad+8));
+            player_status=0x400|0x8000;IA_CHECK(!dg_bridge_controller_special_now());
+            player_status=0x400;menu_status=0x400;IA_CHECK(!dg_bridge_controller_special_now());menu_status=0;
+            game_status=0x10000000;IA_CHECK(!dg_bridge_controller_special_now());game_status=0;
+        }
+    }
     player_status=0x81;IA_CHECK(dg_bridge_controller_special_now()==DG_CONTROLS_LOCKER);
     g_controls_special=DG_CONTROLS_LOCKER;g_controls_frame.interact.special=DG_CONTROLS_LOCKER;
     ++g_controls_frame.interact.epoch;IA_PASS(0,0);IA_PASS(DG_IA_MELEE,0);IA_CHECK(RD32(pad+8)==0x20);

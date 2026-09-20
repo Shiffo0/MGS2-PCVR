@@ -79,6 +79,32 @@ static int t_unarmed_right(void)
     }
     UR_CHECK(vdist3(before,after)>20); /* controller translation moves real solver output */
     UR_CHECK(!g_b.camera_position.ready); /* no invalid pistol position calibration */
+    { /* During native crawl camera/arm-root interpolation, a stationary
+         grip must follow camera height without recapturing the neutral. */
+        double standing[3],lowered[3];
+        t.position.valid=1;t.position.units=1000;
+        t.position.camera[0]=t.position.camera[5]=
+            t.position.camera[10]=t.position.camera[15]=1;
+        t.position.view[3]=1;
+        for(i=0;i<8;i++) {
+            tq_engine(blob,STRIDE,adjust,0,&rig,NULL);
+            g_b.c_ticks++;t.pair_id++;arm_ik_now(arm,&t);
+        }
+        tq_engine(blob,STRIDE,adjust,0,&rig,standing);
+        UR_CHECK(g_b.ik_active && g_b.camera_position.ready);
+        t.position.camera[13]=-40;
+        tq_engine(blob,STRIDE,adjust,0,&rig,NULL);
+        g_b.c_ticks++;t.pair_id++;arm_ik_now(arm,&t);
+        tq_engine(blob,STRIDE,adjust,0,&rig,lowered);
+        UR_CHECK(g_b.ik_active && fabs((lowered[1]-standing[1])+40)<.05);
+        UR_CHECK(fabs(lowered[0]-standing[0])<.05 && fabs(lowered[2]-standing[2])<.05);
+        t.position.camera[13]=0;
+        tq_engine(blob,STRIDE,adjust,0,&rig,NULL);
+        g_b.c_ticks++;t.pair_id++;arm_ik_now(arm,&t);
+        tq_engine(blob,STRIDE,adjust,0,&rig,lowered);
+        UR_CHECK(vdist3(standing,lowered)<.05);
+        t.position.valid=0;
+    }
     t.unarmed_hand_write=1;
     for(i=0;i<5;i++) {tq_engine(blob,STRIDE,adjust,0,&rig,NULL);g_b.c_ticks++;t.pair_id++;arm_ik_now(arm,&t);}
     UR_CHECK(g_b.hand_have_rest);

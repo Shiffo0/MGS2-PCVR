@@ -983,7 +983,8 @@ static void dg_detour_remove(DG_DETOUR *d)
 #define DG_THEATER_GAME_MASK ( \
       0x08000000UL   \
     | 0x10000000UL /* STATE_DEMO - polygon demos AND PSS/MPEG movies      */ \
-    | 0x40000000UL /* STATE_PAD_DEMO - attract replay, player only watches */ )
+    | 0x40000000UL /* STATE_PAD_DEMO - attract replay, player only watches */ \
+    | 0x80004000UL /* STATE_GAMEOVER / STATE_DISP_GAMEOVER - flat Continue UI */ )
 #define DG_THEATER_MENU_MASK ( \
       0x00000400UL /* MENU_RADIO_ON - the only bit that sees a codec */ )
 
@@ -2119,6 +2120,9 @@ static volatile LONG g_controls_fire_retired;
 static void stinger_resolve(const LiveImage *im);
 static void stinger_install(void);
 static void stinger_stop(void);
+static void unarmed_prone_resolve(const LiveImage *im);
+static void unarmed_prone_install(int enabled);
+static void unarmed_prone_stop(void);
 static void blade_resolve(const LiveImage *im);
 static void blade_install(int requested);
 static void blade_stop(void);
@@ -2129,6 +2133,7 @@ static void coolant_resolve(const LiveImage *im);
 static void coolant_install(void);
 static void coolant_stop(void);
 #include "dg_pistol_reload.inl"
+#include "dg_mod_menu_bridge.inl"
 static void controls_clear_legacy(void) {
     InterlockedExchange(&g_b.fire_valid,0);
     InterlockedExchange(&g_b.move_valid,0);
@@ -2168,7 +2173,7 @@ void dg_bridge_controls_context_all(int allowed,int special,int radial) {
     AcquireSRWLockExclusive(&g_controls_lock);
     g_controls_allowed=allowed ? 1 : 0;
     g_controls_special=(special==DG_CONTROLS_LADDER || special==DG_CONTROLS_BEYOND ||
-        special==DG_CONTROLS_LOCKER)?special:0;
+        special==DG_CONTROLS_LOCKER || special==DG_CONTROLS_DOWNED)?special:0;
     g_controls_ladder=g_controls_special==DG_CONTROLS_LADDER;
     g_controls_radial_allowed=radial ? 1 : 0;
     if (!allowed) InterlockedExchange64(&g_interact_codec_pending,0);
@@ -2227,6 +2232,7 @@ static DG_BRIDGE_MENU g_script_menu_pending;
 static ULONGLONG g_script_menu_deadline;
 static volatile LONG g_script_menu_cancel;
 static LONG g_script_menu_pending_epoch;
+static int g_xr_menu_context;
 static void script_menu_clear(int nonblocking)
 {
     InterlockedIncrement(&g_script_menu_cancel);
@@ -2487,6 +2493,7 @@ static void bridge_tick_body(void)
     g_b.tick_status = status;
     move_tick(in.safe_gameplay);
     interact_tick(in.safe_gameplay);
+    mod_menu_pad(in.safe_gameplay);
     controls_end();
     InterlockedExchange(&g_b.s_status_lo, (LONG)(DWORD)status);
     InterlockedExchange(&g_b.s_status_hi, (LONG)(DWORD)(status >> 32));
@@ -2570,7 +2577,7 @@ static void bridge_tick_body(void)
             if (!(flag & 0x1000)) InterlockedIncrement(&g_b.c_arm_visible);
         }
 
-        if (objs && InterlockedCompareExchange(&g_b.arm_show, 0, 0) &&
+        if (objs && !(status&0x1000ULL) && InterlockedCompareExchange(&g_b.arm_show, 0, 0) &&
             g_b.fps.state == DG_FPS_ACTIVE) {
             ULONGLONG evm = *(volatile ULONGLONG *)(ULONG_PTR)(arm + 0x30);
             WR32(objs + 0x58, (LONG)(flag & ~0x1000));
@@ -2701,6 +2708,7 @@ static int sane_menu_mode(const DG_BRIDGE_CONFIG *cfg)
     return mode >= 0 && mode <= 2 ? mode : 0;
 }
 
+static void hanging_visibility_reset(void);
 int dg_bridge_start(void (*log)(const char *fmt, ...),
                     const DG_BRIDGE_CONFIG *cfg)
 {
@@ -2713,6 +2721,7 @@ int dg_bridge_start(void (*log)(const char *fmt, ...),
         return 1;
     }
     g_b.log = log;
+    hanging_visibility_reset();
     memset(&g_interact_stats,0,sizeof g_interact_stats);
     script_menu_clear(0);
     InterlockedExchange(&g_b.c_pad_seam_entries, 0);
@@ -2796,6 +2805,7 @@ int dg_bridge_start(void (*log)(const char *fmt, ...),
     m9_resolve(&image);
     blade_resolve(&image);
     stinger_resolve(&image);
+    unarmed_prone_resolve(&image);
     native_hud_resolve(&image);
     coolant_resolve(&image);
     reload_resolve(&image);
@@ -2843,11 +2853,15 @@ int dg_bridge_start(void (*log)(const char *fmt, ...),
 
     native_hud_install();
     coolant_install();
-    m9_install(cfg && cfg->m9_slide);
+    m9_install(1);
     stinger_install();
+    unarmed_prone_install(cfg && cfg->unarmed_prone_enabled);
     blade_install(cfg && cfg->hf_blade);
-    reload_install(cfg && cfg->pistol_reload);
+    reload_install(1);
+    g_reload.enabled=cfg && cfg->pistol_reload;
     InterlockedExchange(&g_m9_enabled,cfg && cfg->m9_slide ? 1:0);
+    dg_bridge_mod_menu_request((cfg && cfg->pistol_reload?2u:0u)|(cfg && cfg->m9_slide?4u:0u));
+    dg_bridge_mod_menu_capture(0);g_mod_capture_ticks=0;
     radial_game_install();
     /* The pad detour, installed only when its OPTIONAL anchor resolved and
        only when it has somewhere to write. Its failure is logged and
@@ -3250,12 +3264,14 @@ void dg_bridge_stop(void)
     dg_bridge_controls_context(0);
     script_menu_clear(0);
     if (!InterlockedCompareExchange(&g_b.started, 0, 0)) {
+        hanging_visibility_reset();
         InterlockedExchange(&g_b.script_menu_only, 0);
         return;
     }
     InterlockedExchange(&g_b.armed, 0);
     /* Let any in-flight tick finish before the values move under it. */
     Sleep(50);
+    hanging_visibility_reset();
     /* The HUD's release debt, paid on the same once-only path as the borrowed
        pad values: clear exactly the four bits this session held, and only if
        it ever held them. From here on the tick seam no longer runs, so this
@@ -3278,6 +3294,7 @@ void dg_bridge_stop(void)
     dg_bridge_action_register(NULL);
     reload_stop();
     stinger_stop();
+    unarmed_prone_stop();
     native_hud_stop();
     coolant_stop();
     m9_stop();
@@ -4696,6 +4713,8 @@ static int resolve_motion_player(ULONGLONG *a, ULONGLONG *p, LONG *w)
 
 #include "dg_blade_bridge.inl"
 #include "dg_stinger_bridge.inl"
+#include "dg_unarmed_prone.inl"
+#include "dg_model_arm_bridge.inl"
 
 static void interact_tick(int safe_gameplay)
 {
@@ -5659,6 +5678,14 @@ static void fire_tick(int safe_gameplay)
         m9_block=m9_fire_gate(safe_gameplay,in.can_write && wmask && pidx>=0 && pidx<12,pwork,weapon,in.physical_down,&in);
     if(mode==DG_FIRE_MODE_ON)
         reload_block = reload_tick(safe_gameplay,in.can_write && wmask && pidx>=0 && pidx<12,pwork,weapon,in.physical_down,&in);
+    if(g_mod_capture) {
+        if(g_mod_capture_ticks<100)g_mod_capture_ticks++;
+        in.input_ok=0;
+    } else g_mod_capture_ticks=0;
+    mod_features_tick(safe_gameplay,(g_mod_capture_ticks>=DG_FIRE_ABORT_TICKS ||
+        (g_b.fire.state==DG_FIRE_IDLE && !g_reload.driving)) &&
+        g_controls_frame.m9.valid && !in.physical_down && in.value<0.1 &&
+        !g_controls_frame.m9.trigger && !g_controls_frame.m9.grip);
     dg_fire_step(&g_b.fire, &in, &out);
     if(reload_block)out.flags&=~DG_FIRE_F_RELEASED;
 
@@ -6047,7 +6074,10 @@ static void arm_ik_now(ULONGLONG arm, const DG_BRIDGE_ARM_TARGET *target)
         if (unarmed && target->absolute_aim) {
             effective_target = *target;
             effective_target.absolute_aim = 0;
-            effective_target.position.enabled = 0;
+            /* None lacks weapon AIM ownership, but its raw tracked grip
+               still needs the live camera height through crouch/crawl. */
+            effective_target.position.enabled = target->position.enabled &&
+                                                 target->position.valid;
             effective_target.hand_write = target->unarmed_hand_write;
             target = &effective_target;
         }
@@ -7541,8 +7571,43 @@ static void theater_seam_judge(unsigned int game, unsigned int menu,
 /* U2: one frame of synthesized front-end input, published for the pad
    detour to consume. Same shape as dg_bridge_move_now: the caller decides,
    this only carries, and a NULL withdraws. */
+int dg_bridge_menu_gameover_now(void)
+{
+    unsigned game,menu;
+    if(!g_b.armed || !g_b.a.gm_game_status || !g_b.a.gm_game_status_scn ||
+       !g_b.a.gm_menu_status || !g_b.a.gm_menu_status_scn)return 0;
+    game=(unsigned)RD32(g_b.a.gm_game_status)|(unsigned)RD32(g_b.a.gm_game_status_scn);
+    menu=(unsigned)RD32(g_b.a.gm_menu_status)|(unsigned)RD32(g_b.a.gm_menu_status_scn);
+    return (game&0x80004000u)!=0 && !(game&(DG_GAME_UNSAFE_MASK&~0x80004000u)) &&
+           !(menu&DG_MENU_UNSAFE_MASK);
+}
+static int xr_menu_context_now(void)
+{
+    unsigned game;
+    if(!g_b.a.gm_game_status || !g_b.a.gm_game_status_scn)return 0;
+    game=(unsigned)RD32(g_b.a.gm_game_status)|(unsigned)RD32(g_b.a.gm_game_status_scn);
+    if(game&0x80004000u)return dg_bridge_menu_gameover_now()?2:0;
+    /* The animated title backdrop sets CUT_IN|PAUSE_DISABLE (0x240).
+       Only the independently validated no-arm frontend may ignore CUT_IN;
+       gameplay and demos retain their original safety masks. */
+    if(dg_bridge_menu_context_ready() && !(game&(DG_GAME_UNSAFE_MASK&~0x40u)))return 1;
+    return 3; /* Other existing flat menus retain their configured buttons. */
+}
 void dg_bridge_menu_now(const DG_BRIDGE_MENU *cmd)
 {
+    if (!g_b.script_menu_only && cmd && cmd->status &&
+        (cmd->allow==DG_MENU_ALLOW_XR || cmd->allow==DG_MENU_ALLOW_XR_CONFIRM)) {
+        LONG epoch=InterlockedCompareExchange(&g_script_menu_cancel,0,0);
+        AcquireSRWLockExclusive(&g_script_menu_lock);
+        g_script_menu_pending=*cmd;
+        g_script_menu_pending.status &= DG_MENU_PAD_ALLOWED;
+        g_script_menu_pending.clear &= DG_MENU_PAD_ALLOWED;
+        g_script_menu_deadline=GetTickCount64()+100;
+        g_script_menu_pending_epoch=epoch;
+        g_xr_menu_context=xr_menu_context_now();
+        ReleaseSRWLockExclusive(&g_script_menu_lock);
+        return;
+    }
     if (InterlockedCompareExchange(&g_b.script_menu_only, 0, 0)) {
         LONG epoch = InterlockedCompareExchange(&g_script_menu_cancel, 0, 0);
         if (!cmd || !cmd->allow || !cmd->status || !dg_bridge_menu_context_ready()) {
@@ -7559,6 +7624,7 @@ void dg_bridge_menu_now(const DG_BRIDGE_MENU *cmd)
         return;
     }
     if (!cmd || !cmd->allow || !cmd->status) {
+        script_menu_clear(0);
         InterlockedExchange(&g_b.menu_status, 0);
         InterlockedExchange(&g_b.menu_clear, 0);
         InterlockedExchange(&g_b.menu_allow, 0);
@@ -7634,6 +7700,7 @@ static void pad_seam_tick(void)
         return;
     }
     if (!InterlockedCompareExchange(&g_b.armed, 0, 0)) return;
+    mod_menu_start_pad();
 
     /* The OpenXR thread queues a rising edge; this seam is immediately after
        the game's direct UpdatePad call.  Writing here gives full-screen
@@ -7704,6 +7771,46 @@ static void pad_seam_tick(void)
     }
 
     if (InterlockedCompareExchange(&g_b.menu_mode, 0, 0) < 2) return;
+    /* XR presents can outnumber pad updates. Retain a real edge through valid
+       neutral Presents, then consume once here, bounded by wall time even
+       while the player tick is paused on title/game-over screens. */
+    if (!g_b.script_menu_only && TryAcquireSRWLockExclusive(&g_script_menu_lock)) {
+        int xr_pending=g_script_menu_pending.allow==DG_MENU_ALLOW_XR ||
+                       g_script_menu_pending.allow==DG_MENU_ALLOW_XR_CONFIRM;
+        if (xr_pending) {
+            unsigned menu=0,game=0,send=0;int context_ok=0;
+            if(g_b.a.gm_menu_status && g_b.a.gm_menu_status_scn &&
+               g_b.a.gm_game_status && g_b.a.gm_game_status_scn) {
+                menu=(unsigned)RD32(g_b.a.gm_menu_status)|(unsigned)RD32(g_b.a.gm_menu_status_scn);
+                game=(unsigned)RD32(g_b.a.gm_game_status)|(unsigned)RD32(g_b.a.gm_game_status_scn);
+                context_ok=!(menu&DG_UI_PANEL_MENU_MASK);
+            }
+            if(GetTickCount64()>=g_script_menu_deadline)
+                InterlockedIncrement(&g_b.c_menu_stale);
+            else if(!context_ok || !g_xr_menu_context || g_xr_menu_context!=xr_menu_context_now() ||
+                    g_script_menu_pending_epoch!=g_script_menu_cancel)
+                InterlockedIncrement(&g_b.c_menu_gate);
+            else if(g_b.a.gv_pad_data_direct) {
+                volatile DWORD *st=(volatile DWORD *)(ULONG_PTR)(g_b.a.gv_pad_data_direct+DG_GV_PAD_STATUS_OFFSET);
+                volatile DWORD *pr=(volatile DWORD *)(ULONG_PTR)(g_b.a.gv_pad_data_direct+DG_GV_PAD_PRESS_OFFSET);
+                send=dg_menu_native_confirm(g_script_menu_pending.status,
+                    g_script_menu_pending.allow==DG_MENU_ALLOW_XR_CONFIRM,
+                    g_xr_menu_context==1,
+                    (game&0x80004000u)!=0);
+                /* Never create native START+SELECT, including a physical SELECT. */
+                if((send&DG_PAD_START) && ((*st|*pr)&DG_MENU_PAD_SEL))send=0;
+                if(send) {
+                    *st=(*st & ~g_script_menu_pending.clear)|send;
+                    *pr=(*pr & ~g_script_menu_pending.clear)|send;
+                    InterlockedIncrement(&g_b.c_menu_writes);
+                }
+            }
+            memset(&g_script_menu_pending,0,sizeof g_script_menu_pending);
+            g_script_menu_deadline=0;
+        }
+        ReleaseSRWLockExclusive(&g_script_menu_lock);
+        if(xr_pending)return;
+    }
     if (InterlockedCompareExchange(&g_b.script_menu_only, 0, 0)) {
         /* Never block the game's pad thread. The pending tuple is consumed
            under one lock, including the write, so a newer publication cannot
@@ -7834,6 +7941,7 @@ void dg_bridge_screen_seam_now(void)
     theater_seam_judge(game, menu, player);
 }
 
+#include "dg_hanging_visibility.inl"
 void dg_bridge_arm_seam_now(const DG_BRIDGE_ARM_TARGET *target)
 {
     ULONGLONG arm, objs, evm;
@@ -7845,6 +7953,9 @@ void dg_bridge_arm_seam_now(const DG_BRIDGE_ARM_TARGET *target)
        appends only after this function returns. */
     memset(&g_b.rec_pair, 0, sizeof g_b.rec_pair);
     g_b.rec_pair.rest_drift_deg = -1.0f;
+    /* Hanging is intentionally unsafe for IK, but must hide the undriven
+       subjective rest-pose mesh before that unsafe gate returns. */
+    hanging_visibility_now();
 
     if (!InterlockedCompareExchange(&g_b.armed, 0, 0)) {
         left_arm_release(); return;
@@ -8040,9 +8151,13 @@ int dg_bridge_controller_special_now(void)
     case 0x10000ULL: return (player&1ULL)?0:DG_CONTROLS_LADDER;
     case 0x1000ULL: return DG_CONTROLS_BEYOND;
     case 0x80ULL: return DG_CONTROLS_LOCKER;
+    /* Down requires a fresh face press to enter Rise. Preserve every other
+       unsafe bit, including DEAD/FORCE; WATCH permits either camera mode. */
+    case 0x400ULL: return DG_CONTROLS_DOWNED;
     default:return 0;
     }
 }
+#include "dg_hanging_heading.inl"
 int dg_bridge_controller_ladder_now(void)
 {
     return dg_bridge_controller_special_now()==DG_CONTROLS_LADDER;
@@ -8142,6 +8257,30 @@ long dg_bridge_fps_entry_generation(void)
 { return InterlockedCompareExchange(&g_b.c_explicit_entries,0,0); }
 int dg_bridge_fps_recenter_ready(unsigned long long arm)
 { return arm && (ULONGLONG)InterlockedCompareExchange64(&g_b.calibration_ready_arm,0,0)==arm; }
+
+int dg_bridge_view_calibration_now(long *generation, unsigned long long *identity)
+{
+    DG_CAMERA_GATE camera;
+    uint64_t player;
+    int weapon;
+    *generation=0; *identity=0;
+    if (!g_b.armed || g_b.owner || g_b.script_menu_only ||
+        dg_bridge_theater_verdict() || !dg_bridge_controller_gameplay_now()) return 0;
+    if (dg_bridge_camera_gate_now(&camera) &&
+        dg_bridge_fps_recenter_ready(camera.arm_body)) {
+        *generation=dg_bridge_fps_entry_generation();
+        *identity=camera.arm_body;
+        return 1;
+    }
+    /* An unsafe suspension/cutscene is not a request for top-down view.
+       Wait for native OFF as well as the completed user-requested leave. */
+    if (g_b.fps.state!=DG_FPS_OFF || g_b.fps.desired || !g_b.c_left ||
+        !g_b.a.gbp_active || region_end(g_b.a.gbp_active)<g_b.a.gbp_active+4 ||
+        RD32(g_b.a.gbp_active) || !interact_player_now(&player,&weapon)) return 0;
+    *generation=InterlockedCompareExchange(&g_b.c_left,0,0);
+    *identity=player;
+    return 2;
+}
 
 #include "dg_camera_bob.inl"
 
@@ -16293,8 +16432,8 @@ static int t_theater_mask_is_narrower_than_the_gate(void)
 
     if (dg_theater_masked(0x20000000u, 0)) bad++;       /* STATE_PRG_DEMO */
     if (dg_theater_masked(0x00000040u, 0)) bad++;       /* STATE_CUT_IN */
-    if (dg_theater_masked(0x80000000u, 0)) bad++;       /* STATE_GAMEOVER */
-    if (dg_theater_masked(0x00004000u, 0)) bad++;       /* DISP_GAMEOVER */
+    if (!dg_theater_masked(0x80000000u, 0)) bad++;      /* STATE_GAMEOVER */
+    if (!dg_theater_masked(0x00004000u, 0)) bad++;      /* DISP_GAMEOVER */
     if (dg_theater_masked(0x00000001u, 0)) bad++;       /* STATE_DETECT */
 
     /* The theater mask is a strict SUBSET of the safety gate: everything the
@@ -16330,7 +16469,7 @@ static int t_theater_mask_is_narrower_than_the_gate(void)
     if (DG_HUD_HIDE_BITS & 0x00000010u) bad++;          /* MENU_CAPTION_OFF */
 
     printf("  %-6s theater mask: the three demo bits and the codec bit trip "
-           "it, boss immortality (PRG_DEMO), per-frame cut-ins and gameover "
+           "it, gameover also enters; boss immortality (PRG_DEMO) and cut-ins "
            "do not, it stays a subset of the safety gate, and the panel "
            "judgment is the two full menus and nothing else\n",
            bad ? "FAIL" : "ok");
@@ -16548,6 +16687,21 @@ static int t_theater_verdict_is_one_publication_fail_closed(void)
         for (i = 0; i < DG_UI_EXIT_SAMPLES; i++) dg_bridge_screen_seam_now();
         if (dg_bridge_theater_verdict() != 0) bad++;
     }
+
+    /* Game Over must use that same Present publication even when the game
+       camera continues handing off frames. Continue remains independently
+       admitted, then gameplay resumes after the normal exit hysteresis. */
+    game = (LONG)0x80000000u;
+    for (i=0;i<DG_THEATER_ENTER_SAMPLES;i++) dg_bridge_screen_seam_now();
+    if(dg_bridge_theater_verdict()!=DG_THEATER_V_DEMO)bad++;
+    if(!dg_bridge_menu_gameover_now())bad++;
+    game=0;game_scn=0x00004000;
+    dg_bridge_screen_seam_now();
+    if(dg_bridge_theater_verdict()!=DG_THEATER_V_DEMO)bad++;
+    if(!dg_bridge_menu_gameover_now())bad++;
+    game_scn=0;
+    for(i=0;i<DG_THEATER_EXIT_SAMPLES;i++)dg_bridge_screen_seam_now();
+    if(dg_bridge_theater_verdict()!=0 || dg_bridge_menu_gameover_now())bad++;
 
     InterlockedExchange(&g_b.armed, 0);
     g_b.a = saved_anchors;
@@ -17518,6 +17672,7 @@ static int t_adjust_frame_seam(void)
 }
 
 #include "dg_camera_bob_test.inl"
+#include "dg_view_calibration_test.inl"
 
 static int t_camera_gate_now(void)
 {
@@ -17721,9 +17876,12 @@ static int t_camera_gate_now(void)
 
 #include "dg_position_bridge_test.h"
 #include "dg_left_arm_test.inl"
+#include "dg_left_model_test.inl"
 #include "dg_unarmed_right_test.inl"
+#include "dg_unarmed_prone_test.inl"
 #include "dg_hand_pose_test.inl"
 #include "dg_interact_bridge_test.inl"
+#include "dg_hanging_visibility_test.inl"
 
 #include "dg_native_hud_fixture.h"
 static int t_native_hud_relocation(void) {
@@ -17782,6 +17940,7 @@ static int t_native_hud_selective(void) {
     return bad;
 }
 
+#include "dg_menu_recovery_test.inl"
 int dg_bridge_self_test(void)
 {
     int bad = 0;
@@ -17790,9 +17949,12 @@ int dg_bridge_self_test(void)
     bad += t_coolant_pad_alignment();
     bad += t_twohand_latch();
     bad += t_interact_native_writer();
+    bad += t_hanging_visibility();
     bad += t_interact_codec_direct();
     bad += t_left_seam();
+    bad += t_left_model_transport();
     bad += t_unarmed_right();
+    bad += t_unarmed_prone_tables();
     bad += t_hand_pose_mirror();
     bad += t_hand_pose_mirror_heading();
     bad += t_camera_pair_telemetry();
@@ -17822,6 +17984,7 @@ int dg_bridge_self_test(void)
     bad += t_body_follow_speaks_for_the_aim();
     bad += t_press_order_keeps_presses_in_order();
     bad += t_menu_seam_writes_only_where_it_may();
+    bad += t_xr_menu_recovery();
     bad += t_script_menu_context_guard();
     bad += t_the_trigger_only_ever_adds();
     bad += t_the_kick_is_ours_and_comes_home();
@@ -17853,6 +18016,7 @@ int dg_bridge_self_test(void)
     bad += t_arm_body_needs_two_agreeing_anchors();
     bad += t_camera_gate_now();
     bad += t_camera_standing_height();
+    bad += t_view_calibration_gate();
     return bad;
 }
 

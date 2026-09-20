@@ -41,6 +41,8 @@ void dg_ui2d_stats(char *out,size_t n);
 /* Wrist radar, draw-hook half (dg_radar.inl). on = recognise the radar composite draw and hand its
    texture to dg_xr_radar_capture; hud_off = also do not forward it while the wrist layer is up. */
 void dg_radar_configure(int on,int hud_off);
+/* Native HUD radar is suppressed only in a confirmed first-person view. */
+void dg_radar_view(int first_person);
 void dg_radar_stats(char *out,size_t n);
 #ifdef __cplusplus
 }

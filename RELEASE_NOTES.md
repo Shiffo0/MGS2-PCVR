@@ -1,29 +1,31 @@
-# Public Beta 2 — build E4267D3E
+# Public Beta 3 — build 5AC0F9C8
 
-Updated mod binary, buildable source baseline and configuration for MGS2 Master Collection on Windows/OpenXR.
+Updated playable package and matching buildable mod source for MGS2 Master Collection on Windows/OpenXR, using AER (Alternate Eye Rendering).
 
-## Included
+## Changes
 
-- Combined HF Blade, Stinger, native HUD and coolant work.
-- Stinger first-person model/controller integration and aim-directed lock-on adapter; native animation, ammunition, damage and missile guidance are retained.
-- M9 slide handling, pistol reload and wrist-radar/UI settings from the selected baseline.
-- Full shipping implementation and local include dependencies in src/, including the C++ draw-trial module.
-- Matching release settings in config/; recording, diagnostic probes and capture requests are disabled for the package.
+- Radar and LIFE follow the rendered forearm, with the radar corner aligned near the wrist and its long axis pointing toward the elbow.
+- Wrist-look activation tolerates a more relaxed viewing angle while retaining visibility hysteresis and rejecting the back of the panel. This uses head orientation, not eye tracking.
+- M9 support-hand contact follows the slide during manipulation and blends back on release.
+- Experimental hanging camera, heading and first-person arm-visibility fixes.
+- Menu confirmation and recovery improvements, including movement after getting up.
+- Includes the preceding HF Blade, Stinger, coolant, pistol-reload, native HUD and controller work.
+- All 177 shipping C/C++ and local include files are included in src/. Matching release settings are in config/; recording and diagnostic probes are disabled.
 
 ## Validation and limitations
 
-The selected baseline has recorded passes for the main, IK, recorder, Stinger (56 checks), Blade (470 checks), aim-capture (2408 checks) and aim-target desk suites. Its source manifest and binary hash were verified before packaging. The curated source copy also builds successfully; existing f2l compiler warnings remain.
+The packaged binary matches the installed build and the selected artifact byte for byte. All 323 entries in the artifact source manifest were verified. Recorded checks for this baseline passed: radar gaze (87 checks), WARP runtime harness (1199 checks), main suite, IK suite and recorder (9/9). The curated source also builds successfully; existing f2l compiler warnings remain.
 
-**A new headset acceptance test for this combined build has not been recorded.** Quest 3/Tanker playability was reported for the earlier beta; it is not a completed regression test for E4267D3E. Stinger alignment/lock-on/firing, HF Blade gestures, regular weapons/reload, wrist HUD and coolant still need live validation.
+**Quest 3 is the development and testing headset. A complete headset regression test for this exact build has not been recorded.** The earlier Tanker beta was reported fully playable with workarounds; that does not establish acceptance of every new feature. Radar comfort, hanging behavior and the expanded weapon interactions require further live validation. Plant/Raiden is not yet supported as a complete VR campaign.
 
-Use Third Person to get past security-camera sections. Hanging, movement while hanging and grenades remain listed limitations. Raiden/Plant is not yet a complete supported VR campaign.
+Use Third Person to get past security-camera sections. Hanging and movement while hanging remain experimental. Grenades remain unsupported. Raiden work still includes SOCOM, coolant, scope, sniper rifle and Stinger validation, plus Nikita support.
 
-## Download
+## Download and installation
 
-Download **MGS2-PCVR-v0.2.0-beta.2-E4267D3E.zip** for installation. GitHub's Source code archives contain the source snapshot for this release, not the playable package. See the [installation guide](https://github.com/Shiffo0/MGS2-PCVR-Beta#installation).
+Download **MGS2-PCVR-v0.3.0-beta.3-5AC0F9C8.zip** and follow the [installation guide](https://github.com/Shiffo0/MGS2-PCVR-Beta#installation). GitHub's automatic Source code archives are repository snapshots, not playable packages.
 
-The packaged dg_hook.asi is unchanged:
+The unchanged release dg_hook.asi has SHA256:
 
-E4267D3E8D856B1563229444020B718C49FA4596B0934A7403E33C9BAD1FEAD7
+`5AC0F9C8A55DC5EDDFC7588884FB99F196B21868768A0E427E5B442D7DA963CE`
 
-The curated source differs only in documentation comments and three optional diagnostic path strings; a rebuild is a separate artifact. MIT applies to the contributors' own work, with third-party licenses retained separately. No game files, saves or debug symbols are bundled.
+Source curation changes documentation comments and three optional diagnostic path literals only. A rebuild is a separate artifact and is not claimed byte-identical to the release binary. MIT covers contributors' own work; third-party notices remain included. No game files, saves or debug symbols are bundled.

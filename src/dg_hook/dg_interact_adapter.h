@@ -6,7 +6,8 @@
 enum { DG_IA_ACTION=1, DG_IA_POSTURE=2, DG_IA_MELEE=4, DG_IA_CAPTURE=8,
        DG_IA_CODEC=16, DG_IA_UP=32, DG_IA_DOWN=64,
        DG_IA_PEEP_LEFT=128,DG_IA_PEEP_RIGHT=256,DG_IA_ALL=511 };
-enum { DG_IA_LADDER_CONTEXT=3,DG_IA_BEYOND_CONTEXT=5,DG_IA_LOCKER_CONTEXT=6 };
+enum { DG_IA_LADDER_CONTEXT=3,DG_IA_BEYOND_CONTEXT=5,DG_IA_LOCKER_CONTEXT=6,
+       DG_IA_DOWNED_CONTEXT=7 };
 typedef struct {
     uint64_t sample, epoch, choke_seq;
     unsigned age_ms, levels, suppressed;

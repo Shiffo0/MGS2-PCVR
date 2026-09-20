@@ -1,6 +1,7 @@
 /* Included after the right solver: independent ownership of joints 8/9.
    Joint 10 is independently owned only while free-wrist tracking is valid. */
 #include "dg_twohand.h"
+#include "dg_m9_contact.h"
 #define DG_LEFT_MASK ((1ULL << 8) | (1ULL << 9))
 typedef struct {
     ULONGLONG arm, objs, mctrl, adjust;
@@ -9,7 +10,6 @@ typedef struct {
     int active, initialized, root_valid;
     float cached[8];
     int wrist_active;
-    int wrist_unarmed;
     float wrist_before[4],wrist_cached[4];
     double wrist_seen[4];
     DG_FREE_WRIST_STATE wrist;
@@ -21,6 +21,9 @@ typedef struct {
     unsigned long long weapon;
     double anchor[3];
     int anchor_valid;
+    DG_M9_CONTACT slide_contact;
+    double wrist_world[4];
+    int wrist_world_valid;
     unsigned long accepted, refused;
 } DG_LEFT_STATE;
 static DG_LEFT_STATE g_left;
@@ -30,6 +33,14 @@ static volatile LONG g_left_reason;
 /* Per unique solved pair: aim/coherence, right commit, anchor, reach,
    distance, dwell, attached. Keep these across releases for run diagnosis. */
 static volatile LONG g_left_support_gate[7];
+
+/* Weapon-only pose streams can retain the physical left-hand calibration.
+   Older callers use the main stream; owner and explicit calibration changes
+   still invalidate the left epoch. */
+static unsigned long left_calibration_stream(const DG_BRIDGE_ARM_TARGET *t)
+{
+    return t->left_stream_id ? t->left_stream_id : t->stream_id;
+}
 
 static int left_owner(ULONGLONG *mc, ULONGLONG *adj)
 {
@@ -55,7 +66,7 @@ static int left_arm_show_unarmed(ULONGLONG arm, const DG_BRIDGE_ARM_TARGET *t)
     ULONGLONG current = 0, mc, adj;
     LONG weapon = -1;
     return t && t->left_enabled && t->left_valid && g_left.active &&
-        g_left.arm == arm && g_left.stream == t->stream_id &&
+        g_left.arm == arm && g_left.stream == left_calibration_stream(t) &&
         g_left.pair == t->pair_id && left_owner(&mc, &adj) &&
         resolve_player(&current, NULL, &weapon) == DG_RESOLVE_OK &&
         current == arm && weapon == 0; /* WP_None */
@@ -63,6 +74,7 @@ static int left_arm_show_unarmed(ULONGLONG arm, const DG_BRIDGE_ARM_TARGET *t)
 
 static void left_wrist_release(void)
 {
+    g_left.wrist_world_valid=0;
     ULONGLONG mc,adj;
     if(g_left.wrist_active && left_owner(&mc,&adj) &&
        !memcmp((void *)(ULONG_PTR)(adj+10*16),g_left.wrist_cached,16)) {
@@ -76,10 +88,12 @@ static void left_wrist_release(void)
    next finger-rest capture runs after this pair's write. Keep both distinct. */
 static void left_wrist_now(ULONGLONG base,int stride,ULONGLONG mc,ULONGLONG adj,
     const DG_ADJ_FRAME *frame,const DG_BRIDGE_ARM_TARGET *t,
-    const double qa[4],const double qb[4],int had_active,double support_blend)
+    const double qa[4],const double qb[4],int had_active,double support_blend,
+    const double *contact_q)
 {
     DG_IK_HAND_IN in;double rows[3][3],native[4],chain[4],inv[4],want[4],q[4],a[4];
     const double identity[4]={0,0,0,1};int r,k;
+    g_left.wrist_world_valid=0;
     memcpy(g_left.wrist_seen,identity,sizeof identity);
     if(g_left.wrist_active)for(k=0;k<4;k++)g_left.wrist_seen[k]=g_left.wrist_cached[k];
     if(!t->free_left.enabled || !t->free_left.valid || support_blend>0) {
@@ -110,14 +124,15 @@ static void left_wrist_now(ULONGLONG base,int stride,ULONGLONG mc,ULONGLONG adj,
        palm pointing back into an arm that IK has already moved elsewhere.
        Only the initial reference changes; subsequent controller rotations
        remain independent of the arm's position and native animation. */
-    if(g_left.wrist.ready && g_left.wrist_unarmed!=!!g_b.arm_map_unarmed)
-        memset(&g_left.wrist,0,sizeof g_left.wrist);
+    /* Equipment changes the native animation, not the controller neutral.
+       Keep the accepted free-hand reference until tracking/owner/stream loss
+       or an explicit calibration releases it. */
     if(g_b.arm_map_unarmed) {
         dg_ik_quat_mul(in.new_fore,in.new_upper,chain);
         dg_ik_quat_mul(chain,native,native);
     }
     if(!dg_free_wrist_step(&g_left.wrist,&t->free_left,native,want))goto refuse_wrist;
-    g_left.wrist_unarmed=!!g_b.arm_map_unarmed;
+    if(contact_q)memcpy(want,contact_q,sizeof want);
     memcpy(in.desired,want,sizeof want);
     if(!dg_ik_hand_adjust(&in,q))goto refuse_wrist;
     dg_pose_quat_blend(identity,q,t->left_weight,q);
@@ -125,13 +140,16 @@ static void left_wrist_now(ULONGLONG base,int stride,ULONGLONG mc,ULONGLONG adj,
     if(!g_left.wrist_active)memcpy(g_left.wrist_before,(void *)(ULONG_PTR)(adj+10*16),16);
     for(k=0;k<4;k++)g_left.wrist_cached[k]=(float)a[k];
     memcpy((void *)(ULONG_PTR)(adj+10*16),g_left.wrist_cached,16);
-    *(volatile ULONGLONG *)(ULONG_PTR)(mc+0x38)|=1ULL<<10;g_left.wrist_active=1;return;
+    *(volatile ULONGLONG *)(ULONG_PTR)(mc+0x38)|=1ULL<<10;g_left.wrist_active=1;
+    memcpy(g_left.wrist_world,want,sizeof want);g_left.wrist_world_valid=1;return;
 refuse_wrist:
     left_wrist_release();
 }
 
+#include "dg_left_model.inl"
 static void left_arm_release(void)
 {
+    dg_bridge_model_arm_clear();
     hand_pose_release();
     left_wrist_release();
     ULONGLONG mc, adj;
@@ -154,6 +172,30 @@ static void left_arm_release(void)
     InterlockedExchange(&g_left_blend,0);
 }
 
+/* Measured 55-joint hand: palm38/48 and five three-joint finger chains.
+ * Their distal-joint centroid is an inspectable grip contact, not a guessed
+ * wrist offset or a claim about the skinned mesh surface. */
+static int left_m9_finger_contact(ULONGLONG base,int stride,ULONGLONG end,double local[3])
+{
+    static const int parents[17]={10,38,39,40,38,42,43,38,45,46,38,48,49,50,48,52,53};
+    static const int tips[5]={41,44,47,51,54};
+    double rows[3][3],q[4],inv[4],delta[3]={0,0,0},len=0;
+    int i,k;
+    if(stride<64 || g_b.skel_parents_read<55 || end<base+54*(ULONGLONG)stride+64)return 0;
+    for(i=0;i<17;i++)if(g_b.skel_parents[38+i]!=parents[i])return 0;
+    if(!looks_like_matrix(base+10*(ULONGLONG)stride))return 0;
+    for(i=0;i<3;i++)for(k=0;k<3;k++)rows[i][k]=((float *)(ULONG_PTR)(base+10*(ULONGLONG)stride))[i*4+k];
+    if(!dg_ik_basis_quat(rows,q))return 0;
+    for(i=0;i<5;i++) {
+        float *tip=(float *)(ULONG_PTR)(base+tips[i]*(ULONGLONG)stride);
+        float *wrist=(float *)(ULONG_PTR)(base+10*(ULONGLONG)stride);
+        if(!looks_like_matrix((ULONGLONG)(ULONG_PTR)tip))return 0;
+        for(k=0;k<3;k++)delta[k]+=(tip[12+k]-wrist[12+k])/5.0;
+    }
+    dg_ik_quat_conj(q,inv);arm_quat_rotate(inv,delta,local);
+    for(k=0;k<3;k++)len+=local[k]*local[k];
+    return _finite(len) && len>1 && len<250.0*250.0;
+}
 static void left_arm_now(ULONGLONG arm, const DG_BRIDGE_ARM_TARGET *t,
                          int right_committed)
 {
@@ -172,6 +214,7 @@ static void left_arm_now(ULONGLONG arm, const DG_BRIDGE_ARM_TARGET *t,
     double target[3], support[3], delta[3], qa[4], qb[4], blend = 0;
     float slots[8];
     int j,k,r, aiming, had_active, reason=1, support_gate=0;
+    double finger_local[3],contact_q[4];int contact_drive=0,finger_valid=0;
     if (!t || !t->left_enabled || !t->left_valid || !isfinite(t->left_weight) ||
         t->left_weight <= 0 || t->left_weight > 1) {
         InterlockedExchange(&g_left_reason,0);
@@ -186,10 +229,10 @@ static void left_arm_now(ULONGLONG arm, const DG_BRIDGE_ARM_TARGET *t,
     adj = *(volatile ULONGLONG *)(ULONG_PTR)(mc+0x48);
     if (!plausible_ptr(adj) || region_end(adj) < adj+11*16) goto refuse;
     if (!g_left.initialized || g_left.arm != arm || g_left.objs != objs ||
-        g_left.mctrl != mc || g_left.adjust != adj || g_left.stream != t->stream_id) {
+        g_left.mctrl != mc || g_left.adjust != adj || g_left.stream != left_calibration_stream(t)) {
         left_arm_release();
         g_left.arm=arm; g_left.objs=objs; g_left.mctrl=mc; g_left.adjust=adj;
-        g_left.stream=t->stream_id; g_left.settle=g_b.c_ticks+2;
+        g_left.stream=left_calibration_stream(t); g_left.settle=g_b.c_ticks+2;
         g_left.initialized=1; return;
     }
     /* Validate current owner and heading before duplicate handling. */
@@ -272,8 +315,11 @@ static void left_arm_now(ULONGLONG arm, const DG_BRIDGE_ARM_TARGET *t,
     arm_quat_rotate(cq,t->left_shoulder_view,mi.player_shoulder);
     /* Both raw grips share one physical tracking space. Reusing the accepted
        right-hand mapping preserves their relative separation; calibrating
-       the left from its native support animation bakes in a second offset. */
-    if(t->left_position.enabled && t->position.enabled && !g_b.arm_map_unarmed) {
+       the left from its native support animation bakes in a second offset.
+       Seed only an uncalibrated left hand: equipment must not replace a
+       previously accepted unarmed mapping or depend on right-arm settling. */
+    if(t->left_position.enabled && t->position.enabled && !g_b.arm_map_unarmed &&
+       !g_left.camera_position.ready) {
         if(!right_committed || !g_b.camera_position.ready) goto refuse;
         g_left.camera_position=g_b.camera_position;
     }
@@ -291,16 +337,10 @@ static void left_arm_now(ULONGLONG arm, const DG_BRIDGE_ARM_TARGET *t,
     if(t->left_position.enabled && !g_left.camera_position.ready &&
        !dg_position_calibrate(&g_left.camera_position,&t->left_position,
                               target,mo.scale)) goto refuse;
-    /* Manual slide owns the left positional target independently of trigger HOLD. */
-    {
-        double contact[3];
-        if(right_committed && g_b.have_pred_wrist && g_b.hand_have_desired &&
-           t->aim_weapon_id==1 && m9_hand_contact(contact,t->stream_id)) {
-            arm_quat_rotate(g_b.hand_desired,contact,delta);
-            for(k=0;k<3;k++)target[k]=g_b.pred_wrist[k]+delta[k];
-            aiming=0;dg_twohand_reset(&g_left.grip);
-        }
-    }
+    /* Slide attachment owns the hand ahead of ordinary support grip. */
+    {double slide[3];if(t->aim_weapon_id==1 && m9_hand_contact(slide,t->stream_id)) {
+        aiming=0;dg_twohand_reset(&g_left.grip);
+    }}
     /* Capture a native support offset only from the right solve that finished
        on THIS invocation. No previous-pair desired pose is a valid anchor. */
     if (g_left.weapon != t->aim_weapon_id) {
@@ -349,6 +389,32 @@ static void left_arm_now(ULONGLONG arm, const DG_BRIDGE_ARM_TARGET *t,
     ii.pole[1]=clean[2][1]-(mi.upper+mi.fore);
     ii.pole[2]=clean[2][2]+(mi.upper+mi.fore)*delta[2]/norm;
     if(!dg_ik_solve(&ii,&io)) goto refuse;
+    finger_valid=left_m9_finger_contact(base,stride,end,finger_local);
+    {
+        double slide[3],free_q[4],contact_target[3];
+        DG_FREE_WRIST_STATE preview=g_left.wrist;
+        DG_IK_OUT contacted;
+        int attached=right_committed && g_b.have_pred_wrist && g_b.hand_have_desired &&
+            t->aim_weapon_id==1 && m9_hand_contact(slide,t->stream_id);
+        int can_contact=finger_valid && preview.ready && g_left.wrist_world_valid && t->left_weight==1 &&
+            t->free_left.enabled && t->free_left.valid && !reload_owns_left() && blend==0;
+        if(can_contact && dg_free_wrist_step(&preview,&t->free_left,g_left.wrist_world,free_q)) {
+            if(attached)contact_drive=dg_m9_contact_step(&g_left.slide_contact,GetTickCount64(),
+                g_b.hand_desired,g_b.pred_wrist,slide,io.wrist,free_q,finger_local,contact_target,contact_q);
+            else contact_drive=dg_m9_contact_release(&g_left.slide_contact,GetTickCount64(),
+                io.wrist,free_q,contact_target,contact_q);
+            if(contact_drive) {
+                for(k=0;k<3;k++)ii.target[k]=contact_target[k];
+                /* Refuse contact the physical arm cannot reach: accepting an
+                   IK clamp would silently recreate the visible hand gap. */
+                if(dg_ik_solve(&ii,&contacted) && vdist3(contacted.wrist,contact_target)<1.0)io=contacted;
+                else {contact_drive=0;memset(&g_left.slide_contact,0,sizeof g_left.slide_contact);if(attached)m9_contact_cancel();}
+            }
+        } else {
+            memset(&g_left.slide_contact,0,sizeof g_left.slide_contact);
+            if(attached)m9_contact_cancel();
+        }
+    }
     memset(&oi,0,sizeof oi);
     for(k=0;k<3;k++) {
         oi.shoulder[k]=clean[2][k]; oi.elbow[k]=io.elbow[k]; oi.wrist[k]=io.wrist[k];
@@ -363,7 +429,11 @@ static void left_arm_now(ULONGLONG arm, const DG_BRIDGE_ARM_TARGET *t,
       dg_pose_quat_blend(identity,qb,t->left_weight,qb); }
     reason=10;
     if(!left_owner(&mc,&adj)) goto refuse;
-    left_wrist_now(base,stride,mc,adj,&frame,t,qa,qb,had_active,blend);
+    left_model_publish(base,stride,&frame,t,qa,qb,had_active,io.elbow,io.wrist);
+    left_wrist_now(base,stride,mc,adj,&frame,t,qa,qb,had_active,blend,contact_drive?contact_q:NULL);
+    if(contact_drive && !g_left.wrist_world_valid) {
+        m9_contact_cancel();goto refuse; /* no positional-only attachment */
+    }
     for(j=0;j<8;j++) {
         float v=(float)(j<4 ? qa[j] : qb[j-4]);
         ((volatile float *)(ULONG_PTR)(adj+8*16))[j]=v;
@@ -371,8 +441,12 @@ static void left_arm_now(ULONGLONG arm, const DG_BRIDGE_ARM_TARGET *t,
     }
     *(volatile ULONGLONG *)(ULONG_PTR)(mc+0x38)|=DG_LEFT_MASK;
     g_left.active=1; g_left.accepted++;
-    if(right_committed && g_b.have_pred_wrist && g_b.hand_have_desired)
-        m9_observe_hand(t,io.wrist);
+    if(right_committed && g_b.have_pred_wrist && g_b.hand_have_desired &&
+       finger_valid && g_left.wrist_world_valid) {
+        double contact[3];arm_quat_rotate(g_left.wrist_world,finger_local,contact);
+        for(k=0;k<3;k++)contact[k]+=io.wrist[k];
+        m9_observe_hand(t,contact);
+    }
     InterlockedIncrement(&g_left_accepted);
     InterlockedExchange(&g_left_reason,0);
     if (blend>0) InterlockedIncrement(&g_left_support_pairs);

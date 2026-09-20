@@ -113,7 +113,7 @@ typedef struct {
     double radar_size;         /* vr_radar_wrist_size: quad width in metres, default 0.09; height follows the texture */
     double radar_offset[3];    /* vr_radar_wrist_offset: metres in the left grip space */
     double radar_rot[3];       /* vr_radar_wrist_rot: degrees, q = Ry*Rx*Rz (dg_radar_gaze.h) */
-    double radar_gaze_deg;     /* vr_radar_gaze_deg: default 20; 0 = no gate, always shown */
+    double radar_gaze_deg;     /* vr_radar_gaze_deg: default 35; 0 = no gate, always shown */
     double radar_gaze_pitch;   /* vr_radar_gaze_pitch: head forward pitched down by this, default 15 */
     unsigned long long ui2d_vs[8];  /* sprite vertex-shader bytecode hashes */
 } DG_XR_CONFIG;

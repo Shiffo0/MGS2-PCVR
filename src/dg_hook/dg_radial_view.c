@@ -54,6 +54,28 @@ int dg_radial_view_raster(const dg_radial_view *v, uint32_t *pixels,
     if (!pixels || capacity < DG_RADIAL_VIEW_PIXELS) return -1;
     memset(p,0,DG_RADIAL_VIEW_PIXELS*4u);
     if (!v || !v->visible) return 0;
+    if(v->kind==2) {
+        if(v->count!=3 || v->selected<0 || v->selected>2 || (v->eligible>>3))return 0;
+        for(i=0;i<6;i++) {
+            for(n=0;n<17 && v->labels[i][n];n++)
+                if(v->labels[i][n]!=' ' && glyph((unsigned char)v->labels[i][n])<0)return 0;
+            if(n==17)return 0;
+            lengths[i]=n;
+        }
+        for(y=12;y<244;y++)for(x=4;x<252;x++)put(p,x,y,18,25,34);
+        text(p,"MGS2 VR SETTINGS",16,24,26);
+        for(i=0;i<3;i++) {
+            int top=54+i*48;
+            for(y=top;y<top+40;y++)for(x=12;x<244;x++)
+                put(p,x,y,i==v->selected?45:25,i==v->selected?83:36,i==v->selected?110:47);
+            text(p,v->labels[i],lengths[i],24,top+7);
+            text(p,v->labels[i+3],lengths[i+3],24,top+23);
+        }
+        text(p,"UP DOWN - SELECT",16,24,205);
+        text(p,"ENTER - CHANGE",14,24,216);
+        text(p,"HOME - CLOSE",12,24,227);
+        return 1;
+    }
     if (v->count<6 || v->count>8 || v->selected < -1 ||
         v->selected >= (int)v->count || v->kind>1 ||
         (v->eligible >> v->count)) return 0;

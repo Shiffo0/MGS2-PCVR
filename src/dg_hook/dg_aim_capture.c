@@ -134,6 +134,13 @@ static int layout(uint64_t base, int weapon, uint64_t subobject, CAP_LAYOUT *out
         }
         return 0;
     } else if(weapon==7) {
+        unsigned type;
+        /* Retail Stinger type 0x4060 lacks the 0x800000 alternate-trigger bit.
+         * Player constructor therefore passes player.trigger (+B94), not
+         * the arm animation trigger (+CF4). Keep this owner check strict. */
+        if(!read_at(base+0x97e6b8,&type,4) || type!=0x4060 ||
+           !read_at(base+0x53b5ea,code,9) ||
+           memcmp(code,"\x4c\x8d\x8b\x94\x0b\0\0\xff\xd0",9))return 0;
         if(!read_at(base+0x715c60,code,14) ||
            memcmp(code,"\x48\x89\xb3\xe8\0\0\0\x48\x89\xbb\xf0\0\0\0",14)) return 0;
         out->body=0xe8; out->unit=0xf0; out->trigger=0xf8; out->effect=0;
@@ -193,7 +200,7 @@ static int geometry(uint64_t base,CAP_RECORD *r) {
     if(CAP_REJECT(pwork&7)) return CAP_READ;
     if(CAP_REJECT(!ptr_at(pwork+0xba8,&selected_body)) || CAP_REJECT(!read_at(pwork+0xbb0,&selected_unit,4)) || CAP_REJECT(!read_at(pwork+0xb90,&r->weapon_id,4))) return CAP_READ;
     if(CAP_REJECT(!layout(base,r->weapon_id,r->subobject,&offsets))) return CAP_SELECTION;
-    expected_actor_trigger=(r->weapon_id==13 || r->weapon_id==14 || r->weapon_id==5 || r->weapon_id==12 || r->weapon_id==20)?pwork+0xb94:trigger;
+    expected_actor_trigger=(r->weapon_id==7 || r->weapon_id==13 || r->weapon_id==14 || r->weapon_id==5 || r->weapon_id==12 || r->weapon_id==20)?pwork+0xb94:trigger;
     r->actor=r->subobject-offsets.object;
     effect_objs=r->subobjs;
     if(CAP_REJECT((offsets.effect && !ptr_at(r->actor+offsets.effect,&effect_objs))) || CAP_REJECT((offsets.trigger && (!read_at(r->actor+offsets.trigger,&actor_trigger,8) || actor_trigger!=expected_actor_trigger))) || CAP_REJECT(!ptr_at(r->actor+offsets.body,&body_slot)) || CAP_REJECT(!ptr_at(r->actor+offsets.unit,&unit_slot)) || CAP_REJECT(!ptr_at(body_slot,&actor_body)) || CAP_REJECT(!read_at(unit_slot,&actor_unit,4)) || CAP_REJECT(!read_at(r->subobjs+0x40,&root,8))) return CAP_READ;

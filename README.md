@@ -4,7 +4,7 @@
 
 An unofficial PC VR mod for **METAL GEAR SOLID 2: Sons of Liberty — Master Collection Version** on Windows, using OpenXR and **AER (Alternate Eye Rendering)**.
 
-**[Download Public Beta 2](https://github.com/Shiffo0/MGS2-PCVR-Beta/releases/tag/v0.2.0-beta.2)** · [Installation](#installation) · [Controls](#controls) · [Known limitations](#known-limitations) · [Report a problem](https://github.com/Shiffo0/MGS2-PCVR-Beta/issues)
+**[Download Public Beta 3](https://github.com/Shiffo0/MGS2-PCVR-Beta/releases/tag/v0.3.0-beta.3)** · [Installation](#installation) · [Controls](#controls) · [Known limitations](#known-limitations) · [Report a problem](https://github.com/Shiffo0/MGS2-PCVR-Beta/issues)
 
 > [!IMPORTANT]
 > **The earlier Tanker beta was reported fully playable with the workarounds below.** This update includes experimental Raiden/weapon work and needs a fresh headset regression test. Plant is not yet supported as a complete VR campaign.
@@ -17,21 +17,23 @@ An unofficial PC VR mod for **METAL GEAR SOLID 2: Sons of Liberty — Master Col
 | Controllers | Quest Touch Plus; default right-handed layout |
 | Game | Steam Master Collection version of MGS2 (App 2131640) |
 | Local game baseline | Steam build 21578573 |
-| Mod build | **E4267D3E** — Public Beta 2 |
+| Mod build | **5AC0F9C8** — Public Beta 3 |
 | Tanker / Snake | Earlier beta reported fully playable; this update needs a regression playthrough |
 | Plant / Raiden | In development; not supported as a complete campaign |
 | Other headsets / game versions | Not validated for this beta |
 
-Quest 3 and Tanker playability were reported for the earlier beta build 12683251. Build E4267D3E passed its recorded build and desk checks and was deployed, but a new headset acceptance test for this combined build has not been recorded. This is a PC mod, not a standalone Quest application.
+Quest 3 and Tanker playability were reported for the earlier beta build 12683251. Build 5AC0F9C8 passed its recorded build and desk checks and was deployed, but a new headset acceptance test for this combined build has not been recorded. This is a PC mod, not a standalone Quest application.
 
-## Included in build E4267D3E
+## Included in build 5AC0F9C8
 
 This release packages the complete selected mod binary and its matching buildable source baseline, including Stinger controller/aim integration, HF Blade support, native HUD and wrist-radar work, coolant changes, M9 slide handling and pistol-reload work. These inclusions describe implementation, not completed headset acceptance. HF Blade, M9 slide, pistol reload, wrist radar and UI settings are enabled in the supplied configuration; diagnostic recording/probes are disabled.
+
+Additional changes include M9 hand contact during slide manipulation, radar and LIFE placement along the rendered forearm, more permissive wrist-look activation, and menu/recovery fixes. Wrist activation uses head orientation, not eye tracking. Radar comfort and hanging behavior still need headset validation.
 
 ## Known limitations
 
 - **Getting past security cameras:** this does not work in VR. Switch to **Third Person** for these sections, then return to VR.
-- **Hanging:** entering hanging and moving while hanging do not work in VR yet.
+- **Hanging:** experimental camera, heading and arm-visibility fixes are included. Entering and moving while hanging still require headset validation; use Third Person if needed.
 - **Grenades:** do not work in VR yet.
 - **Raiden:** further controller and weapon mapping is required. See the roadmap below.
 
@@ -39,7 +41,7 @@ This release packages the complete selected mod binary and its matching buildabl
 
 1. Install and launch your own Steam copy of **MGS2 — Master Collection Version** once, then close the game.
 2. Connect your Quest 3 to your PC, start your PC VR connection software and make sure its OpenXR runtime is active. Confirm that PC VR works before starting the game.
-3. Download **`MGS2-PCVR-v0.2.0-beta.2-E4267D3E.zip`** from [Public Beta 2](https://github.com/Shiffo0/MGS2-PCVR-Beta/releases/tag/v0.2.0-beta.2). GitHub's automatic **Source code** ZIP/TAR links are repository snapshots, not the playable mod package.
+3. Download **`MGS2-PCVR-v0.3.0-beta.3-5AC0F9C8.zip`** from [Public Beta 3](https://github.com/Shiffo0/MGS2-PCVR-Beta/releases/tag/v0.3.0-beta.3). GitHub's automatic **Source code** ZIP/TAR links are repository snapshots, not the playable mod package.
 4. In Steam, right-click the game → **Manage → Browse local files**. The destination is the folder containing **`METAL GEAR SOLID2.exe`**, normally `steamapps/common/MGS2`.
 5. Back up any existing files with the same names. Extract the release ZIP directly into that folder. Keep its folder structure. If another mod already provides `winmm.dll` or `openxr_loader.dll`, keep a backup and test this beta on a clean mod setup; combinations have not been validated.
 6. Start the game normally through Steam with your headset connected. Use the left controller's **Menu** button for Start. In gameplay, **A** switches VR / Third Person. Face forward in your normal playing position and **hold Y** to recenter.
@@ -77,6 +79,8 @@ The illustration shows the core controls. In this build, **Codec additionally re
 **Radial selection:** start with the stick centered and triggers released. Hold the relevant stick click, move that stick toward the entry, and press the **same controller's trigger** to confirm. Releasing the stick click while an entry is highlighted also selects it. The opposite trigger cancels. Release the controls and return the stick to center before opening another selection. Release the selection trigger before using the weapon.
 
 **Menus:** use the right stick to navigate, **A or right trigger** to confirm, and **B** to go back. Gameplay actions depend on context and are not all available in menus or scripted scenes.
+
+**Mod settings (keyboard):** with the game focused during gameplay, press **Home** to open or close the settings panel. Use **Up/Down** to select View (stereo/mono), VR Pistol Reload or M9 Slide; use **Enter** or **Left/Right** to toggle an available option. After closing, release the buttons and center both sticks to resume control.
 
 **Photo camera:** begin at minimum zoom and let it settle briefly before zooming. Its zoom is controlled with the right stick. Security-camera traversal remains a separate limitation.
 

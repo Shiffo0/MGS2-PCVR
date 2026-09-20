@@ -328,6 +328,7 @@ extern "C" void dg_ui2d_stats(char*out,size_t n){
 }
 // Wrist radar, draw-hook half: the switches and the heartbeat's counters.
 extern "C" void dg_radar_configure(int on,int hud_off){InterlockedExchange(&radarHudOff,hud_off?1:0);InterlockedExchange(&radarOn,on?1:0);}
+extern "C" void dg_radar_view(int first_person){InterlockedExchange(&radarFirstPerson,first_person?1:0);}
 extern "C" void dg_radar_stats(char*out,size_t n){
  _snprintf_s(out,n,_TRUNCATE,"composite draws %ld (extra in frame %ld, frames with more than one %ld)  NOT FORWARDED %ld  wrist-up %ld refused %ld  last viewport %ux%u at (%u,%u) texture %ux%u fmt %u  rejected: origin %ld bigger %ld depth-on %ld no-tex2d %ld size %ld format %ld not-plain %ld no-viewport %ld",
   radarHits,radarExtra,radarFramesMulti,radarSkipped,radarAvailable,radarRefused,radarLastVp[2],radarLastVp[3],radarLastVp[0],radarLastVp[1],radarLastTex[0],radarLastTex[1],radarLastTex[2],

@@ -5,7 +5,8 @@
 #define DG_RADIAL_VIEW_SIZE 256u
 #define DG_RADIAL_VIEW_PIXELS (256u * 256u)
 /* Caller supplies a coherent, fresh snapshot. Empty label = empty slot.
-   kind 0 weapons, 1 items. Only ASCII A-Z/a-z, digits, space and '-' accepted.
+   kind 0 weapons, 1 items, 2 Home settings (three labels and three values).
+   Only ASCII A-Z/a-z, digits, space, dot and '-' accepted.
    No inventory, lifetime, ownership or engine acknowledgement is inferred. */
 typedef struct {
     int visible;

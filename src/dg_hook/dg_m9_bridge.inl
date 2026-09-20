@@ -10,7 +10,7 @@ int dg_bridge_grip_debug_snapshot(DG_GRIP_DEBUG *out) {
 static DG_DETOUR g_m9_slide_detour,g_m9_sea_detour,g_m9_shot_detour;
 static volatile LONG g_m9_enabled,g_m9_events;
 static struct {
-    uint64_t base,objs,ctrl,player,stamp,epoch,shots;
+    uint64_t base,subglobal,objs,ctrl,player,stamp,epoch,shots,rebound_arm;
     int resolved,live,active,render,blocked,last_state,last_block,fault,fault_reported,reset_context;
     double anchor[3],scale;
     double pose_bias[3],grab_bias[3],pose_scale;
@@ -21,7 +21,7 @@ static struct {
     DG_M9_OUTPUT out;
 } g_m9;
 unsigned dg_bridge_m9_events(void) {return (unsigned)InterlockedExchange(&g_m9_events,0);}
-/* Measure the controller-to-rendered-wrist difference from ONE successful
+/* Measure the controller-to-rendered-finger-contact difference from ONE successful
  * coherent arm solve. Independent arm calibration/reach limits make a raw
  * controller origin an unreliable proxy for the visible wrist. */
 static void m9_observe_hand(const DG_BRIDGE_ARM_TARGET *t,const double wrist[3]) {
@@ -50,7 +50,7 @@ static int m9_match(const LiveImage *im,size_t rva,const unsigned char *bytes,si
     return rva+n<=im->size && all_valid(im->valid,rva,n,im->size) && !memcmp(im->bytes+rva,bytes,n);
 }
 static void m9_resolve(const LiveImage *im) {
-    uint64_t fn=0,sea=0;uint32_t sw=0;
+    uint64_t fn=0,sea=0;uint32_t sw=0;int32_t subdisp=0;
     memset(&g_m9,0,sizeof g_m9);g_m9.last_state=-1;
     /* These RVAs are an explicitly version-locked adapter, not a signature
      * scan that claims support for unknown executables. */
@@ -71,8 +71,37 @@ static void m9_resolve(const LiveImage *im) {
        !m9_match(im,0x4d669f,(const unsigned char *)"\x49\x8b\x56\x18\xff\xc5\x48\x81\xc3\x80\x01\0\0",13) ||
        !m9_match(im,0x4aff16,(const unsigned char *)"\x89\xbe\x90\x02\0\0\x89\xbe\xc8\x02\0\0\x44\x8b\xc7",15) ||
        !m9_match(im,0x4afd99,(const unsigned char *)"\x44\x8b\xc7\x85\xc0\x75\x29\x48\x8d\x55\xa0\x8d\x48\x04\xe8\x44\x15\x0a\0",19))return;
+    /* GM_PlayerWeaponSubObject writer; independently witness its RIP target. */
+    if(!m9_match(im,0x4b0cbc,(const unsigned char *)"\x48\x89\x35",3) ||
+       !all_valid(im->valid,0x4b0cbf,4,im->size))return;
+    memcpy(&subdisp,im->bytes+0x4b0cbf,4);
+    if((int64_t)0x4b0cc3+subdisp!=0x17df688)return;
+    g_m9.subglobal=im->base+0x17df688;
     g_m9.base=im->base;g_m9.resolved=1;
     if(g_b.log)g_b.log("  M9: retail slide/shot/audio witnesses resolved (opt-in)\r\n");
+}
+/* WeaponEfInitObject caches root once. A cutscene/room can recreate the arm
+ * while the equipped actor survives; its body/unit SLOTS are updated natively.
+ * Re-prove current ownership through those slots instead of requiring that
+ * constructor-time root to still name the current arm. Never repair game data.
+ * Called under the seam's SEH guard; no old root pointer is dereferenced. */
+static int m9_current_owner(uint64_t arm,uint64_t ctrl,uint64_t objs) {
+    uint64_t sub,actor,trigger,player,armobjs;
+    if(!g_m9.subglobal || arm<0x60)return 0;
+    sub=*(uint64_t *)(ULONG_PTR)g_m9.subglobal;
+    if(sub<0xa0)return 0;
+    actor=sub-0xa0;
+    if(ctrl!=actor+0x2a8 || *(uint64_t *)(ULONG_PTR)sub!=objs)return 0;
+    trigger=*(uint64_t *)(ULONG_PTR)(arm+0x1c8);
+    if(trigger<0xcf4)return 0;
+    player=trigger-0xcf4;
+    armobjs=*(uint64_t *)(ULONG_PTR)arm;
+    return armobjs && *(int *)(ULONG_PTR)(player+0xb90)==1 &&
+        *(uint64_t *)(ULONG_PTR)(actor+0x248)==player+0xba8 &&
+        *(uint64_t *)(ULONG_PTR)(actor+0x2e8)==player+0xbb0 &&
+        *(uint64_t *)(ULONG_PTR)(player+0xba8)==arm &&
+        *(int *)(ULONG_PTR)(player+0xbb0)==6 &&
+        *(uint64_t *)(ULONG_PTR)(objs+0x40)==armobjs+0x110+6*0x180;
 }
 /* original_rsp[-16] is saved R15; -15 R14; -6 RBP; -5 RBX;
  * -7 RSI. The existing detour saves all GPRs and XMM0-5 before calling us. */
@@ -85,11 +114,18 @@ static void m9_slide_variant(void *original_rsp,int kind,int index_reg) {
     __try {
         if(!g_b.a.gm_player_arm_body) __leave;
         arm=*(uint64_t *)(ULONG_PTR)g_b.a.gm_player_arm_body;
-        if(!arm || *(uint64_t *)(ULONG_PTR)(ctrl+0x10)!=arm ||
-           *(int *)(ULONG_PTR)(ctrl+8)!=kind) __leave;
+        if(!arm || *(int *)(ULONG_PTR)(ctrl+8)!=kind) __leave;
         objs=*(uint64_t *)(ULONG_PTR)(ctrl+0x18);
         if(!objs || unit!=objs+0x438 || *(short *)(ULONG_PTR)(objs+0x64)<3 ||
            *(short *)(ULONG_PTR)(objs+0x64)>16) __leave;
+        if(*(uint64_t *)(ULONG_PTR)(ctrl+0x10)!=arm) {
+            if(!m9_current_owner(arm,ctrl,objs)) __leave;
+            if(g_m9.rebound_arm!=arm) {
+                if(g_b.log)g_b.log("  M9: retained weapon validated against recreated arm %llX (cached root %llX)\r\n",
+                    arm,*(uint64_t *)(ULONG_PTR)(ctrl+0x10));
+                g_m9.rebound_arm=arm;
+            }
+        }
         model=*(uint64_t *)(ULONG_PTR)(unit+0xb8);
         if(!model || *(int *)(ULONG_PTR)(model+0x2c)!=0) __leave;
         memcpy(anchor,(void *)(ULONG_PTR)(model+0x20),sizeof anchor);
@@ -208,8 +244,13 @@ static int m9_fire_gate(int safe,int can_write,uint64_t player,int weapon,
     block=g_m9.active && weapon==1 && can_write && g_m9.out.block_fire;
     g_m9.blocked=block;
     if(block){
+        /* The slide adapter owns cancellation while blocked: m9_block_pad
+         * keeps STATUS held at non-firing pressure with no release edge.
+         * WAIT_REARM cannot observe release after input_ok is cleared, so
+         * retire the generic fire gesture instead of starving radial fire_idle.
+         * Consume this press; chamber obligation stays in g_m9.state. */
+        dg_fire_reset(&g_b.fire);
         fire->input_ok=0;g_b.fire.handled_press=fire->press_seq;g_b.fire.started=1;
-        if(g_b.fire.state==DG_FIRE_DRAW || g_b.fire.state==DG_FIRE_HOLD){g_b.fire.state=DG_FIRE_ABORT;g_b.fire.ticks=0;}
     }
     if(g_m9.last_state!=g_m9.out.state || g_m9.last_block!=block || events&(M9_GRAB|M9_END|M9_COMPLETE|M9_CLICK)) {
         if(g_b.log)g_b.log("  M9: state=%d blocked=%d progress=%.3f sample=%llu events=%u valid=%d allowed=%d contact=%d neutral=%d cancel=%d\r\n",
@@ -259,7 +300,24 @@ static int m9_hand_contact(double local[3],uint64_t source) {
     if(g_m9.active && g_m9.render && !g_m9.fault && g_m9.state.source==source &&
        g_m9.out.attached && now>=g_m9.state.now_ms &&
        now-g_m9.state.now_ms<=100) {
-        for(k=0;k<3;k++)local[k]=(g_m9.out.contact[k]+g_m9.grab_bias[k])*g_m9.scale;ok=1;
+        /* Acquisition radius is input tolerance, never a permanent visual
+         * gap. The hand solver eases its measured finger contact onto this
+         * native slide anchor and subtracts its wrist-to-finger geometry. */
+        for(k=0;k<3;k++)local[k]=g_m9.anchor[k];
+        local[1]+=50.0*g_m9.out.progress;ok=1;
     }
     ReleaseSRWLockShared(&g_m9_lock);return ok;
+}
+static void m9_contact_cancel(void) {
+    AcquireSRWLockExclusive(&g_m9_lock);
+    if(g_m9.out.attached) {
+        /* Geometry releases contact, never erases a confirmed rear endpoint. */
+        g_m9.state.state=g_m9.state.state==M9_FULL_REAR?M9_RETURN_GOOD:
+            g_m9.state.travel>0?M9_RETURN_BAD:M9_NEEDS_RACK;
+        g_m9.state.full_samples=0;g_m9.state.grab_deadline=0;
+        g_m9.state.grip_prev=1;g_m9.state.neutral=0;
+        g_m9.out.attached=0;g_m9.out.state=g_m9.state.state;g_m9.blocked=1;
+        InterlockedOr(&g_m9_events,M9_CANCEL);
+    }
+    ReleaseSRWLockExclusive(&g_m9_lock);
 }

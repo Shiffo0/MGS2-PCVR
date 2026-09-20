@@ -53,7 +53,7 @@ int radarClassify(const RadarFacts &f) {
     return 0;
 }
 
-volatile LONG radarOn = 0, radarHudOff = 0;
+volatile LONG radarOn = 0, radarHudOff = 0, radarFirstPerson = 0;
 volatile LONG radarHits = 0, radarAvailable = 0, radarSkipped = 0, radarExtra = 0, radarFramesMulti = 0, radarRefused = 0;
 volatile LONG radarWhy[radarWhyCount] = {};
 LONG radarFrameHits = 0;                                     // draw thread only
@@ -115,7 +115,8 @@ bool radarOnDraw(ID3D11DeviceContext *c, UINT vertexCount) {
     if (shown < 0) InterlockedIncrement(&radarRefused);
     if (shown > 0) InterlockedIncrement(&radarAvailable);
     // The one-shot draw trial must never find its draw withheld; it is off (requested == 0) in normal play.
-    bool skip = radarHudOff && shown > 0 && InterlockedCompareExchange(&requested, 0, 0) != 1;
+    bool skip = radarHudOff && radarFirstPerson && shown > 0 &&
+        InterlockedCompareExchange(&requested, 0, 0) != 1;
     if (skip) InterlockedIncrement(&radarSkipped);
     return skip;
 }

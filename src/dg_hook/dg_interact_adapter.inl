@@ -49,6 +49,9 @@ static void ia_step(DG_INTERACT_ADAPTER *s,
         (DG_IA_ACTION|DG_IA_POSTURE|DG_IA_PEEP_LEFT|DG_IA_PEEP_RIGHT);
     else if (context==DG_IA_LOCKER_CONTEXT) deny|=DG_IA_ALL&~
         (DG_IA_ACTION|DG_IA_POSTURE|DG_IA_MELEE|DG_IA_PEEP_LEFT|DG_IA_PEEP_RIGHT);
+
+    else if (context==DG_IA_DOWNED_CONTEXT) deny|=DG_IA_ALL&~
+        (DG_IA_ACTION|DG_IA_POSTURE);
     else if (context) deny|=DG_IA_ALL;
     else deny|=DG_IA_UP|DG_IA_DOWN|DG_IA_PEEP_LEFT|DG_IA_PEEP_RIGHT;
     if (context && !in->player_identity) deny|=DG_IA_ALL;

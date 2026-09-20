@@ -743,6 +743,7 @@ static int camera_yaw_anchor_apply(MAT *world, double *heading_state,
     return 1;
 }
 
+#include "dg_hanging_camera.inl"
 static int projlike(const MAT *p) {
     return (float)fabs(p->m[2][3] - 1.0f) < 1e-4f && (float)fabs(p->m[3][3]) < 1e-4f
         && (float)fabs(p->m[0][0]) > 1e-4f && (float)fabs(p->m[1][1]) > 1e-4f;
@@ -869,7 +870,12 @@ static void apply_transform(void) {
        cause Present to label an older image with this frame's eye. */
     handoff_write(0, DG_EYE_MONO, NULL, NULL);
 
+    {
+        DG_CAMERA_GATE radar_gate;
+        dg_radar_view(g_source==SRC_XR && camera_gate_now(&radar_gate));
+    }
     if (dg_bridge_theater_verdict()) {
+        dg_radar_view(0);
         camera_yaw_anchor_reset();
         InterlockedIncrement(&g_thea_cam_released);
         return;
@@ -1006,6 +1012,14 @@ static void apply_transform(void) {
         }
     }
 
+    /* Moving FPS skips native hanging SubjectTurn. Align only the local
+       render base with the actual ledge-facing actor; tracked head motion
+       is still applied below and the native camera/cache remain untouched. */
+    if (g_source == SRC_XR) {
+        double heading=0;
+        int hanging=dg_bridge_hanging_heading_now(&heading);
+        hanging_camera_apply(&base_eye,&base_eye_inv,hanging,heading);
+    }
     build_delta(&d, &d_inv, &p);
 
     /* Retarget only from the game's own projection values.  A static camera
@@ -1847,6 +1861,32 @@ static int g_absolute_reset;
 static unsigned long g_absolute_stream;
 static DG_AIM_SELECTION g_absolute_selection;
 static unsigned long long g_absolute_camera;
+/* Equipment resets the right native pose, but is not a new left neutral.
+   Physical refreezes and actual camera/arm replacement remain hard epochs. */
+static struct {
+    unsigned long epoch;
+    long freeze;
+    ULONGLONG arm, camera;
+    int have;
+} g_left_calibration;
+static unsigned long arm_left_calibration_stream(void)
+{
+    if (!g_aim_camera.valid || !g_arm_frame_have) {
+        g_left_calibration.have=0;
+        return 0;
+    }
+    if (!g_left_calibration.have ||
+        g_left_calibration.freeze!=g_arm_frame_freezes ||
+        g_left_calibration.arm!=g_aim_camera.gate.arm_body ||
+        g_left_calibration.camera!=g_aim_camera.gate.camera) {
+        if (!++g_left_calibration.epoch) ++g_left_calibration.epoch;
+        g_left_calibration.have=1;
+        g_left_calibration.freeze=g_arm_frame_freezes;
+        g_left_calibration.arm=g_aim_camera.gate.arm_body;
+        g_left_calibration.camera=g_aim_camera.gate.camera;
+    }
+    return g_left_calibration.epoch;
+}
 #ifdef DG_HOOK_TEST
 static int g_test_aim_selection = -1;
 #endif
@@ -1930,15 +1970,65 @@ static void absolute_aim_step(DG_AIM_REPLAY_STATE *state,
         ((result->pose.flags ^ input->main_pose_flags) & DG_POSE_F_LATCHED) == 0;
 }
 
-typedef struct { long entry; ULONGLONG arm; int have; } DG_AUTO_RECENTER;
-static int auto_recenter_step(DG_AUTO_RECENTER *s,int valid,long entry,ULONGLONG arm)
+typedef struct {
+    long entry;
+    ULONGLONG arm;
+    int mode, have, settling;
+    DWORD since;
+} DG_AUTO_RECENTER;
+static int auto_recenter_step(DG_AUTO_RECENTER *s,int mode,long entry,
+                              ULONGLONG arm,DWORD now)
 {
-    if(!valid || !arm)return 0;
-    if(s->have && s->entry==entry && s->arm==arm)return 0;
-    s->have=1;s->entry=entry;s->arm=arm;
+    if(!mode || !arm) { s->settling=0; return 0; }
+    if(s->mode!=mode || s->entry!=entry || s->arm!=arm) {
+        s->mode=mode; s->entry=entry; s->arm=arm;
+        s->have=0; s->settling=0;
+    }
+    if(s->have)return 0;
+    /* Calibrate the settled gameplay view, after the native transition.
+       Repeated camera callbacks do not substitute for elapsed game time. */
+    if(!s->settling) { s->since=now; s->settling=1; return 0; }
+    if((DWORD)(now-s->since)<100u)return 0;
+    s->have=1;
     return 1;
 }
 static DG_AUTO_RECENTER g_auto_recenter;
+static volatile LONG g_auto_recenter_session;
+
+static void auto_recenter_present(int allowed)
+{
+    static LONG seen_session;
+    DG_XR_FRAME frame;
+    LONG session=InterlockedCompareExchange(&g_auto_recenter_session,0,0);
+    long generation=0;
+    unsigned long long identity=0;
+    int mode=0;
+    /* Session setup runs on the worker; keep the state reset on Present's
+       owning thread. The same actor/generation can recur after VR restart. */
+    if(session!=seen_session) {
+        memset(&g_auto_recenter,0,sizeof g_auto_recenter);
+        seen_session=session;
+    }
+    memset(&frame,0,sizeof frame);
+    if(allowed && g_source==SRC_XR && (input_get_frame(&frame)&1)) {
+        mode=dg_bridge_view_calibration_now(&generation,&identity);
+        /* Both unarmed arms need a tracked calibration pose. This check is
+           independent of weapon selection and the absolute-aim solver. */
+        if(mode==1 && (!frame.left_hand.grip.active || !frame.left_hand.grip.tracked ||
+            !frame.left_hand.grip.position_valid || !frame.left_hand.grip.orientation_valid ||
+            !frame.left_hand.grip.sample_seq || frame.left_hand.grip.xr_time<=0 ||
+            frame.left_hand.grip.pose_age_ms>100 || !frame.right_hand.grip.active ||
+            !frame.right_hand.grip.tracked || !frame.right_hand.grip.position_valid ||
+            !frame.right_hand.grip.orientation_valid || !frame.right_hand.grip.sample_seq ||
+            frame.right_hand.grip.xr_time<=0 || frame.right_hand.grip.pose_age_ms>100))
+            mode=0;
+    }
+    if(auto_recenter_step(&g_auto_recenter,mode,generation,identity,GetTickCount())) {
+        input_recenter();
+        logf_("  calibration: automatic %s recenter requested, transition %ld identity %llX\r\n",
+              mode==1 ? "first-person arms":"third-person view",generation,identity);
+    }
+}
 
 static DG_FREE_WRIST_INPUT free_wrist_input(const DG_XR_HAND_POSE *p,
                                              const DG_XR_CONFIG *cfg,int enabled)
@@ -1997,19 +2087,6 @@ static int arm_pose_target(DG_BRIDGE_ARM_TARGET *target)
     in.dt = arm_pose_dt();
     cfg = g_xrcfg;
 
-    if(g_source==SRC_XR) {
-        DG_CAMERA_GATE gate;
-        DG_XR_FRAME tracked;
-        int valid=camera_gate_now(&gate) && dg_bridge_fps_recenter_ready(gate.arm_body) &&
-                  (input_get_frame(&tracked)&1);
-        if(auto_recenter_step(&g_auto_recenter,valid,
-                             dg_bridge_fps_entry_generation(),gate.arm_body)) {
-            dg_xr_recenter();
-            logf_("  calibration: automatic recenter requested, FPS entry %ld arm %llX\r\n",
-                  g_auto_recenter.entry,g_auto_recenter.arm);
-        }
-    }
-
     /* A recentre is a whole-body statement - "THIS is forward" - so it
        restarts the arm stream: new calibration, new grip rest, new frozen
        heading. Without this the camera and the arm answer to two different
@@ -2020,6 +2097,9 @@ static int arm_pose_target(DG_BRIDGE_ARM_TARGET *target)
         if (rc != s_rc_last) {
             s_rc_last = rc;
             g_arm_pose_stream_id++;
+            /* None has no absolute weapon selection to reset this latch.
+               Recenter must reset its pose history just as it does armed. */
+            dg_pose_init(&g_arm_pose_state,NULL);
         }
     }
 
@@ -2106,6 +2186,7 @@ static int arm_pose_target(DG_BRIDGE_ARM_TARGET *target)
     target->hand_write = InterlockedCompareExchange(&g_arm_hand, 0, 0) ? 1 : 0;
     target->pair_id = g_arm_pose_pair_id;
     target->stream_id = g_arm_pose_stream_id;
+    target->left_stream_id = arm_left_calibration_stream();
     for (i = 0; i < 3; i++) target->wrist_view[i] = out.pos[i];
     for (i = 0; i < 3; i++)
         target->player_shoulder_view[i] = player_shoulder[i];
@@ -2204,7 +2285,9 @@ static int arm_pose_target(DG_BRIDGE_ARM_TARGET *target)
            Eye translation is unscaled; only controller displacement takes
            the character/player arm-length ratio in the bridge. */
         target->position.enabled=1;
-        target->position.valid=aim_ok && ao->write && cfg.positional &&
+        /* Raw grip position is also valid for None. The bridge separately
+           checks native weapon ownership before using it for armed AIM. */
+        target->position.valid=g_aim_camera.valid && out.write && cfg.positional &&
             cfg.x_sign==1 && cfg.y_sign==1 && cfg.z_sign==1 && p &&
             p->active && p->tracked && p->position_valid &&
             p->pose_age_ms<=100 && p->sample_seq && p->xr_time>0;
@@ -2230,10 +2313,11 @@ static int arm_pose_target(DG_BRIDGE_ARM_TARGET *target)
         const DG_XR_HAND_POSE *rp = &f.right_hand.grip;
         double dx, dy, dz;
         int coherent_now;
-        if (g_left_stream != g_arm_pose_stream_id) {
+        unsigned long left_stream=target->left_stream_id ? target->left_stream_id : target->stream_id;
+        if (g_left_stream != left_stream) {
             dg_pose_init(&g_left_pose, NULL);
             memset(&g_left_sample,0,sizeof g_left_sample);
-            g_left_stream = g_arm_pose_stream_id;
+            g_left_stream = left_stream;
         }
         memset(&li, 0, sizeof li);
         li.quat[3] = 1;
@@ -2423,6 +2507,7 @@ static void action_from_frame(DG_ACTION_SAMPLE *out) {
 }
 #include "dg_m9_input.inl"
 #include "dg_blade_input.inl"
+#include "dg_mod_menu_input.inl"
 #include "dg_controls_producer.inl"
 #include "dg_controls_cleanup.inl"
 
@@ -2434,6 +2519,7 @@ static void start_command(void)
     seq = input_menu_press_seq();
     if (!seq || seq == g_start_seen) return;
     g_start_seen = seq;
+    if(InterlockedCompareExchange(&g_mod_input_capture,0,0))return;
     if (g_source == SRC_SCRIPT) {
         DG_XR_FRAME frame;
         if (!g_armed || !(input_get_frame(&frame) & 1)) return;
@@ -2474,7 +2560,7 @@ static void controller_context_publish_all(int allowed,int special,int radial)
 {
     if (g_buttons_gameplay != (allowed ? 1 : 0)) g_buttons_epoch++;
     g_buttons_gameplay=allowed ? 1 : 0;
-    dg_xr_controller_context(allowed);
+    dg_xr_controller_context(allowed && !InterlockedCompareExchange(&g_mod_input_capture,0,0));
     dg_bridge_controls_context_all(allowed,special,radial);
     if (!allowed) {
         dg_bridge_cancel_toggle();
@@ -2744,7 +2830,7 @@ static int parse_config(char *buf, POSE *p, double *seconds,
     xc->radar_mode = 0; xc->radar_hud = 1; xc->radar_space_local = 0; xc->radar_size = 0.09;
     xc->radar_offset[0] = 0.02; xc->radar_offset[1] = 0.08; xc->radar_offset[2] = 0.03;
     xc->radar_rot[0] = 0.0; xc->radar_rot[1] = 90.0; xc->radar_rot[2] = -90.0;
-    xc->radar_gaze_deg = 20.0; xc->radar_gaze_pitch = 15.0;
+    xc->radar_gaze_deg = 35.0; xc->radar_gaze_pitch = 15.0;
 
     xc->stereo_proj_x_sign = -1;
     xc->trigger_deadzone = 0.10;
@@ -5045,6 +5131,7 @@ static const char *run_once(const char *marker) {
         InterlockedExchange(&g_script_menu_context_lost, 0);
     }
     if (menu_session || bc.fps_mode != DG_FPS_MODE_OFF) {
+        bc.unarmed_prone_enabled=source==SRC_XR && g_arm_track!=ARM_TRACK_OFF;
         bridge_on = dg_bridge_start(logf_, &bc);
         if (menu_session && !bridge_on) {
             dg_xr_script_stop();
@@ -5149,6 +5236,7 @@ static const char *run_once(const char *marker) {
         g_phase_stage_addr&&g_phase_consume_addr);
     logf_("  render link: requested %ld anchors %s (buffer-linked pose/FOV; no guessed fallback)\r\n",
         g_link_requested,g_phase_stage_addr?"verified":"UNAVAILABLE");
+    InterlockedIncrement(&g_auto_recenter_session);
     InterlockedExchange(&g_armed, 1);
     dg_xr_set_capture_observer(capture_observed);
     armed_threads = arm_all(1);
@@ -5351,6 +5439,10 @@ static const char *run_once(const char *marker) {
                                     input_secondary_presses(
                                         arm_tracked_xr_hand(arm_track2)));
             if (bridge_on) dg_bridge_configure(&bc2);
+            if(source==SRC_XR) {
+                LONG choice=InterlockedCompareExchange(&g_mod_stereo_override,0,0);
+                if(choice>=0)xc2.stereo=choice;
+            }
             /* Unconditional: the trigger is not part of the pose stream, so a
                change to it must not have to wait for the arm config to move. */
             InterlockedExchange(&g_fire_mode, bc2.fire_mode);
@@ -5520,19 +5612,33 @@ session_cleanup:
 static int script_menu_preserve_neutral(int front_end, const DG_MENU_IN *in,
                                          const DG_MENU_OUT *out)
 {
-    return InterlockedCompareExchange(&g_script_menu_active, 0, 0) &&
+    return (g_source==SRC_XR || InterlockedCompareExchange(&g_script_menu_active, 0, 0)) &&
            !script_menu_blocked() && front_end && !out->write &&
            in->have_sample && in->input_ok &&
            !(out->flags & (DG_MENU_F_BAD_INPUT | DG_MENU_F_BAD_CONFIG | DG_MENU_F_YIELDED));
 }
 
+static int menu_frontend_allowed(int flat,int codec,int gameover,int capture)
+{
+    return !capture && (flat || codec || gameover);
+}
+static void menu_input_from_frame(DG_MENU_IN *in,const DG_XR_FRAME *f)
+{
+    const DG_XR_HAND *h;
+    if(!f)return;
+    h=InterlockedCompareExchange(&g_menu_hand_right,0,0)?&f->right_hand:&f->left_hand;
+    in->have_sample=1;in->x=h->thumbstick_x;in->y=h->thumbstick_y;
+    in->trigger=h->trigger_value;in->button_a=h->primary_button!=0;
+    in->button_b=h->secondary_button!=0;
+    in->input_ok=h->grip.active && h->grip.pose_age_ms<=100;
+}
 static void menu_seam(int front_end)
 {
     DG_MENU_IN in;
     DG_MENU_OUT out;
     DG_XR_FRAME f;
-    const DG_XR_HAND *h;
     int mode = (int)InterlockedCompareExchange(&g_menu_mode, 0, 0);
+    if (InterlockedCompareExchange(&g_mod_input_capture,0,0)) front_end=0;
 
     if (script_menu_blocked()) {
         DG_BRIDGE_MENU empty;
@@ -5586,19 +5692,7 @@ static void menu_seam(int front_end)
        untouched trigger read as held. */
     in.trigger_click = g_xrcfg.trigger_fire;
 
-    if (input_get_frame(&f) & 1) {
-        h = InterlockedCompareExchange(&g_menu_hand_right, 0, 0)
-                ? &f.right_hand : &f.left_hand;
-        in.have_sample = 1;
-        in.x = (double)h->thumbstick_x;
-        in.y = (double)h->thumbstick_y;
-        in.trigger = (double)h->trigger_value;
-        in.button_a = h->primary_button ? 1 : 0;
-        in.button_b = h->secondary_button ? 1 : 0;
-        /* The same freshness bar walking uses: a controller that is not
-           tracked has not stopped reporting, it has stopped being believable. */
-        in.input_ok = (h->grip.active && h->grip.pose_age_ms <= 100) ? 1 : 0;
-    }
+    if (input_get_frame(&f) & 1) menu_input_from_frame(&in,&f);
 
     /* Recorded before the decision, so it shows what the decision SAW. */
     if (in.have_sample) {
@@ -5651,12 +5745,14 @@ static void menu_seam(int front_end)
             InterlockedExchange(&g_menu_sweep_idx, i + 1);
         }
         cmd.allow = front_end ? 1 : 0;
+        if (front_end && g_source==SRC_XR)
+            cmd.allow=(out.flags&DG_MENU_F_CONFIRM)?DG_MENU_ALLOW_XR_CONFIRM:DG_MENU_ALLOW_XR;
         if (front_end && (out.flags & DG_MENU_F_CANCEL) &&
             dg_bridge_codec_input_now())
             cmd.allow = DG_CODEC_MENU_ALLOW_EXIT;
         if (script_menu_blocked()) memset(&cmd, 0, sizeof cmd);
         /* A valid neutral Present is not cancellation of a pending pulse.
-           Only the desktop menu session uses the bounded bridge mailbox. */
+           XR and the desktop menu session use the bounded bridge mailbox. */
         if (script_menu_preserve_neutral(front_end, &in, &out))
             return;
         dg_bridge_menu_now(&cmd);
@@ -5847,10 +5943,11 @@ static void on_present_body(IDXGISwapChain *sc) {
             controller_camera_context(camera_now,raw_radial,GetTickCount()));
         if (g_source==SRC_XR) {
             int toggle=dg_xr_controller_toggle_take();
-            if (g_buttons_gameplay && toggle) dg_bridge_request_toggle();
+            if (g_buttons_gameplay && toggle && !InterlockedCompareExchange(&g_mod_input_capture,0,0)) dg_bridge_request_toggle();
         } else script_primary_command();
     }
-    menu_seam(flat || dg_bridge_codec_input_now());
+    menu_seam(menu_frontend_allowed(flat,dg_bridge_codec_input_now(),
+        dg_bridge_menu_gameover_now(),InterlockedCompareExchange(&g_mod_input_capture,0,0)));
 
     /* Desktop scripts have no XR device, swapchains or layer submission.
        Keep Present's game-frame identity while avoiding every capture path. */
@@ -5865,6 +5962,8 @@ static void on_present_body(IDXGISwapChain *sc) {
        and the capture below takes the MONO path with the live game FOV,
        overriding stereo: the director's frame is one flat image, read per
        frame because cutscenes animate the projection. */
+    auto_recenter_present(armed && !flat && !screen);
+    if(!armed || flat || screen)dg_radar_view(0);
     dg_xr_screen(screen);
     /* Only while alternate-eye gameplay is what reaches the headset; cutscenes (theater), menus and mono keep their blur. */
     dg_ui2d_feedback(InterlockedCompareExchange(&g_feedback_skip, 0, 0) && stereo && armed && have && !screen && g_source == SRC_XR);
@@ -6521,6 +6620,7 @@ static int test_camera_step_height(void)
     return bad;
 }
 
+#include "dg_hanging_camera_test.inl"
 static int test_camera_yaw_anchor(void)
 {
     int i, j, k, have, bad = 0;
@@ -6748,21 +6848,21 @@ static int test_render_link_config(void) {
    switches, all-or-nothing triples, out-of-range keeps the default. */
 static int test_radar_config(void) {
     static const struct { const char *text; int mode, hud, local; double size, off[3], rot[3], gaze, pitch; } t[] = {
-        { "source=xr",                                   0, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 20, 15 },
-        { "source=xr vr_radar_wrist=fixed",              1, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 20, 15 },
-        { "source=xr vr_radar_wrist=wrist vr_radar_hud=off vr_radar_wrist_space=local", 2, 0, 1, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 20, 15 },
-        { "source=xr vr_radar_wrist=WRIST vr_radar_hud=on vr_radar_wrist_space=grip",   2, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 20, 15 },
-        { "source=xr vr_radar_wrist=wristy vr_radar_hud=offf vr_radar_wrist_space=loc", 0, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 20, 15 },
-        { "source=xr vr_radar_wrist=on",                 0, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 20, 15 },
-        { "source=xr vr_radar_wrist=wrist vr_radar_wrist=off", 0, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 20, 15 },
+        { "source=xr",                                   0, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 35, 15 },
+        { "source=xr vr_radar_wrist=fixed",              1, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 35, 15 },
+        { "source=xr vr_radar_wrist=wrist vr_radar_hud=off vr_radar_wrist_space=local", 2, 0, 1, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 35, 15 },
+        { "source=xr vr_radar_wrist=WRIST vr_radar_hud=on vr_radar_wrist_space=grip",   2, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 35, 15 },
+        { "source=xr vr_radar_wrist=wristy vr_radar_hud=offf vr_radar_wrist_space=loc", 0, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 35, 15 },
+        { "source=xr vr_radar_wrist=on",                 0, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 35, 15 },
+        { "source=xr vr_radar_wrist=wrist vr_radar_wrist=off", 0, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 35, 15 },
         { "source=xr vr_radar_wrist_size=0.12 vr_radar_wrist_offset=0.03,-0.01,0.09 vr_radar_wrist_rot=10,-80.5,180 vr_radar_gaze_deg=0 vr_radar_gaze_pitch=-5 vr_radar_wrist=wrist",
                                                          2, 1, 0, 0.12, { 0.03, -0.01, 0.09 }, { 10, -80.5, 180 }, 0, -5 },
-        { "source=xr vr_radar_wrist_size=5 vr_radar_gaze_deg=91 vr_radar_gaze_pitch=61", 0, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 20, 15 },
-        { "source=xr vr_radar_wrist_size=0.02 vr_radar_gaze_deg=-1",                     0, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 20, 15 },
-        { "source=xr vr_radar_wrist_offset=0.03,0.01 vr_radar_wrist_rot=1,2",            0, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 20, 15 },
-        { "source=xr vr_radar_wrist_offset=0.03,0.01,0.5 vr_radar_wrist_rot=1,2,400",    0, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 20, 15 },
-        { "source=xr vr_radar_wrist_offset=0.03,0.01,0.05,7 vr_radar_wrist_rot=1,2,3x",  0, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 20, 15 },
-        { "source=xr vr_radar_wrist_offset=0.03,x,0.05 vr_radar_wrist=fixed stereo=1",   1, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 20, 15 },
+        { "source=xr vr_radar_wrist_size=5 vr_radar_gaze_deg=91 vr_radar_gaze_pitch=61", 0, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 35, 15 },
+        { "source=xr vr_radar_wrist_size=0.02 vr_radar_gaze_deg=-1",                     0, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 35, 15 },
+        { "source=xr vr_radar_wrist_offset=0.03,0.01 vr_radar_wrist_rot=1,2",            0, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 35, 15 },
+        { "source=xr vr_radar_wrist_offset=0.03,0.01,0.5 vr_radar_wrist_rot=1,2,400",    0, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 35, 15 },
+        { "source=xr vr_radar_wrist_offset=0.03,0.01,0.05,7 vr_radar_wrist_rot=1,2,3x",  0, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 35, 15 },
+        { "source=xr vr_radar_wrist_offset=0.03,x,0.05 vr_radar_wrist=fixed stereo=1",   1, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 35, 15 },
     };
     int i, j, bad = 0, stereo_kept = 0;
     for (i = 0; i < (int)(sizeof t / sizeof t[0]); i++) {
@@ -7300,12 +7400,14 @@ static int test_absolute_aim_transport(void)
     g_test_aim_selection = 2;
     AIM_CHECK(arm_pose_target(&t) && t.hand_write && t.aim_write);
     AIM_CHECK(t.aim_weapon_id == 2 && t.stream_id != first.stream_id);
+    AIM_CHECK(t.left_stream_id && t.left_stream_id==first.left_stream_id);
     AIM_CHECK(g_absolute_record.input.reset && t.aim_sample_seq == 11);
     AIM_CHECK(dg_ik_quat_angle(t.aim_world, first.aim_world) > .1);
     first = t;
     g_test_aim_selection = 1;
     AIM_CHECK(arm_pose_target(&t) && t.hand_write && t.aim_write);
     AIM_CHECK(t.aim_weapon_id == 1 && t.stream_id != first.stream_id);
+    AIM_CHECK(t.left_stream_id==first.left_stream_id);
     AIM_CHECK(g_absolute_record.input.reset);
     for (i=0;i<4;i++) AIM_CHECK(fabs(t.aim_world[i]-first.aim_world[i]) < 1e-9);
     {
@@ -7317,6 +7419,7 @@ static int test_absolute_aim_transport(void)
             first=t;g_test_aim_selection=weapons[w];
             AIM_CHECK(arm_pose_target(&t) && t.hand_write && t.aim_write);
             AIM_CHECK(t.aim_weapon_id==(uint64_t)weapons[w] && t.stream_id!=first.stream_id);
+            AIM_CHECK(t.left_stream_id==first.left_stream_id);
             AIM_CHECK(g_absolute_record.input.reset);
             AIM_CHECK(t.twohand_enabled==(weapons[w]==3));
         }
@@ -7329,10 +7432,40 @@ static int test_absolute_aim_transport(void)
         g_test_aim_selection=1;
         AIM_CHECK(arm_pose_target(&t) && t.aim_write);
     }
+    /* First equip after None has no previous absolute weapon selection.
+       Exercise the actual producer path: left validity and its calibration
+       survive both that first equip and subsequent weapon-stream changes. */
+    {
+        unsigned long left_epoch;
+        g_stereo=0;g_test_aim_selection=0;g_absolute_stream=0;
+        g_left_arm=1;
+        for(i=0;i<20;i++) {
+            InterlockedIncrement(&g_present_frame);
+            AIM_CHECK(arm_pose_target(&t));
+        }
+        AIM_CHECK(t.left_valid && t.left_weight>.999 && t.left_stream_id);
+        AIM_CHECK(t.position.enabled && t.position.valid && !t.aim_write);
+        /* None publishes the same live camera-height input as armed hands. */
+        g_aim_camera.camera.m[3][1]-=40;
+        InterlockedIncrement(&g_present_frame);
+        AIM_CHECK(arm_pose_target(&t) && t.position.valid);
+        AIM_CHECK(t.position.camera[13]==g_aim_camera.camera.m[3][1]);
+        g_aim_camera.camera.m[3][1]+=40;
+        left_epoch=t.left_stream_id;
+        g_test_aim_selection=1;
+        InterlockedIncrement(&g_present_frame);
+        AIM_CHECK(arm_pose_target(&t) && t.left_valid && t.left_weight>.999);
+        AIM_CHECK(t.left_stream_id==left_epoch);
+        first=t;g_test_aim_selection=2;
+        InterlockedIncrement(&g_present_frame);
+        AIM_CHECK(arm_pose_target(&t) && t.left_valid && t.left_weight>.999);
+        AIM_CHECK(t.stream_id!=first.stream_id && t.left_stream_id==left_epoch);
+    }
     /* FPS/level replacement while looking sideways must reset native latches
        without redefining physical forward. No old actor writes are retained. */
     {
         long freezes = g_arm_frame_freezes;
+        unsigned long left_epoch=t.left_stream_id;
         double room[4];
         memcpy(room, g_arm_frame_q, sizeof room);
         g_aim_camera.frame.head_raw.qy = sin(.55);
@@ -7344,6 +7477,8 @@ static int test_absolute_aim_transport(void)
         g_aim_camera.gate.arm_body++;
         AIM_CHECK(arm_pose_target(&t) && t.aim_write);
         AIM_CHECK(g_absolute_record.input.reset);
+        AIM_CHECK(t.left_stream_id && t.left_stream_id!=left_epoch);
+        left_epoch=t.left_stream_id;
         AIM_CHECK(g_arm_frame_freezes == freezes);
         AIM_CHECK(!memcmp(room, g_arm_frame_q, sizeof room));
         /* Manual calibration retains precedence even during replacement. */
@@ -7351,6 +7486,7 @@ static int test_absolute_aim_transport(void)
         g_aim_camera.gate.camera++;
         AIM_CHECK(arm_pose_target(&t) && t.aim_write);
         AIM_CHECK(g_arm_frame_freezes == freezes + 1);
+        AIM_CHECK(t.left_stream_id!=left_epoch);
         AIM_CHECK(fabs(g_arm_frame_q[1] - sin(.55)) < 1e-9);
     }
     /* A repeated frame with invalid camera must refuse before pose latching. */
@@ -8041,15 +8177,25 @@ static int test_arm_cfg_change_restarts_stream(void) {
    exists to end. */
 static int test_auto_recenter(void) {
     DG_AUTO_RECENTER s={0};int i,bad=0;
-    if(auto_recenter_step(&s,0,1,100))bad++;
-    if(!auto_recenter_step(&s,1,1,100))bad++;
-    for(i=0;i<20;i++)if(auto_recenter_step(&s,1,1,100))bad++;
-    if(auto_recenter_step(&s,0,2,200))bad++;
-    if(!auto_recenter_step(&s,1,2,200))bad++;
-    if(!auto_recenter_step(&s,1,3,200))bad++; /* FPS off/on, same actor */
-    if(!auto_recenter_step(&s,1,3,300))bad++; /* new level, same global Active */
-    if(auto_recenter_step(&s,0,3,300) || auto_recenter_step(&s,1,3,300))bad++;
-    printf("  %s auto calibration: valid entry/level once, no repeat across transient tracking loss\n",bad?"FAIL":"ok");
+    if(auto_recenter_step(&s,0,1,100,0))bad++;
+    if(auto_recenter_step(&s,1,1,100,0))bad++;
+    for(i=0;i<100;i++)if(auto_recenter_step(&s,1,1,100,(DWORD)i))bad++;
+    if(!auto_recenter_step(&s,1,1,100,100))bad++;
+    for(i=0;i<20;i++)if(auto_recenter_step(&s,1,1,100,101+i))bad++;
+    if(auto_recenter_step(&s,0,1,100,200) ||
+       auto_recenter_step(&s,1,1,100,300))bad++; /* tracking loss is not entry */
+    if(auto_recenter_step(&s,2,1,900,400))bad++; /* native third-person leave */
+    if(!auto_recenter_step(&s,2,1,900,500))bad++;
+    if(auto_recenter_step(&s,1,2,100,600))bad++; /* same actor, new entry */
+    if(auto_recenter_step(&s,0,2,100,650))bad++; /* interrupt settling */
+    if(auto_recenter_step(&s,1,2,100,700) || auto_recenter_step(&s,1,2,100,799))bad++;
+    if(!auto_recenter_step(&s,1,2,100,800))bad++;
+    if(auto_recenter_step(&s,1,2,200,900))bad++; /* new level */
+    if(!auto_recenter_step(&s,1,2,200,1000))bad++;
+    memset(&s,0,sizeof s);
+    if(auto_recenter_step(&s,1,1,100,0xfffffff0u))bad++;
+    if(!auto_recenter_step(&s,1,1,100,84))bad++; /* DWORD wrap */
+    printf("  %s auto calibration: settled FPS/third transitions once, tracking interruption, level and clock wrap\n",bad?"FAIL":"ok");
     return bad;
 }
 
@@ -9511,6 +9657,7 @@ static int script_snapshot_test_write(const char *path, const void *data, size_t
     return fclose(f) == 0 && ok;
 }
 
+#include "dg_menu_producer_test.inl"
 static int test_script_menu_session(void)
 {
     static const struct { const char *text; int valid, enabled; } cases[] = {
@@ -9869,6 +10016,7 @@ int main(int argc, char **argv) {
     bad += dg_script_gate_self_test();
     bad += test_script_snapshot_dispatch();
     bad += test_script_menu_session();
+    bad += test_menu_gameover_producer();
     f3_bad += test_hand_seqlock();
     f3_bad += test_hand_tags();
     f3_bad += test_raw_local_verbatim();
@@ -9885,6 +10033,7 @@ int main(int argc, char **argv) {
     f3_bad += test_rec_live_snapshot_machinery();
     f3_bad += test_camera_telemetry_transform();
     f3_bad += test_camera_yaw_anchor();
+    f3_bad += test_hanging_camera();
     f3_bad += test_camera_step_height();
     f3_bad += test_camera_yaw_apply_integration();
     f3_bad += test_screen_pose_is_yaw_anchored();

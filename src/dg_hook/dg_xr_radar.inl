@@ -1,6 +1,7 @@
 
 
 #include "dg_radar_gaze.h"
+#include "dg_model_radar.h"
 
 #define DG_RADAR_FRESH_MS      250u    /* no capture this recent = the game is not drawing a radar */
 #define DG_RADAR_AVAILABLE_MS  500u    /* how long "the wrist layer is up" stays true for the draw hook */
@@ -250,12 +251,12 @@ static int radar_skip(int why) { InterlockedExchange(&g_radar_st_why, why); retu
    shown this frame; radar_insert then slots it in. Two steps because the
    radial menu's own readiness test wants to find the projection alone. */
 static int radar_prepare(const XrFrameEndInfo *end, XrCompositionLayerQuad *quad, int should_render,
-                         int theater, const DG_XR_FRAME *frame, int frame_status, uint64_t now) {
+                         int theater, const DG_XR_FRAME *frame, int frame_status, uint64_t now,
+                         const DG_MODEL_ARM *model) {
     int mode = g_cfg.radar_mode, open = 1;
     uint32_t w, h;
     uint64_t id, ms;
     DXGI_FORMAT format;
-    DG_RADAR_POSE offset;
     double width;
     if (mode != 1 && mode != 2) {
         if (g_radar_gate.open || g_radar_gate.timing) dg_radar_gate_reset(&g_radar_gate);
@@ -295,40 +296,29 @@ static int radar_prepare(const XrFrameEndInfo *end, XrCompositionLayerQuad *quad
         width = DG_RADAR_FIXED_WIDTH_M;
         dg_radar_gate_reset(&g_radar_gate);
     } else {
-        const DG_XR_HAND_POSE *grip = &frame->left_hand.grip;
-        DG_RADAR_POSE head, hand, local;
-        double theta = 180.0, phi = 180.0;
+        DG_RADAR_POSE head,local;
+        DG_MODEL_ARM current;
+        double theta=180.0,phi=180.0;
         int valid;
-        if (!(frame_status & 1) || !grip->active || !grip->tracked || !grip->position_valid ||
-            !grip->orientation_valid || !raw_pose_usable(&grip->raw_local) ||
-            !raw_pose_usable(&frame->head_raw) || !g_hand_runtime[HAND_LEFT].grip_space || !g_local_space) {
-            dg_radar_gate_reset(&g_radar_gate); return radar_skip(RADAR_HAND);
+        width=g_cfg.radar_size;
+        if(!(width>=.03 && width<=.50))width=.09;
+        /* Capture owns the rendered model pose. Current bridge admission can
+           revoke it immediately, but a newer controller never moves it. */
+        if(!(frame_status&1) || !raw_pose_usable(&frame->head_raw) || !g_local_space ||
+           !dg_bridge_model_arm_snapshot(&current) || !model ||
+           current.stream!=model->stream || !w || !h ||
+           !dg_model_radar_pose(model,width,width*(double)h/(double)w,now,&local)) {
+            dg_radar_gate_reset(&g_radar_gate);return radar_skip(RADAR_HAND);
         }
-        dg_radar_offset_pose(g_cfg.radar_offset, g_cfg.radar_rot, &offset);
-        radar_pose_from_raw(&frame->head_raw, &head);
-        radar_pose_from_raw(&grip->raw_local, &hand);
-        dg_radar_pose_compose(&hand, &offset, &local);
-        /* Head and grip were both located in LOCAL for this frame's display time. */
-        valid = dg_radar_gaze_angles(&head, &local, g_cfg.radar_gaze_pitch, &theta, &phi);
-        open = dg_radar_gate_step(&g_radar_gate, valid, theta, phi, g_cfg.radar_gaze_deg, now);
-        InterlockedExchange(&g_radar_st_theta, (LONG)theta); InterlockedExchange(&g_radar_st_phi, (LONG)phi);
-        if (g_cfg.radar_space_local) {
-            /* Fallback: the same pose composed by us in LOCAL (swims a little when the game hitches). */
-            quad->space = g_local_space;
-            quad->pose.orientation.x = (float)local.qx; quad->pose.orientation.y = (float)local.qy;
-            quad->pose.orientation.z = (float)local.qz; quad->pose.orientation.w = (float)local.qw;
-            quad->pose.position.x = (float)local.px; quad->pose.position.y = (float)local.py; quad->pose.position.z = (float)local.pz;
-        } else {
-            /* The grip action space itself is the layer's space: the runtime
-               locates it at display time, so the quad stays on the hand at
-               headset rate whatever the game's frame rate is. */
-            quad->space = g_hand_runtime[HAND_LEFT].grip_space;
-            quad->pose.orientation.x = (float)offset.qx; quad->pose.orientation.y = (float)offset.qy;
-            quad->pose.orientation.z = (float)offset.qz; quad->pose.orientation.w = (float)offset.qw;
-            quad->pose.position.x = (float)offset.px; quad->pose.position.y = (float)offset.py; quad->pose.position.z = (float)offset.pz;
-        }
-        width = g_cfg.radar_size;
-        if (!(width >= 0.03 && width <= 0.50)) width = 0.09;
+        radar_pose_from_raw(&frame->head_raw,&head);
+        valid=dg_model_radar_angles(model,&head,&local,g_cfg.radar_gaze_pitch,&theta,&phi);
+        open=dg_radar_gate_step(&g_radar_gate,valid,theta,phi,g_cfg.radar_gaze_deg,now);
+        InterlockedExchange(&g_radar_st_theta,(LONG)theta);InterlockedExchange(&g_radar_st_phi,(LONG)phi);
+        quad->space=g_local_space;
+        quad->pose.orientation.x=(float)local.qx;quad->pose.orientation.y=(float)local.qy;
+        quad->pose.orientation.z=(float)local.qz;quad->pose.orientation.w=(float)local.qw;
+        quad->pose.position.x=(float)local.px;quad->pose.position.y=(float)local.py;
+        quad->pose.position.z=(float)local.pz;
     }
     InterlockedExchange(&g_radar_st_gate, open);
     if (!radar_ensure_swapchain(w, h, format)) return radar_skip(g_radar_fault ? RADAR_FAULT : RADAR_SWAPCHAIN);

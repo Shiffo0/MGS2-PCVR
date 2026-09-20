@@ -2,6 +2,10 @@
 
 #ifndef DG_BRIDGE_H
 #define DG_BRIDGE_H
+/* Home menu: bit 1 reload, bit 2 M9; changes apply on the game tick. */
+void dg_bridge_mod_menu_capture(int capture);
+void dg_bridge_mod_menu_request(unsigned values);
+void dg_bridge_mod_menu_status(unsigned *actual,unsigned *available);
 #include <stdint.h>
 #include "dg_position_target.h"
 #include "dg_m9_runtime.h"
@@ -74,6 +78,7 @@ enum {
 
 typedef struct {
     int fps_mode;               /* DG_FPS_MODE_*; default OFF, fail-closed */
+    int unarmed_prone_enabled;  /* internal: XR controller-arm session only */
     /* vr_camera_yaw: opt-in camera base-heading anchor. 0 is legacy/off. */
     int camera_yaw_anchor;
 
@@ -369,6 +374,7 @@ typedef struct {
     unsigned long pair_id;
 
     unsigned long stream_id;
+    unsigned long left_stream_id; /* physical calibration and camera/arm identity */
     double   wrist_view[3];
     /* The PLAYER's shoulder in the same mapped frame as wrist_view: an
        anthropometric constant, run through the identical axis map so it stays
@@ -1111,6 +1117,7 @@ int dg_bridge_controller_radial_now(void);
    pause path as well as front-end screens. */
 void dg_bridge_start_now(void);
 int dg_bridge_menu_context_ready(void); /* read-only anchor value, no object dereference */
+int dg_bridge_menu_gameover_now(void); /* independent of flat/camera handoff */
 
 /* U2: one frame's worth of synthesized front-end input. `status` is the
    GV_PAD status bits to arm; 0 means "nothing this frame", which is also
@@ -1226,7 +1233,8 @@ typedef struct {
 /* Separate native gameplay, tracking-only, ladder and radial admissions. */
 enum { DG_CONTROLS_NONE=0, DG_CONTROLS_GAMEPLAY=1, DG_CONTROLS_TURN_ONLY=2,
        DG_CONTROLS_LADDER=DG_IA_LADDER_CONTEXT, DG_CONTROLS_RADIAL_ONLY=4,
-       DG_CONTROLS_BEYOND=DG_IA_BEYOND_CONTEXT, DG_CONTROLS_LOCKER=DG_IA_LOCKER_CONTEXT };
+       DG_CONTROLS_BEYOND=DG_IA_BEYOND_CONTEXT, DG_CONTROLS_LOCKER=DG_IA_LOCKER_CONTEXT,
+       DG_CONTROLS_DOWNED=DG_IA_DOWNED_CONTEXT };
 #include "dg_action_owner.h"
 int dg_bridge_zoom_now(uint64_t *identity,float *angle);
 int dg_bridge_camera_stick_owned(void);
@@ -1247,6 +1255,7 @@ int dg_bridge_controller_ladder_now(void);
 void dg_bridge_controls_context_ex(int gameplay, int radial);
 void dg_bridge_controls_context_all(int gameplay, int special, int radial);
 int dg_bridge_controller_special_now(void);
+int dg_bridge_hanging_heading_now(double *heading);
 int dg_bridge_codec_input_now(void);
 
 /* Drains the bounded transition ring into the log. Logger side only: the game
@@ -1332,6 +1341,9 @@ int dg_bridge_theater_verdict(void);
    heartbeat/fps verdict is sufficient for this gate. */
 int dg_bridge_camera_gate_now(DG_CAMERA_GATE *out);
 long dg_bridge_fps_entry_generation(void);
+/* Confirmed safe view, independent of weapon/arm pose eligibility.
+   1 = first person, 2 = an explicit return to third person, 0 = not ready. */
+int dg_bridge_view_calibration_now(long *generation, unsigned long long *identity);
 int dg_bridge_fps_recenter_ready(unsigned long long arm);
 /* Read-only, safe owned FPS + grounded standing locomotion only. */
 int dg_bridge_camera_standing_height_now(float *height);
