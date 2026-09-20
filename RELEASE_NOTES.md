@@ -1,35 +1,31 @@
-# MGS2 PCVR Public Beta — 479DF688
+# MGS2 PCVR — Public Beta
 
-Based on Beta 3 (5AC0F9C8), with heavy diagnostics excluded at compile time. The maintainer completed a short Quest 3 test and approved publication. Full campaign regression and exhaustive experimental-feature validation are not claimed.
+Welcome to the first public beta of **MGS2 PCVR**, an unofficial PC VR mod for **METAL GEAR SOLID 2: Sons of Liberty — Master Collection Version**.
 
-## Changed
+**Tested on Meta Quest 3 with Touch Plus controllers.** Requires the Steam game, a Windows gaming PC and a working OpenXR PC VR connection.
 
-- Release builds default to `DG_ENABLE_DIAGNOSTICS=0`. Old probe, recorder, dump and debug settings cannot activate measurements, including mixed-case keys.
-- Flight recording, aim observation, eye/near captures, pixel probes, phase/pair traces, HUD memory watches and diagnostic GPU draw trials are disabled at their entry points.
-- Diagnostic GPU query/copy hooks and the experimental MGSHDFix measurement adapter are not installed. Normal draw forwarding, HUD, wrist radar and AER remain enabled.
-- Diagnostic recording buffers are reduced; disabled measurement implementations are removed by compilation/linking. The release binary is 715264 bytes, versus 901120 bytes for the corresponding diagnostic build. This is not a measured FPS improvement.
-- File logging is limited to matching startup/error messages, capped at 256 lines per process. Repeated detailed capture and bridge summaries are excluded.
-- `src/build.bat diagnostic` explicitly enables development measurements and produces `dg_hook-diagnostic.asi`; the default command produces `dg_hook.asi`.
+## What to expect
 
-## Validation
+- Headset tracking and motion-controller controls, using **AER (Alternate Eye Rendering)**.
+- Switch between **VR and Third Person** with **A**; hold **Y** to recenter.
+- Wrist radar and LIFE display, with controller menus for weapons and items.
+- A **Tanker-focused beta**. Plant / Raiden support is still in development.
 
-- Published release tests: 30 profile checks and 11 GPU checks passed. Old opt-in settings are ignored; diagnostic entry points are inert; query/copy slots stay unchanged and the gameplay shader hook remains installed.
-- Release XR/WARP harness: 1075 checks passed, including rejection of the pixel-probe environment flag, inactive near capture, production image copies, frame submission, LIFE and radar paths.
-- Release HUD/radar WARP harness: 5263 checks passed, including inactive copy tracing.
-- Development main suite and IK suite passed; recorder 9/9; development XR/WARP 1199 checks; development HUD/radar 5263 checks passed.
-- Both binary profiles compile. Existing f2l warnings C4013/C4142 remain.
-- The source and package are screened for protected references and accidental development artifacts. The final download is verified by SHA256.
+## Download and install
 
-## Quest 3 testing and limitations
+Download **`MGS2-PCVR-v0.3.1-beta.3-479DF688.zip`** under **Assets** below. Close the game, back up any existing mod files, and extract the ZIP beside **`METAL GEAR SOLID2.exe`**. Launch through Steam with your headset connected.
 
-This exact binary was installed for the maintainer's test. The development build and original settings were restored afterwards.
+GitHub's automatic **Source code** downloads are for contributors and are not the playable mod package.
 
-Quest 3 remains the development headset. Security-camera traversal requires Third Person; hanging remains experimental; grenades and the complete Plant/Raiden campaign remain unsupported.
+**[Read the setup guide and controls before playing](https://github.com/Shiffo0/MGS2-PCVR#installation).**
 
-## Package
+## Before you play
 
-`MGS2-PCVR-v0.3.1-beta.3-479DF688.zip` is the playable release. Extract beside the game executable with the game closed, following the README installation steps. GitHub's automatic Source code archives are not playable packages.
+- **One-hour VR session limit:** save and restart before the hour is up, or close the game and increase `seconds=3600` in `dg_hook.on` before playing. The game itself stays open when the mod's session ends.
+- **Security cameras:** switch to Third Person to get past camera sections.
+- **Hanging and moving while hanging:** experimental; use Third Person.
+- **Grenades:** not supported in VR yet.
+- **Plant / Raiden:** not ready for a complete VR playthrough. Weapon and interaction support is still being developed.
+- **AER:** eyes update on alternating frames, which can cause ghosting or judder. At 60 game frames per second, each eye receives roughly 30 fresh images per second.
 
-`dg_hook.asi` SHA256: `479DF688C67DE8C1008DB055AF7936E08C1295583EAA614F1FB52DB2450A3544`
-
-MIT covers contributors' own work. Third-party notices remain included. No game files, saves, debugging symbols or measurement output are bundled.
+Found a problem? [Report it here](https://github.com/Shiffo0/MGS2-PCVR/issues), including your setup, location in the game and steps to reproduce it.
