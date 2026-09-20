@@ -7,6 +7,20 @@ static int test_release_profile(void) {
         "vr_geometry_probe","vr_hand_probe","vr_work_probe","vr_skel_probe",
         "vr_adjust_probe","vr_turn_probe","vr_grip_debug","vr_eye_truth"};
     unsigned i,upper; int bad=0,checks=0;
+    {
+        const char *cases[]={"seconds=0\n","0 0\n","seconds=3600\n","seconds=-1\n","seconds=nan\n","seconds=inf\n"};
+        double expected[]={0,0,3600,600,600,600};
+        for(i=0;i<6;i++) {
+            char text[64]; POSE p; double seconds=600;
+            int source,track,map[4],hand;
+            DG_XR_CONFIG xc; DG_BRIDGE_CONFIG bc; ARM_POS_CFG ap;
+            strcpy_s(text,sizeof text,cases[i]); checks++;
+            if(!parse_config(text,&p,&seconds,&source,&xc,&bc,&track,map,&hand,&ap) || seconds!=expected[i])bad++;
+        }
+        checks++; if(session_timer_expired(0,3600)||session_timer_expired(0,86400))bad++;
+        checks++; if(session_timer_expired(3600,3599)||!session_timer_expired(3600,3600))bad++;
+        checks++; if(session_timer_expired(0.5,0)||!session_timer_expired(0.5,1))bad++;
+    }
     for (upper=0;upper<2;upper++) for(i=0;i<sizeof(keys)/sizeof(keys[0]);i++) {
         char text[512],key[64]; POSE p; double seconds=3600;
         int source,track,map[4],hand,ok; unsigned j;

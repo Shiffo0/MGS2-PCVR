@@ -64,18 +64,25 @@ static void capture_diag_snapshot_begin(void) {
     memset(g_cd.capture_ms, 0, sizeof(g_cd.capture_ms));
 }
 static void capture_diag_emit(void) {
-#if DG_ENABLE_DIAGNOSTICS
-
     unsigned i;
     ULONGLONG now = GetTickCount64();
     LONG64 n[CD_COUNT];
     uint64_t producer_failure;
+#if !DG_ENABLE_DIAGNOSTICS
+    /* First five minutes, at most 31 snapshots / 93 lines per process.
+       Keep capture failures observable without enabling GPU probes. */
+    static unsigned support_reports;
+    if (support_reports >= 31) return;
+    if (g_cd.logged && now - g_cd.last_log < 10000) return;
+    ++support_reports;
+#else
     if (g_cd.logged && now - g_cd.last_log < 2000) return;
+#endif
     g_cd.logged = 1; g_cd.last_log = now;
     for (i = 0; i < CD_COUNT; ++i)
         n[i] = InterlockedCompareExchange64(&g_cd_count[i], 0, 0);
     producer_failure = (uint64_t)InterlockedCompareExchange64(&g_cd_producer_failure, 0, 0);
-    g_log("  xr capture: tick %llu state %d producer attempt/queued %lld/%lld"
+    g_log("  OpenXR capture: tick %llu state %d producer attempt/queued %lld/%lld"
           " refuse input/fov/getbuf/create %lld/%lld/%lld/%lld last %ld hr 0x%08lX"
           " frames %lld gate %d render/views/pub/screen/anchor %d/%d/%d/%d/%d"
           " skip render/views/swap/pose %lld/%lld/%lld/%lld"
@@ -96,7 +103,7 @@ static void capture_diag_emit(void) {
        mean not reached this frame, not a successful API call. */
     for (i = 0; i < 2; ++i) {
         const D3D11_TEXTURE2D_DESC *s = &g_cd.src[i], *d = &g_cd.dst[i];
-        g_log("  xr capture eye %u: snapshot-ms %llu checked %d valid %d reason 0x%02X idx %u/%u"
+        g_log("  OpenXR capture eye %u: snapshot-ms %llu checked %d valid %d reason 0x%02X idx %u/%u"
               " calls a/w/r %d:%d/%d:%d/%d:%d legacy-format %d"
               " capture %llu age-ms %llu"
               " src %ux%u fmt %u mip/array/sample/quality %u/%u/%u/%u"
@@ -114,7 +121,4 @@ static void capture_diag_emit(void) {
               d->SampleDesc.Count, d->SampleDesc.Quality);
     }
 
-#else
-
-#endif
 }

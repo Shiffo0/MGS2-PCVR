@@ -2833,6 +2833,11 @@ static void script_menu_sanitize(POSE *p, DG_BRIDGE_CONFIG *bc,
     *hand = 0;
 }
 
+/* Zero explicitly disables the developer session timer. */
+static int session_timer_expired(double seconds, int elapsed) {
+    return seconds > 0.0 && (double)elapsed >= seconds;
+}
+
 static int parse_config(char *buf, POSE *p, double *seconds,
                        int *source, DG_XR_CONFIG *xc, DG_BRIDGE_CONFIG *bc,
                        int *arm_track_out, int arm_qmap_out[4],
@@ -2907,7 +2912,7 @@ static int parse_config(char *buf, POSE *p, double *seconds,
         if (end != buf) {
             p->yaw = v * DEG2RAD;
             v = strtod(end, &end);
-            if (v > 0.0) *seconds = v;
+            if (_finite(v) && v >= 0.0) *seconds = v;
         }
         *arm_track_out = arm_track_cfg;
         memcpy(arm_qmap_out, arm_qmap_cfg, sizeof arm_qmap_cfg);
@@ -3777,7 +3782,7 @@ static int parse_config(char *buf, POSE *p, double *seconds,
         else if (_stricmp(key, "z")        == 0) p->tz    = v;
         else if (_stricmp(key, "sweep")    == 0) p->sweep_rad = v * DEG2RAD;
         else if (_stricmp(key, "sweep_hz") == 0) p->sweep_hz  = v;
-        else if (_stricmp(key, "seconds")  == 0) { if (v > 0.0) *seconds = v; }
+        else if (_stricmp(key, "seconds")  == 0) { if (_finite(v) && v >= 0.0) *seconds = v; }
         else if (_stricmp(key, "xr_yaw_sign")   == 0) xc->yaw_sign   = v;
         else if (_stricmp(key, "xr_pitch_sign") == 0) xc->pitch_sign = v;
         else if (_stricmp(key, "xr_roll_sign")  == 0) xc->roll_sign  = v;
@@ -5370,7 +5375,7 @@ static const char *run_once(const char *marker) {
             break;
         }
         if (menu_session) {
-            if (elapsed >= (int)seconds) break;
+            if (session_timer_expired(seconds, elapsed)) break;
             continue; /* No gameplay shortcuts, probes, policy or hot config. */
         }
 
@@ -5615,7 +5620,7 @@ static const char *run_once(const char *marker) {
                 dg_xr_configure(&xc2);
             }
         }
-        if (elapsed >= (int)seconds) break;
+        if (session_timer_expired(seconds, elapsed)) break;
     }
 
 session_cleanup:

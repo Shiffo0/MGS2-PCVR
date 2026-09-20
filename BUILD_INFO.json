@@ -1,13 +1,14 @@
 {
-  "version": "v0.3.1-beta.3-hotfix.1",
-  "build": "9A439F87",
+  "version": "v0.3.2-beta.3-rc.1",
+  "build": "4F95FE0F",
   "baseline_build": "479DF688",
-  "binary_sha256": "9A439F870367BDCEC4F3228853271F9EE7CA98E7AA70D9B11191305ED2CEF6A7",
+  "binary_sha256": "4F95FE0F114CA314BCA1FAD41E6BB725B1901408F9C80399C80F197C81523AD4",
   "diagnostics_enabled": false,
-  "headset_acceptance": "Desk/build verified. SteamVR resize recovery and physical-headset acceptance remain to be confirmed by the reporter.",
-  "source_changes": [
-    "Rebuild OpenXR projection swapchains when the game backbuffer resolution changes",
-    "Clean up partially created projection swapchains before retrying",
-    "Log the old and new backbuffer dimensions during recovery"
-  ]
+  "support_logging": "Bounded capture counters, no GPU probes",
+  "headset_acceptance": "Pending; issue #2 cause unconfirmed",
+  "tests": {
+    "release_timer": 39,
+    "release_gpu": 11,
+    "resize_warp": 48
+  }
 }

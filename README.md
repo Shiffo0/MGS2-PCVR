@@ -4,12 +4,12 @@ Play **METAL GEAR SOLID 2: Sons of Liberty — Master Collection Version** in PC
 
 **Tested on Meta Quest 3.** This unofficial mod uses **OpenXR** and **AER (Alternate Eye Rendering)**. It runs on a Windows gaming PC; it is not a standalone Quest app.
 
-**[Download the beta hotfix](https://github.com/Shiffo0/MGS2-PCVR/releases/tag/v0.3.1-beta.3-hotfix.1)** · [Installation](#installation) · [Controls](#controls) · [Known limitations](#known-limitations) · [Report a problem](https://github.com/Shiffo0/MGS2-PCVR/issues)
+**[Download the support candidate](https://github.com/Shiffo0/MGS2-PCVR/releases/tag/v0.3.2-beta.3-rc.1)** · [Installation](#installation) · [Controls](#controls) · [Known limitations](#known-limitations) · [Report a problem](https://github.com/Shiffo0/MGS2-PCVR/issues)
 
 The **Tanker chapter with Snake** is the focus of this beta. Switch between VR and Third Person as needed, and check your wrist for radar and LIFE information. **Plant / Raiden support is still in development** and is not ready for a complete VR playthrough.
 
 > [!IMPORTANT]
-> **This beta has a one-hour VR session limit.** Save and restart the game before the hour is up, or close the game and increase the `seconds=3600` value in `dg_hook.on` before playing. The game itself stays open when the mod's session ends.
+> **The support candidate removes the automatic cutoff with `seconds=0`.** If keeping older settings, install the candidate binary and change `seconds=3600` to `seconds=0` with the game closed. Older binaries do not support zero as unlimited.
 
 ## Requirements
 
@@ -20,13 +20,13 @@ The **Tanker chapter with Snake** is the focus of this beta. Switch between VR a
 
 Other headsets and game versions have not been validated for this beta.
 
-Hotfix build **9A439F87** repairs the OpenXR projection-swapchain lifecycle when MGS2 changes its backbuffer resolution between menus, gameplay, codec and cutscenes. Previously, SteamVR could receive zero gameplay layers and display **Waiting**, while codec/cutscene theater layers remained visible. The hotfix passed build and desk checks; SteamVR and physical-headset acceptance still require confirmation.
+Support candidate **4F95FE0F** fixes swapchain resize synchronization and adds bounded capture reports. The cause of issue #2 remains unconfirmed: the supplied log shows different sizes across runtime startups, not a demonstrated in-session resize. Build and desk checks passed; headset acceptance is pending.
 
 ## Installation
 
 1. Launch the unmodified game once, then close it.
 2. Connect your Quest 3 to PC VR. Start your PC VR software and make sure its OpenXR runtime is active.
-3. Download **`MGS2-PCVR-v0.3.1-beta.3-hotfix.1-9A439F87.zip`** from the [release page](https://github.com/Shiffo0/MGS2-PCVR/releases/tag/v0.3.1-beta.3-hotfix.1). Choose the mod ZIP under **Assets**, not GitHub's automatic **Source code** downloads.
+3. Download **`MGS2-PCVR-v0.3.2-beta.3-rc.1-4F95FE0F.zip`** from the [release page](https://github.com/Shiffo0/MGS2-PCVR/releases/tag/v0.3.2-beta.3-rc.1). Choose the mod ZIP under **Assets**, not GitHub's automatic **Source code** downloads.
 4. In Steam, right-click the game → **Manage → Browse local files**. Extract the ZIP into the folder containing **`METAL GEAR SOLID2.exe`**, keeping its folder structure.
 5. Back up any existing files before replacing them. If other mods already provide `winmm.dll` or `openxr_loader.dll`, start with a clean mod setup; compatibility with other mods has not been validated.
 6. Launch the game through Steam with your headset connected. Use the left controller's **Menu** button for Start. During gameplay, press **A** to switch between VR and Third Person. Face forward and **hold Y** to recenter.
@@ -73,7 +73,7 @@ Controls below use the **default right-handed layout**. To open the Codec, bring
 - **Hanging and moving while hanging:** still experimental; use **Third Person** for these actions.
 - **Grenades:** not supported in VR yet.
 - **Plant / Raiden:** incomplete. Experimental weapon features are included, but a full VR campaign is not supported yet.
-- **Session length:** the supplied configuration limits the mod to **one hour per session**. See the notice above before a longer playthrough.
+- **Session length:** this candidate supplies `seconds=0` for no automatic cutoff; update older settings explicitly.
 
 ## AER and performance
 
@@ -90,7 +90,7 @@ Future work focuses on **Raiden and the Plant chapter**, including SOCOM mapping
 - **No VR image:** check your PC VR connection, active OpenXR runtime and installation folder. The mod files must sit beside the game executable. Make sure the `.on` files have not gained an extra `.txt` extension.
 - **View offset or facing the wrong way:** face forward and hold **Y** to recenter.
 - **Stuck at a camera or hanging section:** press **A** to switch to Third Person.
-- **VR stops after about an hour:** save and restart the game. For longer sessions, close the game and increase `seconds` in `dg_hook.on` before launching again.
+- **VR stops after about an hour:** install this candidate, close the game and set `seconds=0` in `dg_hook.on`.
 - **Problems with other mods:** try this beta on its own before reporting the problem.
 
 [Report a problem](https://github.com/Shiffo0/MGS2-PCVR/issues) with your mod version, game version, headset, PC VR software, GPU, chapter/location and steps to reproduce it. Mention whether it happens in VR, Third Person or both. Review logs before sharing them and avoid uploading personal data or game files.

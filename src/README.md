@@ -1,6 +1,6 @@
 # Building the mod
 
-This hotfix starts from public beta build `479DF688` and repairs OpenXR projection-swapchain resizing. The packaged hotfix is `9A439F87`. It has passed build and desk checks; SteamVR and physical-headset acceptance are not yet claimed.
+Support candidate 4F95FE0F starts from beta 479DF688. It fixes resize synchronization, supports seconds=0 and adds bounded capture logging. Run test_release.bat and test_xr_resize.bat with the documented compiler/SDK setup. SteamVR issue #2 remains under investigation.
 
 ## Requirements
 

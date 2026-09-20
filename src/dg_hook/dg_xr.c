@@ -1548,9 +1548,9 @@ static void destroy_projection_swapchains(void) {
     g_swap_w = g_swap_h = 0;
 }
 
-static int projection_swapchains_current(void) {
+static int projection_swapchains_current(uint32_t width, uint32_t height) {
     return g_swap[0] != XR_NULL_HANDLE && g_swap[1] != XR_NULL_HANDLE &&
-           g_swap_w == g_sw && g_swap_h == g_sh;
+           g_swap_w == width && g_swap_h == height;
 }
 
 static int ensure_swapchains(void) {
@@ -1558,17 +1558,22 @@ static int ensure_swapchains(void) {
     int64_t *formats = NULL;
     uint32_t n = 0, cap = 0, i;
     int64_t want = 0;
+    uint32_t width, height;
+
+    EnterCriticalSection(&g_cap_cs);
+    width = g_sw; height = g_sh;
+    LeaveCriticalSection(&g_cap_cs);
 
     /* MGS2 can change its backbuffer size while moving between the front end,
        gameplay and codec/cutscene paths. CopyResource cannot copy a new-size
        capture into old-size XR swapchains. Rebuild here, on the XR frame
        thread between submissions; Present only publishes the new size. */
-    if (projection_swapchains_current()) return 1;
-    if (!g_adopted || !g_sw || !g_sh) return 0;
+    if (projection_swapchains_current(width, height)) return 1;
+    if (!g_adopted || !width || !height) return 0;
     if (g_swap[0] != XR_NULL_HANDLE || g_swap[1] != XR_NULL_HANDLE) {
-        if (g_swap_w && g_swap_h && (g_swap_w != g_sw || g_swap_h != g_sh))
-            g_log("  xr: backbuffer resized %ux%u -> %ux%u; rebuilding stereo swapchains\r\n",
-                  g_swap_w, g_swap_h, g_sw, g_sh);
+        if (g_swap_w && g_swap_h && (g_swap_w != width || g_swap_h != height))
+            g_log("  OpenXR: backbuffer resized %ux%u -> %ux%u; rebuilding stereo swapchains\r\n",
+                  g_swap_w, g_swap_h, width, height);
         destroy_projection_swapchains();
     }
 
@@ -1594,8 +1599,8 @@ static int ensure_swapchains(void) {
                      XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT;
     sci.format = want;
     sci.sampleCount = 1;
-    sci.width = g_sw;
-    sci.height = g_sh;
+    sci.width = width;
+    sci.height = height;
     sci.faceCount = 1;
     sci.arraySize = 1;
     sci.mipCount = 1;
@@ -1623,8 +1628,8 @@ static int ensure_swapchains(void) {
         }
         g_image_count[i] = cap;
     }
-    g_swap_w = g_sw;
-    g_swap_h = g_sh;
+    g_swap_w = sci.width;
+    g_swap_h = sci.height;
     g_log("  xr: stereo swapchains %ux%u fmt %lld, %u images each\r\n",
           g_swap_w, g_swap_h, (long long)want, g_image_count[0]);
     return 1;

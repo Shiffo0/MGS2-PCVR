@@ -1,7 +1,7 @@
 source=xr
 vr_left_arm=on
 vr_twohand=on
-seconds=3600
+seconds=0
 xr_recenter=2
 stereo=1
 vr_stereo_phase_fix=0
