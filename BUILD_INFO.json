@@ -1,11 +1,14 @@
 {
-  "version": "v0.3.0-beta.3",
+  "version": "v0.3.1-beta.3",
+  "build": "479DF688",
   "baseline_build": "5AC0F9C8",
-  "binary_sha256": "5AC0F9C8A55DC5EDDFC7588884FB99F196B21868768A0E427E5B442D7DA963CE",
-  "source_include_files": 177,
+  "binary_sha256": "479DF688C67DE8C1008DB055AF7936E08C1295583EAA614F1FB52DB2450A3544",
+  "diagnostics_enabled": false,
+  "headset_acceptance": "Short Quest 3 test completed; approved for release by maintainer. Full campaign regression not recorded.",
   "source_changes": [
-    "Documentation comments curated",
-    "Three optional diagnostic paths made relative"
-  ],
-  "headset_acceptance": "Not recorded for this combined build"
+    "Compile-time release/diagnostic profiles",
+    "Measurement entry points excluded in release",
+    "Bounded startup/error logging",
+    "Focused release regression tests"
+  ]
 }

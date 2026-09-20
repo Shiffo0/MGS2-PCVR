@@ -5,7 +5,7 @@
  */
 #include "dg_pair_probe.h"
 #define PHASE_ROOT "logs\\pcvr_phase"
-#define PHASE_CAP 8192
+#define PHASE_CAP DG_DIAGNOSTIC_CAPACITY(8192)
 typedef struct {
     LONGLONG qpc;
     DWORD tid;
@@ -50,6 +50,8 @@ static void phase_init(void)
 }
 static void phase_record(int kind,int buffer)
 {
+#if DG_ENABLE_DIAGNOSTICS
+
     PHASE_EVENT e;
     DG_HOOK_HANDOFF h;
     LARGE_INTEGER q;
@@ -74,10 +76,16 @@ static void phase_record(int kind,int buffer)
     if(g_phase_count<PHASE_CAP)g_phase_events[g_phase_count++]=e;
     else InterlockedIncrement(&g_phase_dropped);
     ReleaseSRWLockExclusive(&g_phase_lock);
+
+#else
+
+#endif
 }
 /* Worker only, target remains suspended. No second SetThreadContext. */
 static void phase_registration(HANDLE t,DWORD tid,int set_ok)
 {
+#if DG_ENABLE_DIAGNOSTICS
+
     CONTEXT c;PHASE_REG *r;
     if(!g_phase_enabled)return;
     if(g_phase_reg_count>=256){g_phase_reg_dropped++;return;}
@@ -89,10 +97,16 @@ static void phase_registration(HANDLE t,DWORD tid,int set_ok)
     r->dr0=c.Dr0;r->dr1=c.Dr1;r->dr2=c.Dr2;r->dr3=c.Dr3;r->dr7=c.Dr7;
     r->match=set_ok&&c.Dr2==g_phase_stage_addr&&c.Dr3==g_phase_consume_addr&&
         (c.Dr7&0xff0000f0ull)==0x50;
+
+#else
+
+#endif
 }
 /* Observation of registers delivered on the already-working camera seam. */
 static void phase_camera_context(const CONTEXT *c)
 {
+#if DG_ENABLE_DIAGNOSTICS
+
     PHASE_EVENT e;LARGE_INTEGER q;
     if(!g_phase_enabled)return;
     if(!TryAcquireSRWLockExclusive(&g_phase_lock)){InterlockedIncrement(&g_phase_dropped);return;}
@@ -106,10 +120,16 @@ static void phase_camera_context(const CONTEXT *c)
     if(g_phase_count<PHASE_CAP)g_phase_events[g_phase_count++]=e;
     else InterlockedIncrement(&g_phase_dropped);
     ReleaseSRWLockExclusive(&g_phase_lock);
+
+#else
+
+#endif
 }
 /* Outgoing capture arguments, NOT proof of GPU/copy/submission success. */
 static void phase_link_record(const DG_HOOK_HANDOFF *h,int sequence)
 {
+#if DG_ENABLE_DIAGNOSTICS
+
     PHASE_EVENT e;LARGE_INTEGER q;
     if(!g_phase_enabled)return;
     if(!TryAcquireSRWLockExclusive(&g_phase_lock)){InterlockedIncrement(&g_phase_dropped);return;}
@@ -120,6 +140,10 @@ static void phase_link_record(const DG_HOOK_HANDOFF *h,int sequence)
     if(g_phase_count<PHASE_CAP)g_phase_events[g_phase_count++]=e;
     else InterlockedIncrement(&g_phase_dropped);
     ReleaseSRWLockExclusive(&g_phase_lock);
+
+#else
+
+#endif
 }
 /* Return exactly the owned execution-breakpoint bit, never a foreign trap. */
 static unsigned phase_owned(const CONTEXT *c)
@@ -151,6 +175,8 @@ static int phase_context(CONTEXT *c)
 }
 static void phase_finish(const char *reason)
 {
+#if DG_ENABLE_DIAGNOSTICS
+
     char path[MAX_PATH];FILE *f;LARGE_INTEGER freq;LONG i;int ok=1;
     if(!InterlockedExchange(&g_phase_enabled,0))return;
     arm_all(g_armed!=0); /* Remove DR2/3; existing camera and blur remain. */
@@ -178,10 +204,16 @@ static void phase_finish(const char *reason)
     ReleaseSRWLockExclusive(&g_phase_lock);
     logf_("  stereo phase: %s events %ld dropped %ld -> %s (%s)\r\n",
         ok?"saved":"FAILED",g_phase_count,g_phase_dropped,path,reason);
+
+#else
+
+#endif
 }
 /* Worker thread only: no filesystem IO, waits or thread suspension in VEH. */
 static void phase_poll(void)
 {
+#if DG_ENABLE_DIAGNOSTICS
+
     FILE *f=NULL;unsigned token=0;char extra;ULONGLONG now=GetTickCount64();
     if(InterlockedCompareExchange(&g_phase_enabled,0,0)) {
         if(now-g_phase_start>=10000||g_phase_faults>100000)
@@ -195,4 +227,8 @@ static void phase_poll(void)
     g_phase_attempted=1;g_phase_token=token;g_phase_start=now;
     InterlockedExchange(&g_phase_enabled,1);
     logf_("  stereo phase: started token %u, ten seconds, observer threads %d\r\n",token,arm_all(1));
+
+#else
+
+#endif
 }

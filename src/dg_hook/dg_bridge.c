@@ -1,3 +1,4 @@
+#include "dg_build_profile.h"
 /* dg_bridge.c - F2: in-process anchors, a detour, and the FPS state machine.
  *
  * Read dg_bridge.h first for the shape. What follows is, in order:
@@ -3142,13 +3143,25 @@ void dg_bridge_configure(const DG_BRIDGE_CONFIG *cfg)
 
 void dg_bridge_rec_pair(struct DG_REC_PAIRSTATE *out)
 {
+#if DG_ENABLE_DIAGNOSTICS
+
     if (!out) return;
     *out = g_b.rec_pair;
+
+#else
+
+#endif
 }
 
 void dg_bridge_rec_camera(const MAT *eye, const MAT *pers)
 {
+#if DG_ENABLE_DIAGNOSTICS
+
     dg_rec_pair_camera(&g_b.rec_pair, eye, pers);
+
+#else
+
+#endif
 }
 
 void dg_bridge_request_toggle(void)
@@ -5493,6 +5506,8 @@ static void move_tick(int safe_gameplay)
 
 void dg_bridge_move_probe_now(ULONGLONG image_base)
 {
+#if DG_ENABLE_DIAGNOSTICS
+
     ULONGLONG pad = g_b.a.player_pad;
     LONG wt = InterlockedCompareExchange(&g_b.mp_w_tick, 0, 0);
     LONG now = InterlockedCompareExchange(&g_b.c_ticks, 0, 0);
@@ -5557,6 +5572,10 @@ void dg_bridge_move_probe_now(ULONGLONG image_base)
         InterlockedExchange(&g_b.mp_c_data2, (LONG)RD32(id + 0xCA4));
     }
     InterlockedIncrement(&g_b.mp_c_seen);
+
+#else
+
+#endif
 }
 
 /* One tick of the trigger contract. In DRY nothing is written anywhere: the

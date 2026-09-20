@@ -4,31 +4,31 @@
 
 An unofficial PC VR mod for **METAL GEAR SOLID 2: Sons of Liberty — Master Collection Version** on Windows, using OpenXR and **AER (Alternate Eye Rendering)**.
 
-**[Download Public Beta 3](https://github.com/Shiffo0/MGS2-PCVR-Beta/releases/tag/v0.3.0-beta.3)** · [Installation](#installation) · [Controls](#controls) · [Known limitations](#known-limitations) · [Report a problem](https://github.com/Shiffo0/MGS2-PCVR-Beta/issues)
+**[Download Public Beta](https://github.com/Shiffo0/MGS2-PCVR/releases/tag/v0.3.1-beta.3)** · [Installation](#installation) · [Controls](#controls) · [Known limitations](#known-limitations) · [Report a problem](https://github.com/Shiffo0/MGS2-PCVR/issues)
 
 > [!IMPORTANT]
-> **The earlier Tanker beta was reported fully playable with the workarounds below.** This update includes experimental Raiden/weapon work and needs a fresh headset regression test. Plant is not yet supported as a complete VR campaign.
+> **The earlier Tanker beta was reported fully playable with the workarounds below.** This build has received a short Quest 3 test and includes experimental Raiden/weapon work. Plant is not yet supported as a complete VR campaign.
 
 ## Compatibility
 
 | Item | Beta status |
 | --- | --- |
-| Headset baseline | **Meta Quest 3**, connected to a Windows gaming PC; new combined build awaits headset acceptance |
+| Headset baseline | **Meta Quest 3**, connected to a Windows gaming PC; tested development headset |
 | Controllers | Quest Touch Plus; default right-handed layout |
 | Game | Steam Master Collection version of MGS2 (App 2131640) |
 | Local game baseline | Steam build 21578573 |
-| Mod build | **5AC0F9C8** — Public Beta 3 |
-| Tanker / Snake | Earlier beta reported fully playable; this update needs a regression playthrough |
+| Mod build | **479DF688** — Public Beta |
+| Tanker / Snake | Earlier beta reported fully playable; full campaign regression on this build is not recorded |
 | Plant / Raiden | In development; not supported as a complete campaign |
 | Other headsets / game versions | Not validated for this beta |
 
-Quest 3 and Tanker playability were reported for the earlier beta build 12683251. Build 5AC0F9C8 passed its recorded build and desk checks and was deployed, but a new headset acceptance test for this combined build has not been recorded. This is a PC mod, not a standalone Quest application.
+Quest 3 and Tanker playability were reported for the earlier beta build 12683251. Build 479DF688 passed its build and desk checks, was installed, and received a short Quest 3 test before approval for this release. This does not establish a full campaign regression or validation of every experimental feature. This is a PC mod, not a standalone Quest application.
 
-## Included in build 5AC0F9C8
+## Included in build 479DF688
 
-This release packages the complete selected mod binary and its matching buildable source baseline, including Stinger controller/aim integration, HF Blade support, native HUD and wrist-radar work, coolant changes, M9 slide handling and pistol-reload work. These inclusions describe implementation, not completed headset acceptance. HF Blade, M9 slide, pistol reload, wrist radar and UI settings are enabled in the supplied configuration; diagnostic recording/probes are disabled.
+This release packages the complete selected mod binary and its buildable source baseline, including Stinger controller/aim integration, HF Blade support, native HUD and wrist-radar work, coolant changes, M9 slide handling and pistol-reload work. Experimental feature coverage remains limited; see the known limitations below. HF Blade, M9 slide, pistol reload, wrist radar and UI settings are enabled in the supplied configuration; heavy diagnostic recording/probes are excluded by the release build profile. Old measurement markers cannot activate them. Limited startup/error logging remains.
 
-Additional changes include M9 hand contact during slide manipulation, radar and LIFE placement along the rendered forearm, more permissive wrist-look activation, and menu/recovery fixes. Wrist activation uses head orientation, not eye tracking. Radar comfort and hanging behavior still need headset validation.
+Additional changes include M9 hand contact during slide manipulation, radar and LIFE placement along the rendered forearm, more permissive wrist-look activation, and menu/recovery fixes. Wrist activation uses head orientation, not eye tracking. Radar comfort and hanging behavior remain areas for further testing.
 
 ## Known limitations
 
@@ -41,7 +41,7 @@ Additional changes include M9 hand contact during slide manipulation, radar and 
 
 1. Install and launch your own Steam copy of **MGS2 — Master Collection Version** once, then close the game.
 2. Connect your Quest 3 to your PC, start your PC VR connection software and make sure its OpenXR runtime is active. Confirm that PC VR works before starting the game.
-3. Download **`MGS2-PCVR-v0.3.0-beta.3-5AC0F9C8.zip`** from [Public Beta 3](https://github.com/Shiffo0/MGS2-PCVR-Beta/releases/tag/v0.3.0-beta.3). GitHub's automatic **Source code** ZIP/TAR links are repository snapshots, not the playable mod package.
+3. Download **`MGS2-PCVR-v0.3.1-beta.3-479DF688.zip`** from [Public Beta](https://github.com/Shiffo0/MGS2-PCVR/releases/tag/v0.3.1-beta.3). GitHub's automatic **Source code** ZIP/TAR links are repository snapshots, not the playable mod package.
 4. In Steam, right-click the game → **Manage → Browse local files**. The destination is the folder containing **`METAL GEAR SOLID2.exe`**, normally `steamapps/common/MGS2`.
 5. Back up any existing files with the same names. Extract the release ZIP directly into that folder. Keep its folder structure. If another mod already provides `winmm.dll` or `openxr_loader.dll`, keep a backup and test this beta on a clean mod setup; combinations have not been validated.
 6. Start the game normally through Steam with your headset connected. Use the left controller's **Menu** button for Start. In gameplay, **A** switches VR / Third Person. Face forward in your normal playing position and **hold Y** to recenter.
@@ -114,13 +114,13 @@ There is no release date for complete Raiden support yet.
 - **Session stops after about an hour:** this beta retains the tested 3600-second session setting. Save and restart the game, or increase `seconds` in `dg_hook.on` with the game closed.
 - **Unexpected behavior with other mods:** reproduce with this beta as the only gameplay mod before reporting.
 
-Open an [issue](https://github.com/Shiffo0/MGS2-PCVR-Beta/issues) with the mod build, game version, headset, PC VR connection/runtime, GPU, chapter, exact location and steps to reproduce. State whether it happens in VR, Third Person or both. Review logs before sharing them; do not upload game files or personal data.
+Open an [issue](https://github.com/Shiffo0/MGS2-PCVR/issues) with the mod build, game version, headset, PC VR connection/runtime, GPU, chapter, exact location and steps to reproduce. State whether it happens in VR, Third Person or both. Review logs before sharing them; do not upload game files or personal data.
 
 ## Credits and distribution
 
 Created by **Shiffo0**. Unofficial fan project; not affiliated with or endorsed by Konami or Meta. You must own the game.
 
-The mod implementation is available in [src/](https://github.com/Shiffo0/MGS2-PCVR-Beta/tree/main/src), with build instructions. Playable downloads are provided separately through Releases.
+The mod implementation is available in [src/](https://github.com/Shiffo0/MGS2-PCVR/tree/main/src), with build instructions. Playable downloads are provided separately through Releases.
 
 The original mod code and accompanying documentation are licensed under the **[MIT License](LICENSE)**. This grant covers the contributors' own work only. The game, game assets and trademarks are not covered. Third-party components retain their respective licenses; their notices are included in the release package.
 

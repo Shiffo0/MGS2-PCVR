@@ -1,31 +1,35 @@
-# Public Beta 3 — build 5AC0F9C8
+# MGS2 PCVR Public Beta — 479DF688
 
-Updated playable package and matching buildable mod source for MGS2 Master Collection on Windows/OpenXR, using AER (Alternate Eye Rendering).
+Based on Beta 3 (5AC0F9C8), with heavy diagnostics excluded at compile time. The maintainer completed a short Quest 3 test and approved publication. Full campaign regression and exhaustive experimental-feature validation are not claimed.
 
-## Changes
+## Changed
 
-- Radar and LIFE follow the rendered forearm, with the radar corner aligned near the wrist and its long axis pointing toward the elbow.
-- Wrist-look activation tolerates a more relaxed viewing angle while retaining visibility hysteresis and rejecting the back of the panel. This uses head orientation, not eye tracking.
-- M9 support-hand contact follows the slide during manipulation and blends back on release.
-- Experimental hanging camera, heading and first-person arm-visibility fixes.
-- Menu confirmation and recovery improvements, including movement after getting up.
-- Includes the preceding HF Blade, Stinger, coolant, pistol-reload, native HUD and controller work.
-- All 177 shipping C/C++ and local include files are included in src/. Matching release settings are in config/; recording and diagnostic probes are disabled.
+- Release builds default to `DG_ENABLE_DIAGNOSTICS=0`. Old probe, recorder, dump and debug settings cannot activate measurements, including mixed-case keys.
+- Flight recording, aim observation, eye/near captures, pixel probes, phase/pair traces, HUD memory watches and diagnostic GPU draw trials are disabled at their entry points.
+- Diagnostic GPU query/copy hooks and the experimental MGSHDFix measurement adapter are not installed. Normal draw forwarding, HUD, wrist radar and AER remain enabled.
+- Diagnostic recording buffers are reduced; disabled measurement implementations are removed by compilation/linking. The release binary is 715264 bytes, versus 901120 bytes for the corresponding diagnostic build. This is not a measured FPS improvement.
+- File logging is limited to matching startup/error messages, capped at 256 lines per process. Repeated detailed capture and bridge summaries are excluded.
+- `src/build.bat diagnostic` explicitly enables development measurements and produces `dg_hook-diagnostic.asi`; the default command produces `dg_hook.asi`.
 
-## Validation and limitations
+## Validation
 
-The packaged binary matches the installed build and the selected artifact byte for byte. All 323 entries in the artifact source manifest were verified. Recorded checks for this baseline passed: radar gaze (87 checks), WARP runtime harness (1199 checks), main suite, IK suite and recorder (9/9). The curated source also builds successfully; existing f2l compiler warnings remain.
+- Published release tests: 30 profile checks and 11 GPU checks passed. Old opt-in settings are ignored; diagnostic entry points are inert; query/copy slots stay unchanged and the gameplay shader hook remains installed.
+- Release XR/WARP harness: 1075 checks passed, including rejection of the pixel-probe environment flag, inactive near capture, production image copies, frame submission, LIFE and radar paths.
+- Release HUD/radar WARP harness: 5263 checks passed, including inactive copy tracing.
+- Development main suite and IK suite passed; recorder 9/9; development XR/WARP 1199 checks; development HUD/radar 5263 checks passed.
+- Both binary profiles compile. Existing f2l warnings C4013/C4142 remain.
+- The source and package are screened for protected references and accidental development artifacts. The final download is verified by SHA256.
 
-**Quest 3 is the development and testing headset. A complete headset regression test for this exact build has not been recorded.** The earlier Tanker beta was reported fully playable with workarounds; that does not establish acceptance of every new feature. Radar comfort, hanging behavior and the expanded weapon interactions require further live validation. Plant/Raiden is not yet supported as a complete VR campaign.
+## Quest 3 testing and limitations
 
-Use Third Person to get past security-camera sections. Hanging and movement while hanging remain experimental. Grenades remain unsupported. Raiden work still includes SOCOM, coolant, scope, sniper rifle and Stinger validation, plus Nikita support.
+This exact binary was installed for the maintainer's test. The development build and original settings were restored afterwards.
 
-## Download and installation
+Quest 3 remains the development headset. Security-camera traversal requires Third Person; hanging remains experimental; grenades and the complete Plant/Raiden campaign remain unsupported.
 
-Download **MGS2-PCVR-v0.3.0-beta.3-5AC0F9C8.zip** and follow the [installation guide](https://github.com/Shiffo0/MGS2-PCVR-Beta#installation). GitHub's automatic Source code archives are repository snapshots, not playable packages.
+## Package
 
-The unchanged release dg_hook.asi has SHA256:
+`MGS2-PCVR-v0.3.1-beta.3-479DF688.zip` is the playable release. Extract beside the game executable with the game closed, following the README installation steps. GitHub's automatic Source code archives are not playable packages.
 
-`5AC0F9C8A55DC5EDDFC7588884FB99F196B21868768A0E427E5B442D7DA963CE`
+`dg_hook.asi` SHA256: `479DF688C67DE8C1008DB055AF7936E08C1295583EAA614F1FB52DB2450A3544`
 
-Source curation changes documentation comments and three optional diagnostic path literals only. A rebuild is a separate artifact and is not claimed byte-identical to the release binary. MIT covers contributors' own work; third-party notices remain included. No game files, saves or debug symbols are bundled.
+MIT covers contributors' own work. Third-party notices remain included. No game files, saves, debugging symbols or measurement output are bundled.

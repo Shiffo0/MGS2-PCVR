@@ -1,3 +1,4 @@
+#include "dg_build_profile.h"
 /* dg_rec.h - the flight recorder: raw XR input, kept, dumped, replayed.
  *
  * Every arm defect so far has been diagnosed from a phone video of a mirror
@@ -41,7 +42,7 @@
 #include "dg_xr.h"
 #include "dg_aim_replay.h"
 
-#define DG_REC_CAP    16384
+#define DG_REC_CAP DG_DIAGNOSTIC_CAPACITY(16384)
 #define DG_REC_MAGIC  "DGREC6"
 #define DG_REC_MAGIC_V5 "DGREC5"
 /* Older files are still readable, fail-open by layout: v1 (no game-side pair

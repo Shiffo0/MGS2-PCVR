@@ -142,6 +142,8 @@ static void gripdbg_quad(XrCompositionLayerQuad *q,int tile,const double pos[3],
 }
 static void gripdbg_append(XrFrameEndInfo *end,const XrCompositionLayerBaseHeader **layers,
     unsigned capacity,XrCompositionLayerQuad q[6],int render,int theater,int views,XrTime when,uint64_t now) {
+#if DG_ENABLE_DIAGNOSTICS
+
     DG_GRIP_DEBUG s;double a[3],b[3],mid[3],distance=0;int ready,k;
     XrSpaceLocation head={XR_TYPE_SPACE_LOCATION};
     const XrSpaceLocationFlags need=XR_SPACE_LOCATION_ORIENTATION_VALID_BIT|XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT|
@@ -175,4 +177,8 @@ static void gripdbg_append(XrFrameEndInfo *end,const XrCompositionLayerBaseHeade
     for(k=0;k<6;k++)layers[end->layerCount++]=(const XrCompositionLayerBaseHeader *)&q[k];
     end->layers=layers;
     if(!g_gripdbg_logged && g_log){g_log("  M9 debug: actual hit-test sphere/point/line/mm submitted; headset placement unverified\r\n");g_gripdbg_logged=1;}
+
+#else
+
+#endif
 }

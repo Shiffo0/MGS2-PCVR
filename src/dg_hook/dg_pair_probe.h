@@ -6,10 +6,11 @@
  */
 #ifndef DG_PAIR_PROBE_H
 #define DG_PAIR_PROBE_H
+#include "dg_build_profile.h"
 #include <stdint.h>
 #include <io.h>
 #include <fcntl.h>
-#define PP_CAPACITY 16384
+#define PP_CAPACITY DG_DIAGNOSTIC_CAPACITY(16384)
 #define PP_STAGE_CALL 0x89DFDull
 #define PP_STAGE_RETURN 0x89E00ull
 #define PP_CONSUMER_CALL 0xFBF2ull
@@ -40,8 +41,14 @@ static ULONG64 pp_pending_rsp;
 static unsigned pp_pending_which;
 /* Only the measured same-thread call site is eligible. Unknown callers fail closed. */
 static int pp_pending_context(const CONTEXT *c) {
+#if DG_ENABLE_DIAGNOSTICS
+
     return pp_pending_tid==(LONG)GetCurrentThreadId() &&
         c->Dr3==pp_base+PP_CONSUMER_RETURN;
+
+#else
+return 0;
+#endif
 }
 
 static void pp_fail(const char *reason) {
@@ -73,6 +80,8 @@ static int cq_mode,cq_used,cq_pending,cp_mode;
 static void cp_prepare(void);
 static void pp_begin(ULONG64 base, const char *marker, const char *output,
                      void (*log)(const char *,...)) {
+#if DG_ENABLE_DIAGNOSTICS
+
     FILE *f=NULL;
     char text[64]={0};
     size_t n;
@@ -98,21 +107,37 @@ static void pp_begin(ULONG64 base, const char *marker, const char *output,
     strcpy_s(pp_output,sizeof pp_output,output);
     pp_base=base; pp_begin_ms=GetTickCount(); pp_status=PP_RECORDING;
     log("  pair probe: OBSERVE ONLY %s; 8 Presents / 16384 events / 10 seconds; no second render\r\n",pp_return_mode?"shared entries plus same-thread consumer return":"shared entries (no returns)");
+
+#else
+
+#endif
 }
 static void pp_prepare(ULONG64 base,const char *marker,const char *output) {
+#if DG_ENABLE_DIAGNOSTICS
+
     pp_base=0; pp_status=PP_OFF; pp_attempted=0;
     pp_request_base=base;
     strcpy_s(pp_request_marker,sizeof pp_request_marker,marker);
     strcpy_s(pp_request_output,sizeof pp_request_output,output);
+
+#else
+
+#endif
 }
 /* Worker poll: the owner can request capture after reaching gameplay.
    One request attempt per session, including a malformed/refused request. */
 static int pp_poll(void (*log)(const char *,...)) {
+#if DG_ENABLE_DIAGNOSTICS
+
     if (pp_attempted || !pp_request_base ||
         GetFileAttributesA(pp_request_marker)==INVALID_FILE_ATTRIBUTES) return 0;
     pp_attempted=1;
     pp_begin(pp_request_base,pp_request_marker,pp_request_output,log);
     return pp_status==PP_RECORDING;
+
+#else
+return 0;
+#endif
 }
 static int pp_store(PP_ROW *row) {
     LARGE_INTEGER now;
@@ -167,6 +192,8 @@ static int pp_native(PP_ROW *r) {
 /* Called from phase_context AFTER the existing render-link event. The
  * host owns the execution trap; this observer must not consume/change it. */
 static void pp_shared_event(unsigned bit,const CONTEXT *c) {
+#if DG_ENABLE_DIAGNOSTICS
+
     PP_ROW row;
     if (pp_status!=PP_RECORDING) return;
     memset(&row,0,sizeof row);
@@ -180,8 +207,14 @@ static void pp_shared_event(unsigned bit,const CONTEXT *c) {
     if (!pp_native(&row)) { pp_fail("native_state_mismatch"); return; }
     if (bit==4 && row.table!=c->Rax) { pp_fail("stage_table_register_mismatch"); return; }
     pp_store(&row);
+
+#else
+
+#endif
 }
 static void pp_return_arm(CONTEXT *c) {
+#if DG_ENABLE_DIAGNOSTICS
+
     ULONG64 target;
     if(!pp_return_mode || pp_status!=PP_RECORDING)return;
     __try {target=*(ULONG64*)c->Rsp;
@@ -197,8 +230,14 @@ static void pp_return_arm(CONTEXT *c) {
     c->Dr3=target;
     if(cq_mode) {PP_ROW r;memset(&r,0,sizeof r);r.which=pp_pending_which;
         if(pp_native(&r))cq_entry(&r);else pp_fail("census_native_entry");}
+
+#else
+
+#endif
 }
 static int pp_return_context(CONTEXT *c) {
+#if DG_ENABLE_DIAGNOSTICS
+
     PP_ROW row;
     if(!pp_pending_context(c) || c->Rip!=pp_base+PP_CONSUMER_RETURN ||
        (c->Dr6&15)!=8 || (c->Dr7&0xff000050ull)!=0x50)return 0;
@@ -211,16 +250,28 @@ static int pp_return_context(CONTEXT *c) {
     InterlockedExchange(&pp_pending_tid,0);
     if(pp_present_id>=8)InterlockedCompareExchange(&pp_status,PP_DONE,PP_RECORDING);
     return 1;
+
+#else
+return 0;
+#endif
 }
 static void pp_present(void) {
+#if DG_ENABLE_DIAGNOSTICS
+
     PP_ROW row;
     if (pp_status!=PP_RECORDING || !pp_started) return;
     memset(&row,0,sizeof row); row.event=PP_PRESENT;
     if (pp_store(&row) && InterlockedIncrement(&pp_present_id)>=8 && !pp_pending_tid)
         InterlockedCompareExchange(&pp_status,PP_DONE,PP_RECORDING);
+
+#else
+
+#endif
 }
 /* Worker only. Stop publication before taking a blocking lock or doing I/O. */
 static void pp_flush(int finish,void (*log)(const char *,...)) {
+#if DG_ENABLE_DIAGNOSTICS
+
     FILE *f=NULL;
     HANDLE file;
     int fd;
@@ -257,5 +308,9 @@ static void pp_flush(int finish,void (*log)(const char *,...)) {
           failed?"WRITE FAILED":"wrote",pp_count,pp_status,pp_failure?pp_failure:"none",pp_output); }
     pp_dumped=1;
     ReleaseSRWLockExclusive(&pp_lock);
+
+#else
+
+#endif
 }
 #endif

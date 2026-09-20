@@ -4,11 +4,13 @@ typedef struct {
     LONGLONG qpc;DWORD tid;LONG frame;int kind,slot,sequence;
     uint64_t capture;DG_HOOK_HANDOFF h;
 } CI_ROW;
-static CI_ROW ci_rows[256];
+static CI_ROW ci_rows[DG_DIAGNOSTIC_CAPACITY(256)];
 static unsigned ci_count;
 static LONG ci_lost;
 static SRWLOCK ci_lock=SRWLOCK_INIT;
 static void ci_record(int kind,int slot,int sequence,const DG_HOOK_HANDOFF *h,uint64_t capture) {
+#if DG_ENABLE_DIAGNOSTICS
+
     CI_ROW r;LARGE_INTEGER q;
     if(pp_status!=PP_RECORDING)return;
     memset(&r,0,sizeof r);QueryPerformanceCounter(&q);r.qpc=q.QuadPart;
@@ -17,8 +19,14 @@ static void ci_record(int kind,int slot,int sequence,const DG_HOOK_HANDOFF *h,ui
     if(!TryAcquireSRWLockExclusive(&ci_lock)){InterlockedIncrement(&ci_lost);return;}
     if(ci_count<256)ci_rows[ci_count++]=r;else InterlockedIncrement(&ci_lost);
     ReleaseSRWLockExclusive(&ci_lock);
+
+#else
+
+#endif
 }
 static void ci_native(unsigned bit,const CONTEXT *c) {
+#if DG_ENABLE_DIAGNOSTICS
+
     DG_HOOK_HANDOFF h;LONG before,after;
     if(pp_status!=PP_RECORDING)return;
     if(bit==4 && c->Rcx==g_chan0 && c->Rsi==24) {
@@ -28,13 +36,25 @@ static void ci_native(unsigned bit,const CONTEXT *c) {
         if(before!=after || (after&1))h.valid=0;
         ci_record(1,(int)c->Rdx,(int)after,&h,0);
     } else if(bit==8)ci_record(2,(int)c->Rcx,0,NULL,0);
+
+#else
+
+#endif
 }
 static void ci_published(int eye,uint64_t id) {
+#if DG_ENABLE_DIAGNOSTICS
+
     DG_HOOK_HANDOFF h;memset(&h,0,sizeof h);h.eye=eye;
     ci_record(4,-1,0,&h,id);
+
+#else
+
+#endif
 }
 /* Worker only; publication can race draining but each row is copied atomically. */
 static void ci_drain(void) {
+#if DG_ENABLE_DIAGNOSTICS
+
     static CI_ROW copy[256];unsigned n,i;LONG lost;
     AcquireSRWLockExclusive(&ci_lock);n=ci_count;memcpy(copy,ci_rows,n*sizeof *copy);ci_count=0;
     lost=ci_lost;ReleaseSRWLockExclusive(&ci_lock);
@@ -46,4 +66,8 @@ static void ci_drain(void) {
         r->h.fov.left,r->h.fov.right,r->h.fov.up,r->h.fov.down);
     }
     if(n)logf_("CAPIDENT health lost %ld\r\n",lost);
+
+#else
+
+#endif
 }

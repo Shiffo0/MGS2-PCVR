@@ -93,6 +93,8 @@ bool forwardRefused(const char*reason){if(logger)logger("draw_trial: forward ref
 // All fields below are written under lifetime-exclusive before publishing the
 // pointer hook. Native entries consult only the atomic state until publication.
 void beginForward(){
+#if DG_ENABLE_DIAGNOSTICS
+
  HMODULE module=GetModuleHandleW(L"MGSHDFix.asi");
  if(!module){setForwardStatus(FORWARD_DIRECT);return;}
  forwardModule=(BYTE*)module;
@@ -101,6 +103,10 @@ void beginForward(){
   forwardRefused("module_pin");setForwardStatus(FORWARD_REJECTED);return;
  }
  setForwardStatus(FORWARD_WAITING);log("forward pending: waiting for validated MGSHDFix original slot");
+
+#else
+
+#endif
 }
 void rejectForward(const char*reason){forwardRefused(reason);setForwardStatus(FORWARD_REJECTED);}
 void probeForward(){
@@ -131,7 +137,13 @@ void probeForward(){
  if(forwardAttempts>=120){if(logger)logger("draw_trial: forward timeout last=%s attempts=%u\r\n",forwardLastReason,forwardAttempts);setForwardStatus(FORWARD_REJECTED);}
 }
 void pollForward(){
+#if DG_ENABLE_DIAGNOSTICS
+
  if(forwardStatus()!=FORWARD_WAITING)return;
  ULONGLONG now=GetTickCount64();if(now<forwardNextPoll)return;forwardNextPoll=now+250;
  AcquireSRWLockExclusive(&lifetime);probeForward();ReleaseSRWLockExclusive(&lifetime);
+
+#else
+
+#endif
 }

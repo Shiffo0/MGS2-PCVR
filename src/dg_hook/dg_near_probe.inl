@@ -15,9 +15,15 @@ static struct {
     uint64_t capture_id[2], qpc[2];
 } g_np;
 static void near_probe_free(void) {
+#if DG_ENABLE_DIAGNOSTICS
+
     int i;for(i=0;i<2;i++)if(g_np.texture[i]){g_np.texture[i]->lpVtbl->Release(g_np.texture[i]);g_np.texture[i]=NULL;}
     if(g_np.query){g_np.query->lpVtbl->Release(g_np.query);g_np.query=NULL;}
     g_np.mask=0;g_np.token=0;g_np.polls=0;
+
+#else
+
+#endif
 }
 static void near_numbers(FILE *f,const double *a,int n){int i;fputc('[',f);for(i=0;i<n;i++){if(i)fputc(',',f);if(_finite(a[i]))fprintf(f,"%.17g",a[i]);else fputs("null",f);}fputc(']',f);}
 static void near_pose(FILE *f,const DG_XR_RAW_POSE *p){double q[4]={p->qx,p->qy,p->qz,p->qw},v[3]={p->px,p->py,p->pz};fputs("{\"q\":",f);near_numbers(f,q,4);fputs(",\"p\":",f);near_numbers(f,v,3);fputc('}',f);}
@@ -69,6 +75,8 @@ static void near_finish(void){
     g_log("near probe: sample %u %s -> %s\r\n",g_np.token,ok?"saved":"FAILED",dir);near_probe_free();
 }
 static void near_probe_capture(ID3D11Texture2D *back,int eye,int mono,const DG_XR_RAW_POSE *raw,const DG_PROJ_FOV *fov,const DG_NEAR_META *meta,uint64_t id){
+#if DG_ENABLE_DIAGNOSTICS
+
     ULONGLONG now=GetTickCount64();FILE *f;unsigned token=0;char extra;HRESULT hr;D3D11_TEXTURE2D_DESC d;D3D11_QUERY_DESC q={D3D11_QUERY_EVENT,0};LARGE_INTEGER pc;
     if(g_np.token&&(mono||g_state!=XR_SESSION_STATE_FOCUSED||!meta||!meta->valid||!raw)){near_probe_free();return;}
     if(g_np.mask==3){near_finish();return;}
@@ -96,5 +104,9 @@ static void near_probe_capture(ID3D11Texture2D *back,int eye,int mono,const DG_X
         hr=g_dev->lpVtbl->CreateQuery(g_dev,&q,&g_np.query);if(FAILED(hr)){near_probe_free();return;}
         g_ctx->lpVtbl->End(g_ctx,(ID3D11Asynchronous*)g_np.query);
     }
+
+#else
+
+#endif
 }
 #pragma warning(pop)
