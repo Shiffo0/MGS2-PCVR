@@ -1,3 +1,4 @@
+#include "dg_build_profile.h"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <new>
@@ -63,6 +64,8 @@ struct QueryObservation {
  ~QueryObservation(){if(tracked)queryParent=previous;}
 };
 void flushQueries(){
+#if DG_ENABLE_DIAGNOSTICS
+
  if(!logger)return;
  for(auto&r:queryRecords){
   if(!InterlockedCompareExchange(&r.ready,0,0)||InterlockedCompareExchange(&r.emitted,1,0))continue;
@@ -79,6 +82,10 @@ void flushQueries(){
  LONG lost=InterlockedCompareExchange(&queryOverflow,0,0);
  if(lost!=InterlockedExchange(&queryOverflowReported,lost))
   logger("draw_query: overflow=%ld capacity=%ld coverage=incomplete\r\n",lost,queryCapacity);
+
+#else
+
+#endif
 }
 
 bool runtimePointer(void*p){
@@ -114,6 +121,8 @@ int readNative(void*,uint64_t a,void*p,unsigned n){
 }
 bool forwardApi(void*api);
 template<class F>void intercept(ID3D11DeviceContext*c,F next,void*api,const char*kind,bool forwarded=false){
+#if DG_ENABLE_DIAGNOSTICS
+
  if(InterlockedCompareExchange(&requested,0,0)!=1){next();return;}
  // Never wait on lifetime while holding the external callback mutex.
  if(!TryAcquireSRWLockShared(&lifetime)){next();return;}
@@ -139,6 +148,10 @@ template<class F>void intercept(ID3D11DeviceContext*c,F next,void*api,const char
  bool witness=ns_take(&after,base,readNative,nullptr)&&!memcmp(&before,&after,sizeof before);
  if(logger)logger("draw_trial: submitted kind=%s thread=%lu extra_draws=1 native_witness_equal=%d timing_perturbed=possible width=%u height=%u depth=%d\r\n",kind,GetCurrentThreadId(),witness,t->color.desc.Width,t->color.desc.Height,t->hasDepth);
  if(!witness){log("native_witness_changed; result invalid");delete t;return;}pending=t;polls=0;
+
+#else
+next();
+#endif
 }
 void ui2dOnDraw(ID3D11DeviceContext*,unsigned);void ui2dOnPresent();bool ui2dSkipDraw(ID3D11DeviceContext*,UINT); // dg_ui2d.inl
 bool radarOnDraw(ID3D11DeviceContext*,UINT);void radarOnPresent(); // dg_radar.inl
@@ -220,10 +233,15 @@ bool prepareSites(uint64_t base){
 extern "C" void dg_draw_trial_attach(ID3D11Device*d,void(*out)(const char*,...)){
  AcquireSRWLockExclusive(&lifetime);if(everAttached){ReleaseSRWLockExclusive(&lifetime);return;}everAttached=true;logger=out;device=d;d->GetImmediateContext(&context);
  if(!context||FAILED(context.As(&multi))){log("attach refused: serialization unavailable");ReleaseSRWLockExclusive(&lifetime);return;}
- oldProtected=multi->GetMultithreadProtected()!=FALSE;auto table=*(void***)d;void*ours[]={(void*)createQuery,(void*)createPredicate,(void*)createCounter};bool ok=true;
+ oldProtected=multi->GetMultithreadProtected()!=FALSE;
+#if DG_ENABLE_DIAGNOSTICS
+auto table=*(void***)d;void*ours[]={(void*)createQuery,(void*)createPredicate,(void*)createCounter};bool ok=true;
  for(unsigned i=0;i<3;i++){hooks[i]={table+24+i,table[24+i],ours[i]};if(!runtimePointer(hooks[i].next))ok=false;}
  if(SUCCEEDED(d->QueryInterface(IID_PPV_ARGS(&modernDevice)))){auto mt=*(void***)modernDevice.Get();hooks[3]={mt+60,mt[60],(void*)createQuery1};hookCount=4;if(!runtimePointer(hooks[3].next))ok=false;}
  InterlockedExchangePointer(&queryOwner,d);InterlockedExchangePointer(&modernQueryOwner,modernDevice.Get());
+#else
+ bool ok=true; hookCount=0;
+#endif
 #ifdef DG_DRAW_TRIAL_TEST
  extern uint64_t testSiteBase;
  uint64_t base=testSiteBase;
@@ -235,10 +253,18 @@ extern "C" void dg_draw_trial_attach(ID3D11Device*d,void(*out)(const char*,...))
  if(ok){multi->SetMultithreadProtected(TRUE);for(unsigned i=0;i<hookCount;i++){auto&h=hooks[i];if(!writeSlot(h,h.next,h.ours)){ok=false;break;}}}
  if(ok)for(auto&s:sites)if(!codeWrite(s,s.original,s.patch)){ok=false;break;}
  if(!ok){restoreAll();multi->SetMultithreadProtected(oldProtected);log("attach refused: code/API ownership; no draw trial");}
- else{installed=true;ui2dInstall(d);beginForward();log("attached: native API callsites only; query policy=timing_allowed_geometry_only; indexed=deferred_validated_forward; default off");}
+ else{installed=true;ui2dInstall(d);beginForward();
+#if DG_ENABLE_DIAGNOSTICS
+ log("attached: native API callsites only; query policy=timing_allowed_geometry_only; indexed=deferred_validated_forward; default off");
+#else
+ log("attached: gameplay HUD/radar only; diagnostic GPU hooks excluded");
+#endif
+}
  ReleaseSRWLockExclusive(&lifetime);
 }
-extern "C" void dg_draw_trial_poll(const char*marker){flushQueries();pollForward();
+extern "C" void dg_draw_trial_poll(const char*marker){
+#if DG_ENABLE_DIAGNOSTICS
+flushQueries();pollForward();
  if(marker){ // The constant-buffer capture has its own request word and is independent of the one-shot draw trial.
   char cp[MAX_PATH],cbuf[64];size_t cn=0;
   if(!strcpy_s(cp,marker)){auto cl=strrchr(cp,'\\');bool named=cl?!strcpy_s(cl+1,sizeof(cp)-(cl+1-cp),"dg_draw_trial.on"):!strcpy_s(cp,"dg_draw_trial.on");
@@ -251,20 +277,33 @@ extern "C" void dg_draw_trial_poll(const char*marker){flushQueries();pollForward
  if(n==14&&!memcmp(buf,"identical_draw",14)){LifeLock life;if(!installed){InterlockedExchange(&requested,2);log("refused=no_api_owner extra_draws=0");}else if(forwardStatus()==FORWARD_WAITING){log("request deferred: forward binding pending");}
  else if(forwardStatus()==FORWARD_REJECTED){InterlockedExchange(&requested,2);log("refused=forward_binding_unavailable extra_draws=0");}
  else InterlockedCompareExchange(&requested,1,0);}
+
+#else
+
+#endif
 }
-extern "C" void dg_draw_trial_present(){LifeLock life;if(!installed||stopping)return;MultiLock lock;if(!ownerThread)ownerThread=GetCurrentThreadId();
+extern "C" void dg_draw_trial_present(){
+#if DG_ENABLE_DIAGNOSTICS
+LifeLock life;if(!installed||stopping)return;MultiLock lock;if(!ownerThread)ownerThread=GetCurrentThreadId();
  cbOnPresent();ui2dOnPresent();radarOnPresent();
  if(InterlockedCompareExchange(&requested,0,0)==1&&++requestPresents>120){InterlockedExchange(&requested,2);log("refused=no_direct_draw extra_draws=0");}
  if(!pending)return;if(ownerThread!=GetCurrentThreadId()||++polls>120||FAILED(device->GetDeviceRemovedReason())){log("readback timeout/thread-change/device-loss; no retry");delete pending;pending=nullptr;return;}
  unsigned long long cm=0,cc=0,dm=0,dc=0;int a=pending->color.compare(context.Get(),cm,cc),b=pending->hasDepth?pending->depth.compare(context.Get(),dm,dc):1;if(a==0||b==0)return;
  if(logger)logger("draw_trial: readback valid=%d color_diff_bytes=%llu depth_diff_bytes=%llu normal_changed_color=%llu normal_changed_depth=%llu nontrivial=%d\r\n",a==1&&b==1,cm,dm,cc,dc,cc+dc>0);delete pending;pending=nullptr;
+
+#else
+LifeLock life; if(!installed || stopping)return; MultiLock lock; ui2dOnPresent(); radarOnPresent();
+#endif
 }
 extern "C" void dg_draw_trial_stop(){InterlockedExchange(&stopping,1);AcquireSRWLockExclusive(&lifetime);bool owned=sitesOwned();
  // Code sites remain forwarding-only until process exit. Unlike pointer slots,
  // ten instruction bytes cannot safely be restored amid concurrent execution.
  restoreForward();setForwardStatus(FORWARD_STOPPED);ui2dRemove();
  for(auto&h:hooks)if(h.slot&&*h.slot==h.ours)writeSlot(h,h.ours,h.next);
- installed=false;delete pending;pending=nullptr;
+ installed=false;
+#if DG_ENABLE_DIAGNOSTICS
+ delete pending;pending=nullptr;
+#endif
  InterlockedExchangePointer(&queryOwner,nullptr);InterlockedExchangePointer(&modernQueryOwner,nullptr);
  // Keep serialization enabled until the device dies. Turning it off rewrites
  // runtime dispatch while a normal, forwarding-only draw may still be active.
@@ -276,11 +315,17 @@ extern "C" void dg_draw_trial_stop(){InterlockedExchange(&stopping,1);AcquireSRW
 // Camera-seam publisher for the constant-buffer capture. Called from the VEH
 // camera hook: interlocked counters and four 64-byte copies, nothing else.
 extern "C" void dg_cb_probe_camera(int eye,const float*eye_pers,const float*pers,const float*eye_inv,const float*eye_world){
+#if DG_ENABLE_DIAGNOSTICS
+
  LONG n=InterlockedIncrement(&cbCamNext);CbCam&c=cbCams[(unsigned)(n-1)%cbCamCount];
  InterlockedIncrement(&c.seq); // odd: writer active
  c.eye=eye;c.tick=GetTickCount64();
  memcpy(c.m[0],eye_pers,64);memcpy(c.m[1],pers,64);memcpy(c.m[2],eye_inv,64);memcpy(c.m[3],eye_world,64);
  InterlockedIncrement(&c.seq);
+
+#else
+
+#endif
 }
 // 2D sprite placement: configuration, back-buffer size and the heartbeat line.
 extern "C" void dg_ui2d_configure(int on,int scale_mils,int conv_e5,int sign,const unsigned long long*vs,unsigned count){
@@ -308,7 +353,13 @@ extern "C" long dg_ui2d_last_frame_draws(void){return ui2dLast.draws;}
 extern "C" void dg_ui2d_backbuffer_ptr(void*p){ui2dBackbufferPtr=p;}
 extern "C" long dg_ui2d_last_frame_bb(long*indexed,void**srv){if(indexed)*indexed=ui2dLastBbIndexed;if(srv)*srv=ui2dLastBbSrv;return ui2dLastBbDraws;}
 // Arms the final-buffer trace for the next `frames` frames; a and b are the two final textures (identity only).
-extern "C" void dg_ui2d_trace(int frames,void*a,void*b){ui2dEnsureCopyHooks();ui2dTraceTarget[0]=a;ui2dTraceTarget[1]=b;ui2dTraceCount=0;ui2dTraceOverflow=0;ui2dTraceFrameNo=0;InterlockedExchange(&ui2dTraceLeft,frames<0?0:frames>16?16:frames);}
+extern "C" void dg_ui2d_trace(int frames,void*a,void*b){
+#if DG_ENABLE_DIAGNOSTICS
+ui2dEnsureCopyHooks();ui2dTraceTarget[0]=a;ui2dTraceTarget[1]=b;ui2dTraceCount=0;ui2dTraceOverflow=0;ui2dTraceFrameNo=0;InterlockedExchange(&ui2dTraceLeft,frames<0?0:frames>16?16:frames);
+#else
+
+#endif
+}
 // Present thread: 1 while alternate-eye stereo gameplay is being captured and vr_feedback_skip is on.
 extern "C" void dg_ui2d_feedback(int on){InterlockedExchange(&ui2dFeedbackOn,on?1:0);}
 extern "C" void dg_ui2d_feedback_stats(long*skipped,long*checked){if(skipped)*skipped=ui2dFeedbackSkipped;if(checked)*checked=ui2dFeedbackChecked;}

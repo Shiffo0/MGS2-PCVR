@@ -1,5 +1,8 @@
 # MGS2 PCVR — Public Beta
 
+> [!IMPORTANT]
+> **Player-build candidate `479DF688` — Quest 3 validation pending.** This branch adds a release profile with heavy measurements disabled at compile time. See [release notes](RELEASE_NOTES.md). The Beta 3 download linked below remains the existing build until headset validation is complete.
+
 **MGS2 in PC VR — Quest 3 development baseline.**
 
 An unofficial PC VR mod for **METAL GEAR SOLID 2: Sons of Liberty — Master Collection Version** on Windows, using OpenXR and **AER (Alternate Eye Rendering)**.
@@ -26,7 +29,7 @@ Quest 3 and Tanker playability were reported for the earlier beta build 12683251
 
 ## Included in build 5AC0F9C8
 
-This release packages the complete selected mod binary and its matching buildable source baseline, including Stinger controller/aim integration, HF Blade support, native HUD and wrist-radar work, coolant changes, M9 slide handling and pistol-reload work. These inclusions describe implementation, not completed headset acceptance. HF Blade, M9 slide, pistol reload, wrist radar and UI settings are enabled in the supplied configuration; diagnostic recording/probes are disabled.
+This release packages the complete selected mod binary and its buildable source baseline, including Stinger controller/aim integration, HF Blade support, native HUD and wrist-radar work, coolant changes, M9 slide handling and pistol-reload work. These inclusions describe implementation, not completed headset acceptance. HF Blade, M9 slide, pistol reload, wrist radar and UI settings are enabled in the supplied configuration; diagnostic recording/probes are disabled.
 
 Additional changes include M9 hand contact during slide manipulation, radar and LIFE placement along the rendered forearm, more permissive wrist-look activation, and menu/recovery fixes. Wrist activation uses head orientation, not eye tracking. Radar comfort and hanging behavior still need headset validation.
 

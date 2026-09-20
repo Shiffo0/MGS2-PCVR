@@ -76,6 +76,8 @@ ID3D11Buffer *cbStagingFor(ID3D11Device *d, UINT bytes) {
 // The draw path. kind 0 = DrawIndexed, 1 = Draw. Runs BEFORE the draw is
 // forwarded, so the buffers hold what this draw will use.
 void cbOnDraw(ID3D11DeviceContext *c, unsigned kind, UINT count, UINT first, INT base) {
+#if DG_ENABLE_DIAGNOSTICS
+
     if (InterlockedCompareExchange(&cbState, 0, 0) != 2) return;
     if (!TryAcquireSRWLockShared(&lifetime)) return;
     struct Release { ~Release() { ReleaseSRWLockShared(&lifetime); } } release;
@@ -131,6 +133,10 @@ void cbOnDraw(ID3D11DeviceContext *c, unsigned kind, UINT count, UINT first, INT
     }
     rec->size = (UINT32)(at - cbUsed);
     cbUsed = at; cbDraws++;
+
+#else
+
+#endif
 }
 
 // Frame boundary, from dg_draw_trial_present (already under the life and
@@ -155,9 +161,15 @@ void cbSnapshotCams() {
     }
 }
 void cbOnPresent() {
+#if DG_ENABLE_DIAGNOSTICS
+
     LONG s = InterlockedCompareExchange(&cbState, 0, 0);
     if (s == 1) { cbFrame = 0; InterlockedExchange(&cbState, 2); }
     else if (s == 2 && ++cbFrame >= cbFrames) { cbSnapshotCams(); InterlockedExchange(&cbState, 3); }
+
+#else
+
+#endif
 }
 
 bool cbWrite(const char *path) {
@@ -177,6 +189,8 @@ bool cbWrite(const char *path) {
 // Worker thread, once a second. `text` is the content of dg_draw_trial.on:
 // "cb_capture <token>" arms one capture whenever the token is new.
 void cbPoll(const char *markerPath, const char *text, size_t n) {
+#if DG_ENABLE_DIAGNOSTICS
+
     if (InterlockedCompareExchange(&cbState, 0, 0) == 3) {
         char path[MAX_PATH];
         if (!strcpy_s(path, markerPath)) {
@@ -218,4 +232,8 @@ void cbPoll(const char *markerPath, const char *text, size_t n) {
     cbUsed = 0; cbDraws = 0; cbFrame = 0; cbTruncated = 0; cbErrors = 0; cbStartTick = GetTickCount64();
     InterlockedExchange(&cbState, 1);
     if (logger) logger("cb_probe: armed token=%s (capture %u of %u; read-only, expect a short hitch)\r\n", cbToken, cbCaptures, cbMaxCaptures);
+
+#else
+
+#endif
 }

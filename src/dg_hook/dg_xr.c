@@ -1,3 +1,4 @@
+#include "dg_build_profile.h"
 
 
 #define WIN32_LEAN_AND_MEAN

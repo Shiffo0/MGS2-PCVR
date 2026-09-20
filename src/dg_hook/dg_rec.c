@@ -106,6 +106,8 @@ void dg_rec_pack(const DG_XR_FRAME *f, long long qpc, unsigned int stream_id,
                  unsigned int pair_id, unsigned int present_frame,
                  unsigned int eye, DG_REC_FRAME *out)
 {
+#if DG_ENABLE_DIAGNOSTICS
+
     /* memset first: the struct has no holes by construction, but "by
        construction" is exactly the claim a future field should not be able
        to silently weaken. A total byte image keeps memcmp meaningful. */
@@ -126,10 +128,16 @@ void dg_rec_pack(const DG_XR_FRAME *f, long long qpc, unsigned int stream_id,
     out->eye = eye;
     out->stream_id = stream_id;
     out->pair_id = pair_id;
+
+#else
+if (out) memset(out,0,sizeof *out);
+#endif
 }
 
 void dg_rec_unpack(const DG_REC_FRAME *r, DG_XR_FRAME *out)
 {
+#if DG_ENABLE_DIAGNOSTICS
+
     memset(out, 0, sizeof *out);
     out->head_raw.qx = r->head[0]; out->head_raw.qy = r->head[1];
     out->head_raw.qz = r->head[2]; out->head_raw.qw = r->head[3];
@@ -137,6 +145,10 @@ void dg_rec_unpack(const DG_REC_FRAME *r, DG_XR_FRAME *out)
     out->head_raw.pz = r->head[6];
     unpack_hand(&r->hand[0], DG_XR_HAND_LEFT, &out->left_hand);
     unpack_hand(&r->hand[1], DG_XR_HAND_RIGHT, &out->right_hand);
+
+#else
+if (out) memset(out,0,sizeof *out);
+#endif
 }
 
 static int camera_basis_valid(const MAT *m)
@@ -173,6 +185,8 @@ static int camera_basis_valid(const MAT *m)
 void dg_rec_pair_camera(DG_REC_PAIRSTATE *pair, const MAT *camera_world,
                         const MAT *projection)
 {
+#if DG_ENABLE_DIAGNOSTICS
+
     float m00, m11, m23;
     int i, j;
 
@@ -198,10 +212,16 @@ void dg_rec_pair_camera(DG_REC_PAIRSTATE *pair, const MAT *camera_world,
     pair->camera_proj[1] = m11;
     pair->camera_proj[2] = m23;
     pair->flags |= DG_REC_PAIR_F_CAMERA;
+
+#else
+
+#endif
 }
 
 int dg_rec_capture(DG_REC_RING *r, const DG_REC_FRAME *f)
 {
+#if DG_ENABLE_DIAGNOSTICS
+
     DG_REC_SLOT *s;
     long idx;
 
@@ -224,10 +244,16 @@ int dg_rec_capture(DG_REC_RING *r, const DG_REC_FRAME *f)
     r->last = *f;
     r->have_last = 1;
     return 1;
+
+#else
+return 0;
+#endif
 }
 
 long dg_rec_write(DG_REC_RING *r, long long qpf, FILE *out, long *torn_out)
 {
+#if DG_ENABLE_DIAGNOSTICS
+
     long total, first, i, written = 0, torn = 0;
 
     if (torn_out) *torn_out = 0;
@@ -276,11 +302,17 @@ long dg_rec_write(DG_REC_RING *r, long long qpf, FILE *out, long *torn_out)
     }
     if (torn_out) *torn_out = torn;
     return written;
+
+#else
+return 0;
+#endif
 }
 
 int dg_rec_read_open(FILE *in, long *count_out, long long *qpf_out,
                      int *v1_out)
 {
+#if DG_ENABLE_DIAGNOSTICS
+
     char line[512];
     long count = -1;
     long long qpf = 0;
@@ -329,10 +361,16 @@ int dg_rec_read_open(FILE *in, long *count_out, long long *qpf_out,
     if (qpf_out) *qpf_out = qpf;
     if (v1_out) *v1_out = v1;
     return 1;
+
+#else
+return 0;
+#endif
 }
 
 int dg_rec_read_next(FILE *in, int v1, DG_REC_FRAME *out)
 {
+#if DG_ENABLE_DIAGNOSTICS
+
     if (!in || !out) return 0;
     memset(out, 0, sizeof *out);
     if (v1 == DG_REC_COMPAT_NONE)
@@ -376,4 +414,8 @@ int dg_rec_read_next(FILE *in, int v1, DG_REC_FRAME *out)
     out->pair.rest_drift_deg = -1.0f;
     if (fread(out, DG_REC_V1_PREFIX, 1, in) != 1) return 0;
     return fread(&out->present_frame, 4 * sizeof(unsigned int), 1, in) == 1;
+
+#else
+return 0;
+#endif
 }

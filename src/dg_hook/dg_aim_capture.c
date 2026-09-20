@@ -1,3 +1,4 @@
+#include "dg_build_profile.h"
 #define _CRT_SECURE_NO_WARNINGS
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -11,7 +12,7 @@
 #include "dg_ik.h"
 #include "dg_weapon_aim.h"
 
-#define CAPACITY 4096u
+#define CAPACITY DG_DIAGNOSTIC_CAPACITY(4096u)
 #define MODELS 16u
 enum { CAP_OK=0, CAP_ANCHOR=100, CAP_READ, CAP_SELECTION,
        CAP_MODEL_COUNT, CAP_CHANGED, CAP_HAND };
@@ -40,7 +41,7 @@ typedef struct {
 } CAP_RECORD;
 static CAP_RECORD ring[CAPACITY], dump_rows[CAPACITY];
 #define NATIVE_WEAPONS 8
-#define NATIVE_ROWS 128
+#define NATIVE_ROWS DG_DIAGNOSTIC_CAPACITY(128)
 static CAP_RECORD native_ring[NATIVE_WEAPONS][NATIVE_ROWS];
 static uint64_t native_counts[NATIVE_WEAPONS],native_stamp[NATIVE_WEAPONS],native_total,native_last_capture;
 static SRWLOCK ring_lock=SRWLOCK_INIT;
@@ -330,11 +331,25 @@ int dg_aim_capture_hand_selection(uintptr_t base, uint64_t expected_arm,
     selection->weapon_id=(uint64_t)r.weapon_id;
     return 1;
 }
-void dg_aim_capture_configure(int on) { InterlockedExchange(&enabled,on?1:0); }
-int dg_aim_capture_enabled(void) { return InterlockedCompareExchange(&enabled,0,0)!=0; }
+void dg_aim_capture_configure(int on) {
+#if DG_ENABLE_DIAGNOSTICS
+ InterlockedExchange(&enabled,on?1:0);
+#else
+
+#endif
+}
+int dg_aim_capture_enabled(void) {
+#if DG_ENABLE_DIAGNOSTICS
+ return InterlockedCompareExchange(&enabled,0,0)!=0;
+#else
+return 0;
+#endif
+}
 void dg_aim_capture_observe(uintptr_t base,uint64_t stream,const MAT *camera,
                             const MAT *proj,const DG_XR_FRAME *frame,int frame_flags,
                             const DG_XR_RAW_POSE *view,int kind) {
+#if DG_ENABLE_DIAGNOSTICS
+
     CAP_RECORD r; LARGE_INTEGER q; int j,k;
     const DG_XR_HAND_POSE *aim;
     if(!dg_aim_capture_enabled() || !camera || !proj || !frame || !view) return;
@@ -369,10 +384,28 @@ void dg_aim_capture_observe(uintptr_t base,uint64_t stream,const MAT *camera,
     r.probe_result=(int)dg_aim_probe_build(&r.input,&r.sample);
     ring[(r.id-1)%CAPACITY]=r;
     ReleaseSRWLockExclusive(&ring_lock);
+
+#else
+
+#endif
 }
-void dg_aim_capture_native_configure(int on) {InterlockedExchange(&native_enabled,on?1:0);}
-int dg_aim_capture_native_enabled(void) {return InterlockedCompareExchange(&native_enabled,0,0)!=0;}
+void dg_aim_capture_native_configure(int on) {
+#if DG_ENABLE_DIAGNOSTICS
+InterlockedExchange(&native_enabled,on?1:0);
+#else
+
+#endif
+}
+int dg_aim_capture_native_enabled(void) {
+#if DG_ENABLE_DIAGNOSTICS
+return InterlockedCompareExchange(&native_enabled,0,0)!=0;
+#else
+return 0;
+#endif
+}
 void dg_aim_capture_native_observe(uintptr_t base,const MAT *camera,const MAT *proj) {
+#if DG_ENABLE_DIAGNOSTICS
+
     CAP_RECORD r;LARGE_INTEGER q;uint64_t now=GetTickCount64();int slot=5,j,k;
     if(!dg_aim_capture_native_enabled() || !camera || !proj)return;
     if(!TryAcquireSRWLockExclusive(&ring_lock)){InterlockedIncrement(&busy_drops);return;}
@@ -390,6 +423,10 @@ void dg_aim_capture_native_observe(uintptr_t base,const MAT *camera,const MAT *p
         r.id=++native_total;native_ring[slot][native_counts[slot]++%NATIVE_ROWS]=r;
     }
     ReleaseSRWLockExclusive(&ring_lock);
+
+#else
+
+#endif
 }
 static void doubles(FILE *f,const double *v,int n) {
     int i; fputc('[',f); for(i=0;i<n;i++) {
@@ -490,6 +527,8 @@ static long dump_snapshot(const char *path) {
     { int bad=ferror(f); if(fclose(f)) bad=1; return bad?-1:(long)n; }
 }
 long dg_aim_capture_dump(const char *path) {
+#if DG_ENABLE_DIAGNOSTICS
+
     long result;
     /* Worker and shutdown may overlap. Never wait from shutdown or let two
        dumpers overwrite each other's scratch rows during file I/O. */
@@ -497,4 +536,8 @@ long dg_aim_capture_dump(const char *path) {
     result=dump_snapshot(path);
     ReleaseSRWLockExclusive(&dump_lock);
     return result;
+
+#else
+return 0;
+#endif
 }

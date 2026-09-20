@@ -64,6 +64,8 @@ static void capture_diag_snapshot_begin(void) {
     memset(g_cd.capture_ms, 0, sizeof(g_cd.capture_ms));
 }
 static void capture_diag_emit(void) {
+#if DG_ENABLE_DIAGNOSTICS
+
     unsigned i;
     ULONGLONG now = GetTickCount64();
     LONG64 n[CD_COUNT];
@@ -111,4 +113,8 @@ static void capture_diag_emit(void) {
               d->Width, d->Height, (unsigned)d->Format, d->MipLevels, d->ArraySize,
               d->SampleDesc.Count, d->SampleDesc.Quality);
     }
+
+#else
+
+#endif
 }

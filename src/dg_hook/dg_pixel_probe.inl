@@ -39,11 +39,17 @@ static int pixel_probe_opt_in(const char *s, DWORD n) {
     return n == 1 && s[0] == '1' && s[1] == 0;
 }
 static void pixel_probe_free(void) {
+#if DG_ENABLE_DIAGNOSTICS
+
     int i;
     for (i=0; i<3; ++i) if (g_pp.stage[i]) {
         g_pp.stage[i]->lpVtbl->Release(g_pp.stage[i]); g_pp.stage[i]=NULL;
     }
     if (g_pp.event) { g_pp.event->lpVtbl->Release(g_pp.event); g_pp.event=NULL; }
+
+#else
+
+#endif
 }
 /* RGB/A bytes, no gamma conversion. Hash and nonblack describe only the same
  * deterministic <=64x36 grid in each full-size staging texture, NOT all pixels.
@@ -71,6 +77,8 @@ static void pixel_probe_stats(DG_PIXEL_STATS *s, const D3D11_MAPPED_SUBRESOURCE 
 /* Called only for an armed mono capture, inside the producer's capture lock.
  * A later producer overwrite is never silently relabelled as this sample. */
 static void pixel_probe_source(ID3D11Texture2D *back, int mono) {
+#if DG_ENABLE_DIAGNOSTICS
+
     D3D11_TEXTURE2D_DESC d; D3D11_QUERY_DESC q; LARGE_INTEGER start; int i;
     if (!g_pp.enabled || g_pp.phase!=PP_ARMED || !mono) return;
     QueryPerformanceCounter(&start);
@@ -102,9 +110,15 @@ static void pixel_probe_source(ID3D11Texture2D *back, int mono) {
         }
     }
     g_pp.producer_us=pixel_probe_us(start);
+
+#else
+
+#endif
 }
 /* Called after the normal destination copy, still in the snapshot lock. */
 static void pixel_probe_destination(ID3D11Texture2D *dst, int eye) {
+#if DG_ENABLE_DIAGNOSTICS
+
     LARGE_INTEGER start; D3D11_TEXTURE2D_DESC d;
     if(!g_pp.enabled || g_pp.phase!=PP_SOURCE || eye!=0) return;
     QueryPerformanceCounter(&start);
@@ -120,6 +134,10 @@ static void pixel_probe_destination(ID3D11Texture2D *dst, int eye) {
     g_ctx->lpVtbl->CopyResource(g_ctx,(ID3D11Resource *)g_pp.stage[2],(ID3D11Resource *)dst);
     g_ctx->lpVtbl->End(g_ctx,(ID3D11Asynchronous *)g_pp.event);
     g_pp.phase=PP_GPU; g_pp.submit_us=pixel_probe_us(start);
+
+#else
+
+#endif
 }
 /* One query per call, never spin/flush. Caller holds g_cap_cs. */
 static void pixel_probe_read(int before) {
@@ -156,6 +174,8 @@ static void pixel_probe_read(int before) {
     g_pp.read_us+=pixel_probe_us(start);
 }
 static void pixel_probe_before_release(void) {
+#if DG_ENABLE_DIAGNOSTICS
+
     if(!g_pp.enabled) return;
     EnterCriticalSection(&g_cap_cs);
     /* Never relabel a previous frame's pending staging read as pre-release
@@ -164,10 +184,16 @@ static void pixel_probe_before_release(void) {
        g_pp.frame==(uint64_t)InterlockedCompareExchange64(&g_cd_count[CD_FRAME],0,0))
         pixel_probe_read(1);
     LeaveCriticalSection(&g_cap_cs);
+
+#else
+
+#endif
 }
 /* XR thread only; retain the ACTUAL built quad and a head location at the same
  * predicted time. This happens before EndFrame; no anchor is changed. */
 static void pixel_probe_quad(const XrCompositionLayerQuad *quad) {
+#if DG_ENABLE_DIAGNOSTICS
+
     LARGE_INTEGER start; int measure=0;
     XrTime time=0; XrSpaceLocation head; XrResult result;
     if(!g_pp.enabled) return;
@@ -186,6 +212,10 @@ static void pixel_probe_quad(const XrCompositionLayerQuad *quad) {
         g_pp.head=head; g_pp.head_result=result; g_pp.pose_us=pixel_probe_us(start);
         LeaveCriticalSection(&g_cap_cs);
     }
+
+#else
+
+#endif
 }
 static void pixel_probe_emit(void) {
     int i;
@@ -251,6 +281,8 @@ static void pixel_probe_emit(void) {
 }
 /* EndFrame result is attached before servicing or arming the next sample. */
 static void pixel_probe_tick(int arm, int end_attempted, XrResult end_result) {
+#if DG_ENABLE_DIAGNOSTICS
+
     ULONGLONG now; int emit=0;
     if(!g_pp.enabled) return;
     EnterCriticalSection(&g_cap_cs); now=GetTickCount64();
@@ -275,8 +307,14 @@ static void pixel_probe_tick(int arm, int end_attempted, XrResult end_result) {
         g_pp.phase=PP_ARMED; g_pp.arm_ms=now;
     }
     LeaveCriticalSection(&g_cap_cs);
+
+#else
+
+#endif
 }
 static void pixel_probe_teardown(void) {
+#if DG_ENABLE_DIAGNOSTICS
+
     if(!g_pp.enabled) return;
     EnterCriticalSection(&g_cap_cs);
     if(g_pp.submit_ms && g_pp.frame==(uint64_t)InterlockedCompareExchange64(&g_cd_count[CD_FRAME],0,0)) {
@@ -288,8 +326,14 @@ static void pixel_probe_teardown(void) {
     }
     LeaveCriticalSection(&g_cap_cs);
     pixel_probe_tick(0,0,XR_SUCCESS);
+
+#else
+
+#endif
 }
 static void pixel_probe_init(void) {
+#if DG_ENABLE_DIAGNOSTICS
+
     char value[8]={0}; DWORD n;
     if(g_pp_initialized) return;
     g_pp_initialized=1;
@@ -302,4 +346,8 @@ static void pixel_probe_init(void) {
     if(g_pp.enabled) g_log("  xr pixel-probe enabled: max 3 attempts, 2 s spacing/timeout,"
         " focused mono quad only; staging intervention, nonflushing query/nonblocking Map;"
         " <=64x36 grid stats are not a full-image checksum or headset proof\r\n");
+
+#else
+
+#endif
 }

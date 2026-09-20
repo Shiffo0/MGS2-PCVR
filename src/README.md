@@ -1,28 +1,26 @@
 # Building the mod
 
-This directory contains the mod implementation and its local include dependencies for the Public Beta 3 baseline, build `5AC0F9C8`.
+This candidate starts from Beta 3 build `5AC0F9C8` and adds separate release and diagnostic profiles. The packaged release candidate is `479DF688`. It has passed desk and WARP checks; Quest 3 validation is pending.
 
 ## Requirements
 
-- Windows x64.
-- Visual Studio 2022 C++ Build Tools with the Windows SDK.
-- [OpenXR SDK headers](https://github.com/KhronosGroup/OpenXR-SDK); the baseline uses version 1.1.59. Dependencies are obtained separately.
+- Windows x64 and Visual Studio 2022 C++ Build Tools with the Windows SDK.
+- [OpenXR SDK headers](https://github.com/KhronosGroup/OpenXR-SDK), baseline version 1.1.59.
 
-Open an **x64 Native Tools Command Prompt for VS 2022**, set `OPENXR_INCLUDE_DIR` to the directory containing `openxr/openxr.h`, then run `src\build.bat` from the repository root.
+Open an **x64 Native Tools Command Prompt for VS 2022** and set `OPENXR_INCLUDE_DIR` to the directory containing `openxr/openxr.h`.
 
-The output is `src/dg_hook/dg_hook.asi`. Building does not install or start anything. For playing the tested beta, use the packaged release and follow the main README.
+Run `src\build.bat` for the player release. Output: `src/dg_hook/dg_hook.asi`.
 
-## Layout
+Run `src\build.bat diagnostic` only for development measurements. Output: `src/dg_hook/dg_hook-diagnostic.asi`. This is not the playable release asset. Build profiles serially; they share intermediate object files.
 
-- `dg_hook/`: OpenXR integration, controller input, game integration, stereo, tracking, UI and diagnostic helpers. Some files contain conditional development checks.
-- `shared/`: shared executable identification and integration helpers.
+`DG_ENABLE_DIAGNOSTICS` defaults to **0** in `dg_build_profile.h`. Set it to **1** consistently for every translation unit only when building development tools. Old marker files and environment flags cannot enable the excluded measurements in the player release.
 
-This is the buildable mod baseline, not the full development workspace or a complete standalone test-tool distribution. Game files and SDK dependencies are not included.
+Run `src\test_release.bat` from the same developer prompt to test legacy-setting rejection and inert measurement entry points, plus real D3D11 WARP hook behavior. No game, headset or OpenXR runtime is needed. These tests do not establish physical-headset acceptance.
 
-## Relationship to Public Beta 3
+## Contents and behavior
 
-Documentation comments have been curated for this repository. Three optional diagnostic locations use relative paths under `logs/`: `pcvr_hud_watch.txt`, `pcvr_near/` and `pcvr_phase/`. The directories for optional captures must exist before using those diagnostics.
+`dg_hook/` contains the mod and focused release tests; `shared/` contains integration helpers. SDKs and game files are not included. Normal frame transfer to OpenXR, input, AER, HUD and wrist radar remain part of the release profile. Diagnostic capture is distinct from that essential frame transfer.
 
-The gameplay code tokens are unchanged from the selected baseline; the three diagnostic path literals are the only executable-token edits. A build from this directory is a separate artifact and is not claimed to be byte-identical to, or headset-tested as, release binary `5AC0F9C8`.
+Flight recording, GPU trials/readback probes, phase/pair traces, HUD watches, optional captures and debug visuals require the diagnostic profile. Player logs keep a bounded subset of startup/error messages (maximum 256 lines per process). No FPS improvement is claimed without measurement.
 
-The build includes 177 C/C++ and local include files. The C++ draw-trial module is compiled with /EHsc. The release configuration is available in config/ at the repository root. All feature code from the selected shipping build and its transitive local includes is included.
+This source has curated comments and three relative development-only diagnostic paths. A local rebuild is a separate artifact; byte identity with the packaged build is not guaranteed.

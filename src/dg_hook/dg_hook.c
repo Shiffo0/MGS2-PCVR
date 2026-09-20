@@ -1,3 +1,4 @@
+#include "dg_build_profile.h"
 /* dg_hook.asi - the in-process camera hook.  Closes S2.
  *
  * S2 (plan 2.12) proved an external write reaches the renderer but cannot be
@@ -509,6 +510,19 @@ static void logf_(const char *fmt, ...) {
         n = (int)strlen(buf);
         cut = 1;
     }
+#if !DG_ENABLE_DIAGNOSTICS
+    {
+        static volatile LONG lines;
+        char lower[sizeof buf]; size_t i;
+        for(i=0; i<sizeof(lower)-1 && buf[i]; ++i)
+            lower[i]=(buf[i]>='A' && buf[i]<='Z') ? (char)(buf[i]+('a'-'A')) : buf[i];
+        lower[i]=0;
+        if (!strstr(lower,"failed") && !strstr(lower,"error") &&
+            !strstr(lower,"fatal") && !strstr(lower,"refused") &&
+            !strstr(lower,"openxr") && !strstr(lower,"session state")) return;
+        if (InterlockedIncrement(&lines)>256) return;
+    }
+#endif
     h = CreateFileA(g_logpath, FILE_APPEND_DATA, FILE_SHARE_READ, NULL,
                     OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (h == INVALID_HANDLE_VALUE) return;
@@ -1669,7 +1683,7 @@ static int    g_arm_raw_have;
    worker thread, at dump time. */
 static DG_REC_RING   g_rec;
 static volatile LONG g_rec_on = 1;
-static volatile LONG g_rec_cfg_on = 1;   /* parsed; the worker applies it */
+static volatile LONG g_rec_cfg_on = DG_ENABLE_DIAGNOSTICS;
 static volatile LONG g_rec_cfg_dump;     /* vr_rec_dump token; change dumps */
 /* vr_eye_dump=<n>: a token like vr_rec_dump. A CHANGE writes the next
    DG_EYE_DUMP_FRAMES stereo Presents - the exact back buffer that is about to
@@ -1731,6 +1745,8 @@ static size_t rec_log_dir(char *path, size_t cap)
 
 static void aim_observation_dump(void)
 {
+#if DG_ENABLE_DIAGNOSTICS
+
     char path[MAX_PATH];
     SYSTEMTIME st;
     size_t dir = rec_log_dir(path, sizeof path);
@@ -1744,10 +1760,16 @@ static void aim_observation_dump(void)
     if (count < 0) logf_("  aim observation: FAILED dump -> %s (I/O or busy capture)\r\n", path);
     else if (count) logf_("  aim observation: %ld rows -> %s (camera seam; final draw unproven)\r\n",
                          count, path);
+
+#else
+
+#endif
 }
 
 static int rec_dump(const char *why)
 {
+#if DG_ENABLE_DIAGNOSTICS
+
     char path[MAX_PATH];
     SYSTEMTIME st;
     FILE *f = NULL;
@@ -1785,6 +1807,10 @@ static int rec_dump(const char *why)
           " torn %ld)\r\n",
           written, path, why, g_rec.seen, g_rec.dup, torn);
     return 1;
+
+#else
+return 0;
+#endif
 }
 
 #define DG_REC_SNAPSHOT_S 60
@@ -1798,6 +1824,8 @@ static int rec_dump(const char *why)
    .tmp does not survive. */
 static long rec_write_atomic(const char *path, long *torn)
 {
+#if DG_ENABLE_DIAGNOSTICS
+
     char tmp[MAX_PATH];
     FILE *f = NULL;
     long written;
@@ -1813,6 +1841,10 @@ static long rec_write_atomic(const char *path, long *torn)
         written = -1;
     if (written < 0) remove(tmp);
     return written;
+
+#else
+return 0;
+#endif
 }
 
 /* When is a live snapshot due? Every DG_REC_SNAPSHOT_S seconds, only while
@@ -1837,6 +1869,8 @@ static int rec_snapshot_due(int on, long appended, int elapsed,
    minute of input. */
 static void rec_snapshot(void)
 {
+#if DG_ENABLE_DIAGNOSTICS
+
     char path[MAX_PATH];
     long written, torn = 0;
     size_t dir = rec_log_dir(path, sizeof path);
@@ -1850,6 +1884,10 @@ static void rec_snapshot(void)
     }
     InterlockedIncrement(&g_rec_snapshots);
     logf_("  rec: live snapshot %ld frames (torn %ld)\r\n", written, torn);
+
+#else
+
+#endif
 }
 
 /* Produces one policy-owned target whenever controller driving is configured.
@@ -2654,7 +2692,7 @@ static LONG CALLBACK veh(EXCEPTION_POINTERS *ep) {
     {
         DG_BRIDGE_ARM_TARGET target;
         DG_REC_FRAME r;
-        int record_on = InterlockedCompareExchange(&g_rec_on, 0, 0) != 0;
+        int record_on = DG_ENABLE_DIAGNOSTICS && InterlockedCompareExchange(&g_rec_on, 0, 0) != 0;
         int record_frame = 0, have_target;
         /* The flight recorder taps the same published frame the consumers
            below are about to read, before arm_pose_target advances the pair
@@ -2691,10 +2729,10 @@ static LONG CALLBACK veh(EXCEPTION_POINTERS *ep) {
         have_target = arm_pose_target(&target);
         if (record_on) {
             r.absolute = g_absolute_record;
-            if (record_frame || r.absolute.present) dg_rec_capture(&g_rec, &r);
+            if (DG_ENABLE_DIAGNOSTICS && (record_frame || r.absolute.present)) dg_rec_capture(&g_rec, &r);
         }
         dg_bridge_arm_seam_now(have_target ? &target : NULL);
-        if (InterlockedCompareExchange(&g_camera_telemetry_valid, 0, 0))
+        if (DG_ENABLE_DIAGNOSTICS && InterlockedCompareExchange(&g_camera_telemetry_valid, 0, 0))
             dg_bridge_rec_camera(&g_camera_telemetry_eye_world,
                                  &g_camera_telemetry_proj);
         else
@@ -2892,6 +2930,16 @@ static int parse_config(char *buf, POSE *p, double *seconds,
         if (*s != '=') continue;                /* malformed token: skip it */
         s++;
 
+#if !DG_ENABLE_DIAGNOSTICS
+        { char *lower=key; for (; *lower; ++lower)
+            if (*lower>='A' && *lower<='Z') *lower=(char)(*lower+('a'-'A')); }
+        if (strstr(key, "probe") || strstr(key, "dump") || strstr(key, "debug") ||
+            !_stricmp(key,"vr_rec") || !_stricmp(key,"vr_policy") ||
+            !_stricmp(key,"vr_eye_truth")) {
+            while (*s && *s!='\n' && *s!='\r') ++s;
+            continue;
+        }
+#endif
         if (_stricmp(key, "sweep_axis") == 0) {  /* non-numeric values */
             if      (_strnicmp(s, "pitch", 5) == 0) p->sweep_axis = 1;
             else if (_strnicmp(s, "roll", 4) == 0)  p->sweep_axis = 2;
@@ -3944,6 +3992,8 @@ static const char *vk_name(int vk)
    long before a 30 s heartbeat came round. */
 static void drain_turn_probe(void)
 {
+#if DG_ENABLE_DIAGNOSTICS
+
     DG_TURN_PROBE_SAMPLE ps;
     while (dg_bridge_turn_probe_take(&ps)) {
         if (ps.pw_ok)
@@ -3967,6 +4017,10 @@ static void drain_turn_probe(void)
                   ps.tick, (unsigned)ps.byte, ps.wrote ? "" : " idle",
                   ps.fire_state);
     }
+
+#else
+
+#endif
 }
 
 /* The adjust probe's per-cycle drain (Meetplan A', ROLL V5.1 par. 3): one
@@ -3977,6 +4031,8 @@ static void drain_turn_probe(void)
    ring long before a 30 s heartbeat. */
 static void drain_adj_cycles(void)
 {
+#if DG_ENABLE_DIAGNOSTICS
+
     DG_ADJ_CYCLE cy;
     while (dg_bridge_adj_cycle_take(&cy))
         logf_("  adj cycle: tick %ld ok %d rot.vy %+d/%+d  yaw %.2f"
@@ -3985,9 +4041,15 @@ static void drain_adj_cycles(void)
               (double)cy.yaw_deg, (double)cy.ang_deg[0],
               (double)cy.ang_deg[1], (double)cy.ang_deg[2],
               (double)cy.ydot);
+
+#else
+
+#endif
 }
 
 static void log_bridge_summary(const char *when) {
+#if DG_ENABLE_DIAGNOSTICS
+
     DG_BRIDGE_STATS bs;
     dg_bridge_stats(&bs);
     /* Wall clock and tick on every heartbeat. Run 15 (2026-09-05) had to be
@@ -4867,6 +4929,10 @@ static void log_bridge_summary(const char *when) {
                   bs.recoil_amplitude, bs.recoil_worst);
         }
     }
+
+#else
+
+#endif
 }
 
 /* One armed session: wait for a live camera, arm, run, disarm. Returns the
@@ -5776,6 +5842,8 @@ static void on_present(IDXGISwapChain *sc) {
 
 static void eye_dump_step(IDXGISwapChain *sc, int eye)
 {
+#if DG_ENABLE_DIAGNOSTICS
+
     LONG cfg = InterlockedCompareExchange(&g_eye_dump_cfg, 0, 0);
     ID3D11Texture2D *bb = NULL, *st = NULL; ID3D11Device *dev = NULL; ID3D11DeviceContext *ctx = NULL;
     D3D11_TEXTURE2D_DESC d; D3D11_MAPPED_SUBRESOURCE m; int ok = 0;
@@ -5845,6 +5913,10 @@ done:
     if (bb) bb->lpVtbl->Release(bb);
     if (!g_eye_dump_left) logf_("  eye dump: done, written %ld failed %ld (logs\\dg_eye_%lu_*.raw)\r\n",
                                (long)g_eye_dump_written, (long)g_eye_dump_failed, (unsigned long)g_eye_dump_tick);
+
+#else
+
+#endif
 }
 
 static void on_present_body(IDXGISwapChain *sc) {
@@ -6558,7 +6630,7 @@ static int test_camera_telemetry_transform(void)
     M(O_EYE_INV)->m[0][0] = 2.0f;
     camera_pass_begin();
     apply_transform();
-    if (InterlockedCompareExchange(&g_camera_telemetry_valid, 0, 0)) bad++;
+    if (DG_ENABLE_DIAGNOSTICS && InterlockedCompareExchange(&g_camera_telemetry_valid, 0, 0)) bad++;
 
     g_chan0 = saved_chan0;
     InterlockedExchange(&g_source, saved_source);
@@ -9938,7 +10010,13 @@ int dg_bridge_test_position_turn(
 
 #include "dg_scene_blur_test.inl"
 
+#ifdef DG_RELEASE_PROFILE_TEST
+#include "dg_release_profile_test.inl"
+#endif
 int main(int argc, char **argv) {
+#ifdef DG_RELEASE_PROFILE_TEST
+    return test_release_profile();
+#endif
     static const double cases[][6] = {
         {   0,   0,   0,     0,    0,    0 },
         {  30,   0,   0,     0,    0,    0 },

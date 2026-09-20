@@ -257,6 +257,8 @@ void STDMETHODCALLTYPE resolveSub(ID3D11DeviceContext *c, ID3D11Resource *dst, U
     ui2dNoteCopy("ResolveSubresource", dst, src); ((ResolveFn)ui2dCopySetOf(c)->rsv.next)(c, dst, ds, src, ss, f); }
 // Present thread (install, and every time a trace is armed): make sure the context's CURRENT vtable carries the observers.
 void ui2dEnsureCopyHooks() {
+#if DG_ENABLE_DIAGNOSTICS
+
     if (!context.Get() || stopping) return;
     void **ct = *(void ***)context.Get();
     if (ct[47] == (void *)copyRes) return;
@@ -274,11 +276,17 @@ void ui2dEnsureCopyHooks() {
     ui2dCopySetCount++;                                            // published before the slots change: a call through them must find its set
     unsigned ok = 0; for (Hook *h : { &set.reg, &set.res, &set.rsv }) { if (h->next && writeSlot(*h, h->next, h->ours)) ok++; else h->slot = nullptr; }
     if (logger) logger("ui2d: copy observers attached %u of 3 on vtable %p (set %u)\r\n", ok, (void *)ct, ui2dCopySetCount);
+
+#else
+
+#endif
 }
 volatile LONG ui2dFeedbackOn = 0, ui2dFeedbackSkipped = 0, ui2dFeedbackChecked = 0;
 void *ui2dFinalTex[2] = { nullptr, nullptr };
 // true = do not forward this non-indexed draw.
 void ui2dTraceQuad(ID3D11DeviceContext *c) {
+#if DG_ENABLE_DIAGNOSTICS
+
     MultiLock tqLock;
     ID3D11RenderTargetView *rtv = nullptr; c->OMGetRenderTargets(1, &rtv, nullptr);
     if (!rtv) return;
@@ -297,6 +305,10 @@ void ui2dTraceQuad(ID3D11DeviceContext *c) {
     }
     if (res) res->Release();
     rtv->Release();
+
+#else
+
+#endif
 }
 bool ui2dSkipDraw(ID3D11DeviceContext *c, UINT vertexCount) {
     if (ui2dTraceLeft > 0 && vertexCount == 4 && c == context.Get() && !stopping) ui2dTraceQuad(c);

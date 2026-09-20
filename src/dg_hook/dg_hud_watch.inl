@@ -19,10 +19,12 @@ typedef struct HUD_EVENT {
     float xy[8];
     DWORD tid; LONG frame; int kind,slot,eye;
 } HUD_EVENT;
-static HUD_EVENT hud_events[1024];
+static HUD_EVENT hud_events[DG_DIAGNOSTIC_CAPACITY(1024)];
 static unsigned hud_count;
 
 static void hud_push(HUD_EVENT *e) {
+#if DG_ENABLE_DIAGNOSTICS
+
     LARGE_INTEGER q;
     QueryPerformanceCounter(&q);e->qpc=q.QuadPart;
     e->tid=GetCurrentThreadId();e->frame=g_present_frame;
@@ -30,14 +32,26 @@ static void hud_push(HUD_EVENT *e) {
     if(hud_count<1024)hud_events[hud_count++]=*e;
     else InterlockedIncrement(&hud_dropped);
     ReleaseSRWLockExclusive(&hud_lock);
+
+#else
+
+#endif
 }
 static void hud_capture(int eye, uint64_t capture_id) {
+#if DG_ENABLE_DIAGNOSTICS
+
     HUD_EVENT e;
     if(!hud_active)return;
     memset(&e,0,sizeof e);e.kind=1;e.eye=eye;e.cap=capture_id;
     hud_push(&e);
+
+#else
+
+#endif
 }
 static int hud_context(CONTEXT *c) {
+#if DG_ENABLE_DIAGNOSTICS
+
     unsigned bits=(unsigned)c->Dr6&15u;
     int entry=bits==4 && c->Rip==g_base+HUD_ENTRY_RVA &&
         c->Dr2==g_base+HUD_ENTRY_RVA && (c->Dr7&0x0f000010ull)==0x10;
@@ -109,12 +123,22 @@ static int hud_context(CONTEXT *c) {
     c->Dr6&=~(ULONG64)bits;
     if(entry||submit)c->EFlags|=0x10000; /* original instruction exactly once */
     return 1;
+
+#else
+return 0;
+#endif
 }
 static void hud_debug_registers(CONTEXT *c,int arm) {
+#if DG_ENABLE_DIAGNOSTICS
+
     if(arm && hud_active && !g_phase_enabled && !g_render_link_active && pp_status!=PP_RECORDING) {
         c->Dr2=g_base+HUD_ENTRY_RVA;c->Dr3=0;
         c->Dr7=(c->Dr7&~0xff0000f0ull)|0x10ull;
     }
+
+#else
+
+#endif
 }
 /* Same getter signatures and bounded layout traversal as the verified reader.
  * Only a non-empty SP_POLY cursor is eligible; SP_EMPTY fields are not pointers.
@@ -168,6 +192,8 @@ static int hud_find_cursor(ULONG64 out[3]) {
     out[0]=found[0];out[1]=found[1];out[2]=found[2];return 1;
 }
 static void hud_flush(void) {
+#if DG_ENABLE_DIAGNOSTICS
+
     static HUD_EVENT copy[1024];unsigned n,i;
     AcquireSRWLockExclusive(&hud_lock);n=hud_count;
     memcpy(copy,hud_events,n*sizeof *copy);hud_count=0;
@@ -180,14 +206,26 @@ static void hud_flush(void) {
         else if(e->kind==2)logf_("HUDVERT submit qpc %llu tid %lu frame %ld command %llx sprite %llx textured %d xy %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g\r\n",e->qpc,e->tid,e->frame,e->address,e->rip,e->slot,e->xy[0],e->xy[1],e->xy[2],e->xy[3],e->xy[4],e->xy[5],e->xy[6],e->xy[7]);
         else logf_("HUDVERT access qpc %llu tid %lu frame %ld address %llx rip_after %llx regs %llx %llx %llx %llx %llx %llx %llx %llx %llx %llx %llx %llx %llx %llx\r\n",e->qpc,e->tid,e->frame,e->address,e->rip,e->regs[0],e->regs[1],e->regs[2],e->regs[3],e->regs[4],e->regs[5],e->regs[6],e->regs[7],e->regs[8],e->regs[9],e->regs[10],e->regs[11],e->regs[12],e->regs[13]);
     }
+
+#else
+
+#endif
 }
 static void hud_stop(void) {
+#if DG_ENABLE_DIAGNOSTICS
+
     if(InterlockedExchange(&hud_active,0)) {
         arm_all(1);hud_flush();
         logf_("HUDVERT stop dropped %ld budget_remaining %ld; same-thread dynamic watch, accesses include writes\r\n",hud_dropped,hud_budget);
     }
+
+#else
+
+#endif
 }
 static void hud_poll(void) {
+#if DG_ENABLE_DIAGNOSTICS
+
     ULONG64 found[3];LARGE_INTEGER f;
     if(hud_active) {
         if(GetTickCount64()>=hud_until||hud_budget<=0||!g_armed||g_source!=SRC_XR||!g_stereo||
@@ -205,4 +243,8 @@ static void hud_poll(void) {
     logf_("HUDVERT start qpf %llu base %llx sprite %llx entry %llx; branch CALL then opcode-specific RW4 watch\r\n",f.QuadPart,g_base,hud_cursor,g_base+HUD_ENTRY_RVA);
     InterlockedExchange(&hud_active,1);
     logf_("HUDVERT armed threads %d\r\n",arm_all(1));
+
+#else
+
+#endif
 }
