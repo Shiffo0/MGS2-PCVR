@@ -4,7 +4,7 @@ Play **METAL GEAR SOLID 2: Sons of Liberty — Master Collection Version** in PC
 
 **Tested on Meta Quest 3.** This unofficial mod uses **OpenXR** and **AER (Alternate Eye Rendering)**. It runs on a Windows gaming PC; it is not a standalone Quest app.
 
-**[Download the Release](https://github.com/Shiffo0/MGS2-PCVR/releases/tag/v0.3.2-beta.3-rc.1)** · [Installation](#installation) · [Controls](#controls) · [Known limitations](#known-limitations) · [Report a problem](https://github.com/Shiffo0/MGS2-PCVR/issues)
+**[Download the Beta](https://github.com/Shiffo0/MGS2-PCVR/releases/tag/v0.3.2-beta.3-rc.1)** · [Installation](#installation) · [Controls](#controls) · [Known limitations](#known-limitations) · [Report a problem](https://github.com/Shiffo0/MGS2-PCVR/issues)
 
 The **Tanker chapter with Snake** is the focus of this beta. Switch between VR and Third Person as needed, and check your wrist for radar and LIFE information. **Plant / Raiden support is still in development** and is not ready for a complete VR playthrough.
 
