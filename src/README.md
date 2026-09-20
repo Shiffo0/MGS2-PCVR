@@ -1,6 +1,6 @@
 # Building the mod
 
-This candidate starts from Beta 3 build `5AC0F9C8` and adds separate release and diagnostic profiles. The packaged release candidate is `479DF688`. It has passed desk and WARP checks; Quest 3 validation is pending.
+This release starts from Beta 3 build `5AC0F9C8` and adds separate release and diagnostic profiles. The packaged release is `479DF688`. It has passed desk and WARP checks and received a short Quest 3 test. Full campaign regression is not claimed.
 
 ## Requirements
 

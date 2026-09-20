@@ -4,7 +4,7 @@
   "baseline_build": "5AC0F9C8",
   "binary_sha256": "479DF688C67DE8C1008DB055AF7936E08C1295583EAA614F1FB52DB2450A3544",
   "diagnostics_enabled": false,
-  "headset_acceptance": "Pending; not installed or headset-tested",
+  "headset_acceptance": "Short Quest 3 test completed; approved for release by maintainer. Full campaign regression not recorded.",
   "source_changes": [
     "Compile-time release/diagnostic profiles",
     "Measurement entry points excluded in release",

@@ -1,6 +1,6 @@
-# Beta 3 player-build candidate — 479DF688
+# MGS2 PCVR Public Beta — 479DF688
 
-Based on Beta 3 (5AC0F9C8), with heavy diagnostics excluded at compile time. **Draft: awaiting a short Quest 3 regression test.** This build has not been installed into the game folder or tested in a headset.
+Based on Beta 3 (5AC0F9C8), with heavy diagnostics excluded at compile time. The maintainer completed a short Quest 3 test and approved publication. Full campaign regression and exhaustive experimental-feature validation are not claimed.
 
 ## Changed
 
@@ -20,15 +20,15 @@ Based on Beta 3 (5AC0F9C8), with heavy diagnostics excluded at compile time. **D
 - Both binary profiles compile. Existing f2l warnings C4013/C4142 remain.
 - The source and package are screened for protected references and accidental development artifacts. The final download is verified by SHA256.
 
-## Quest 3 check before publishing
+## Quest 3 testing and limitations
 
-Check game startup, VR/Third Person switching, AER view, movement and turning, recenter, menus/radials, LIFE and wrist radar, M9 slide/pistol reload, and a short Tanker segment. Confirm no measurement files are created when old diagnostic settings/markers are present. Keep the existing Beta 3 available until this check passes.
+This exact binary was installed for the maintainer's test. The development build and original settings were restored afterwards.
 
 Quest 3 remains the development headset. Security-camera traversal requires Third Person; hanging remains experimental; grenades and the complete Plant/Raiden campaign remain unsupported.
 
 ## Package
 
-`MGS2-PCVR-v0.3.1-beta.3-479DF688.zip` is the playable candidate. Extract beside the game executable with the game closed, following the README installation steps. GitHub's automatic Source code archives are not playable packages.
+`MGS2-PCVR-v0.3.1-beta.3-479DF688.zip` is the playable release. Extract beside the game executable with the game closed, following the README installation steps. GitHub's automatic Source code archives are not playable packages.
 
 `dg_hook.asi` SHA256: `479DF688C67DE8C1008DB055AF7936E08C1295583EAA614F1FB52DB2450A3544`
 
