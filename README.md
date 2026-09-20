@@ -4,7 +4,7 @@ Play **METAL GEAR SOLID 2: Sons of Liberty — Master Collection Version** in PC
 
 **Tested on Meta Quest 3.** This unofficial mod uses **OpenXR** and **AER (Alternate Eye Rendering)**. It runs on a Windows gaming PC; it is not a standalone Quest app.
 
-**[Download the beta](https://github.com/Shiffo0/MGS2-PCVR/releases/tag/v0.3.1-beta.3)** · [Installation](#installation) · [Controls](#controls) · [Known limitations](#known-limitations) · [Report a problem](https://github.com/Shiffo0/MGS2-PCVR/issues)
+**[Download the beta hotfix](https://github.com/Shiffo0/MGS2-PCVR/releases/tag/v0.3.1-beta.3-hotfix.1)** · [Installation](#installation) · [Controls](#controls) · [Known limitations](#known-limitations) · [Report a problem](https://github.com/Shiffo0/MGS2-PCVR/issues)
 
 The **Tanker chapter with Snake** is the focus of this beta. Switch between VR and Third Person as needed, and check your wrist for radar and LIFE information. **Plant / Raiden support is still in development** and is not ready for a complete VR playthrough.
 
@@ -20,11 +20,13 @@ The **Tanker chapter with Snake** is the focus of this beta. Switch between VR a
 
 Other headsets and game versions have not been validated for this beta.
 
+Hotfix build **9A439F87** repairs the OpenXR projection-swapchain lifecycle when MGS2 changes its backbuffer resolution between menus, gameplay, codec and cutscenes. Previously, SteamVR could receive zero gameplay layers and display **Waiting**, while codec/cutscene theater layers remained visible. The hotfix passed build and desk checks; SteamVR and physical-headset acceptance still require confirmation.
+
 ## Installation
 
 1. Launch the unmodified game once, then close it.
 2. Connect your Quest 3 to PC VR. Start your PC VR software and make sure its OpenXR runtime is active.
-3. Download **`MGS2-PCVR-v0.3.1-beta.3-479DF688.zip`** from the [release page](https://github.com/Shiffo0/MGS2-PCVR/releases/tag/v0.3.1-beta.3). Choose the mod ZIP under **Assets**, not GitHub's automatic **Source code** downloads.
+3. Download **`MGS2-PCVR-v0.3.1-beta.3-hotfix.1-9A439F87.zip`** from the [release page](https://github.com/Shiffo0/MGS2-PCVR/releases/tag/v0.3.1-beta.3-hotfix.1). Choose the mod ZIP under **Assets**, not GitHub's automatic **Source code** downloads.
 4. In Steam, right-click the game → **Manage → Browse local files**. Extract the ZIP into the folder containing **`METAL GEAR SOLID2.exe`**, keeping its folder structure.
 5. Back up any existing files before replacing them. If other mods already provide `winmm.dll` or `openxr_loader.dll`, start with a clean mod setup; compatibility with other mods has not been validated.
 6. Launch the game through Steam with your headset connected. Use the left controller's **Menu** button for Start. During gameplay, press **A** to switch between VR and Third Person. Face forward and **hold Y** to recenter.

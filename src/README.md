@@ -1,6 +1,6 @@
 # Building the mod
 
-This release starts from Beta 3 build `5AC0F9C8` and adds separate release and diagnostic profiles. The packaged release is `479DF688`. It has passed desk and WARP checks and received a short Quest 3 test. Full campaign regression is not claimed.
+This hotfix starts from public beta build `479DF688` and repairs OpenXR projection-swapchain resizing. The packaged hotfix is `9A439F87`. It has passed build and desk checks; SteamVR and physical-headset acceptance are not yet claimed.
 
 ## Requirements
 

@@ -904,6 +904,7 @@ static XrSwapchain  g_swap[2] = { XR_NULL_HANDLE, XR_NULL_HANDLE };
 static XrSwapchainImageD3D11KHR *g_images[2];
 static uint32_t     g_image_count[2];
 static uint32_t     g_sw, g_sh;         /* back-buffer sized, per plan 2.20 */
+static uint32_t     g_swap_w, g_swap_h; /* size owned by the live XR swapchains */
 
 /* Captured at Present on the game thread, consumed by the XR thread. Both
    touch the immediate context, so the device is put into multithread-protected
@@ -1486,6 +1487,7 @@ static void xr_teardown(void) {
     if (g_images[0]) { free(g_images[0]); g_images[0] = NULL; }
     if (g_images[1]) { free(g_images[1]); g_images[1] = NULL; }
     g_image_count[0] = g_image_count[1] = 0;
+    g_swap_w = g_swap_h = 0;
     if (g_mt) { g_mt->lpVtbl->Release(g_mt); g_mt = NULL; }
     /* g_adopted deliberately SURVIVES teardown. It is the game's device, we
        hold a reference to it (see dg_xr_adopt_device), and a session restart
@@ -1533,14 +1535,42 @@ static void xr_teardown(void) {
 
 /* Created lazily: the swapchain is back-buffer sized (plan 2.20), and that size
    is not known until the first Present has been seen. */
+static void destroy_projection_swapchains(void) {
+    int i;
+    for (i = 0; i < 2; ++i) {
+        if (g_swap[i] && pfn_DestroySwapchain)
+            pfn_DestroySwapchain(g_swap[i]);
+        g_swap[i] = XR_NULL_HANDLE;
+        free(g_images[i]);
+        g_images[i] = NULL;
+        g_image_count[i] = 0;
+    }
+    g_swap_w = g_swap_h = 0;
+}
+
+static int projection_swapchains_current(void) {
+    return g_swap[0] != XR_NULL_HANDLE && g_swap[1] != XR_NULL_HANDLE &&
+           g_swap_w == g_sw && g_swap_h == g_sh;
+}
+
 static int ensure_swapchains(void) {
     XrSwapchainCreateInfo sci;
     int64_t *formats = NULL;
     uint32_t n = 0, cap = 0, i;
     int64_t want = 0;
 
-    if (g_swap[0] != XR_NULL_HANDLE && g_swap[1] != XR_NULL_HANDLE) return 1;
+    /* MGS2 can change its backbuffer size while moving between the front end,
+       gameplay and codec/cutscene paths. CopyResource cannot copy a new-size
+       capture into old-size XR swapchains. Rebuild here, on the XR frame
+       thread between submissions; Present only publishes the new size. */
+    if (projection_swapchains_current()) return 1;
     if (!g_adopted || !g_sw || !g_sh) return 0;
+    if (g_swap[0] != XR_NULL_HANDLE || g_swap[1] != XR_NULL_HANDLE) {
+        if (g_swap_w && g_swap_h && (g_swap_w != g_sw || g_swap_h != g_sh))
+            g_log("  xr: backbuffer resized %ux%u -> %ux%u; rebuilding stereo swapchains\r\n",
+                  g_swap_w, g_swap_h, g_sw, g_sh);
+        destroy_projection_swapchains();
+    }
 
     if (XR_FAILED(pfn_EnumScFormats(g_sess, 0, &n, NULL)) || !n) return 0;
     formats = (int64_t *)calloc(n, sizeof(int64_t));
@@ -1574,21 +1604,29 @@ static int ensure_swapchains(void) {
         if (XR_FAILED(pfn_CreateSwapchain(g_sess, &sci, &g_swap[i]))) {
             g_swap[i] = XR_NULL_HANDLE;
             g_log("  xr: xrCreateSwapchain failed\r\n");
+            destroy_projection_swapchains();
             return 0;
         }
         cap = 0;
-        if (XR_FAILED(pfn_EnumScImages(g_swap[i], 0, &cap, NULL)) || !cap)
+        if (XR_FAILED(pfn_EnumScImages(g_swap[i], 0, &cap, NULL)) || !cap) {
+            destroy_projection_swapchains();
             return 0;
+        }
         g_images[i] = (XrSwapchainImageD3D11KHR *)calloc(cap, sizeof(*g_images[i]));
-        if (!g_images[i]) return 0;
+        if (!g_images[i]) { destroy_projection_swapchains(); return 0; }
         for (j = 0; j < cap; j++)
             g_images[i][j].type = XR_TYPE_SWAPCHAIN_IMAGE_D3D11_KHR;
         if (XR_FAILED(pfn_EnumScImages(g_swap[i], cap, &cap,
-                    (XrSwapchainImageBaseHeader *)g_images[i])) ) return 0;
+                    (XrSwapchainImageBaseHeader *)g_images[i])) ) {
+            destroy_projection_swapchains();
+            return 0;
+        }
         g_image_count[i] = cap;
     }
+    g_swap_w = g_sw;
+    g_swap_h = g_sh;
     g_log("  xr: stereo swapchains %ux%u fmt %lld, %u images each\r\n",
-          g_sw, g_sh, (long long)want, g_image_count[0]);
+          g_swap_w, g_swap_h, (long long)want, g_image_count[0]);
     return 1;
 }
 

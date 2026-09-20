@@ -1,14 +1,13 @@
 {
-  "version": "v0.3.1-beta.3",
-  "build": "479DF688",
-  "baseline_build": "5AC0F9C8",
-  "binary_sha256": "479DF688C67DE8C1008DB055AF7936E08C1295583EAA614F1FB52DB2450A3544",
+  "version": "v0.3.1-beta.3-hotfix.1",
+  "build": "9A439F87",
+  "baseline_build": "479DF688",
+  "binary_sha256": "9A439F870367BDCEC4F3228853271F9EE7CA98E7AA70D9B11191305ED2CEF6A7",
   "diagnostics_enabled": false,
-  "headset_acceptance": "Short Quest 3 test completed; approved for release by maintainer. Full campaign regression not recorded.",
+  "headset_acceptance": "Desk/build verified. SteamVR resize recovery and physical-headset acceptance remain to be confirmed by the reporter.",
   "source_changes": [
-    "Compile-time release/diagnostic profiles",
-    "Measurement entry points excluded in release",
-    "Bounded startup/error logging",
-    "Focused release regression tests"
+    "Rebuild OpenXR projection swapchains when the game backbuffer resolution changes",
+    "Clean up partially created projection swapchains before retrying",
+    "Log the old and new backbuffer dimensions during recovery"
   ]
 }
