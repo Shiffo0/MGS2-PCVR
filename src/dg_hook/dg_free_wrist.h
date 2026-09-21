@@ -3,7 +3,10 @@
 #ifndef DG_FREE_WRIST_H
 #define DG_FREE_WRIST_H
 #include "dg_position_target.h"
-typedef struct { int enabled,valid; double world[4]; } DG_FREE_WRIST_INPUT;
+typedef struct {
+    int enabled,valid; double world[4];
+    int persistent; double alignment[4];
+} DG_FREE_WRIST_INPUT;
 typedef struct { int ready; double controller0[4],rest0[4]; } DG_FREE_WRIST_STATE;
 static int dg_free_wrist_step(DG_FREE_WRIST_STATE *s,
     const DG_FREE_WRIST_INPUT *in,const double rest[4],double out[4])
@@ -15,6 +18,14 @@ static int dg_free_wrist_step(DG_FREE_WRIST_STATE *s,
     }
     memcpy(q,in->world,sizeof q);
     if(!dg_ik_quat_normalize(q)) {memset(s,0,sizeof *s);return 0;}
+    if(in->persistent) {
+        memcpy(r,in->alignment,sizeof r);
+        if(!dg_ik_quat_normalize(r))return 0;
+        dg_ik_quat_mul(q,r,out);
+        if(!dg_ik_quat_normalize(out))return 0;
+        s->ready=1;memcpy(s->controller0,q,sizeof q);memcpy(s->rest0,out,sizeof r);
+        return 1;
+    }
     if(!s->ready) {
         memcpy(r,rest,sizeof r);
         if(!dg_ik_quat_normalize(r))return 0;

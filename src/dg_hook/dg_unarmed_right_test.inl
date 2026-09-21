@@ -190,6 +190,39 @@ static int t_unarmed_right(void)
     *(LONG *)(player+0xB90)=0;
     for(i=0;i<10;i++) {tq_engine(blob,STRIDE,adjust,0,&rig,NULL);g_b.c_ticks++;t.pair_id++;arm_ik_now(arm,&t);}
     UR_CHECK(g_b.ik_active);
+    { /* Shipping right solver: deterministic default survives actual forget,
+         stream replacement, animated rest changes and tracking loss. */
+        DG_HAND_PROFILE profile;
+        double want[4],initial[3],later[3];int epoch;
+        dg_hand_profile_default(&profile);
+        t.persistent_hands=1;t.free_right.persistent=1;
+        memcpy(t.free_right.alignment,profile.rotation[1],sizeof t.free_right.alignment);
+        t.position.enabled=t.position.valid=1;t.position.units=1000;
+        memset(t.position.camera,0,sizeof t.position.camera);
+        memset(t.position.view,0,sizeof t.position.view);t.position.view[3]=1;
+        for(i=0;i<4;i++)t.position.camera[i*5]=1;
+        t.position.grip[0]=.12;t.position.grip[1]=-.12;t.position.grip[2]=-.12;
+        th_axis(0,0,1,20,t.free_right.world);
+        dg_ik_quat_mul(t.free_right.world,t.free_right.alignment,want);
+        for(epoch=0;epoch<4;epoch++) {
+            arm_map_forget();t.stream_id++;
+            th_axis(0,1,0,epoch*25,left_engine);
+            UR_CHECK(adjust_quat_to_world(&native_frame,left_engine,left_world));
+            th_write_basis((float *)(blob+DG_OBJS_ARRAY+10*STRIDE),left_world);
+            for(i=0;i<12;i++) {
+                tq_engine(blob,STRIDE,adjust,0,&rig,NULL);
+                g_b.c_ticks++;t.pair_id++;arm_ik_now(arm,&t);
+            }
+            UR_CHECK(g_b.ik_active && g_b.hand_have_desired && g_b.free_right.ready);
+            UR_CHECK(!g_b.camera_position.ready);
+            UR_CHECK(th_angle_between(g_b.free_right.rest0,want)<.001);
+            for(i=0;i<3;i++)later[i]=g_b.pred_wrist[i];
+            if(!epoch)memcpy(initial,later,sizeof initial);
+            else UR_CHECK(vdist3(initial,later)<.1);
+            t.free_right.valid=0;arm_ik_now(arm,&t);
+            UR_CHECK(!g_b.hand_command_valid);t.free_right.valid=1;
+        }
+    }
     t.write=0;arm_ik_now(arm,&t);UR_CHECK(!g_b.ik_active);
     UR_CHECK((*(ULONGLONG *)(mc+0x38)&((1ULL<<4)|(1ULL<<5)))==0);
     memcpy(&g_b,saved,sizeof g_b);free(saved);

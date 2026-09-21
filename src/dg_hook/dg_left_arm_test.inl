@@ -451,6 +451,34 @@ static int t_left_seam(void)
     t.free_left.valid=1;
     for(i=0;i<3;i++) {tl_engine(blob,STRIDE,adjust,&rig,wrist);g_b.c_ticks++;t.pair_id++;left_arm_now(arm,&t,0);}
     LH_CHECK(g_left.wrist_active);
+    { /* Shipping left solver + independently reconstructed native hierarchy.
+         Releases for view/scene/tracking changes must reuse numeric alignment. */
+        DG_HAND_PROFILE profile;double want[4],got[4],rows[3][3];int epoch,r,c;
+        dg_hand_profile_default(&profile);
+        t.persistent_hands=1;t.free_left.persistent=1;
+        memcpy(t.free_left.alignment,profile.rotation[0],sizeof t.free_left.alignment);
+        t.left_position.enabled=t.left_position.valid=1;t.left_position.units=1000;
+        memset(t.left_position.camera,0,sizeof t.left_position.camera);
+        memset(t.left_position.view,0,sizeof t.left_position.view);t.left_position.view[3]=1;
+        for(i=0;i<4;i++)t.left_position.camera[i*5]=1;
+        t.left_position.grip[0]=-.12;t.left_position.grip[1]=-.12;t.left_position.grip[2]=-.12;
+        t.aim_weapon_id=0;t.twohand_enabled=0;
+        for(epoch=0;epoch<4;epoch++) {
+            left_arm_release();t.left_stream_id++;g_b.arm_map_unarmed=epoch%2;
+            th_axis(0,1,0,epoch*20,t.free_left.world);
+            dg_ik_quat_mul(t.free_left.world,t.free_left.alignment,want);
+            for(i=0;i<12;i++) {
+                tl_engine(blob,STRIDE,adjust,&rig,wrist);
+                g_b.c_ticks++;t.pair_id++;left_arm_now(arm,&t,0);
+            }
+            LH_CHECK(g_left.active && g_left.wrist_active && !g_left.camera_position.ready);
+            tl_engine(blob,STRIDE,adjust,&rig,wrist);
+            for(r=0;r<3;r++)for(c=0;c<3;c++)rows[r][c]=
+                ((float *)(blob+DG_OBJS_ARRAY+10*STRIDE))[r*4+c];
+            LH_CHECK(dg_ik_basis_quat(rows,got));
+            LH_CHECK(th_angle_between(got,want)<.05);
+        }
+    }
     adjust[40]=.123f;left_arm_release();LH_CHECK(adjust[40]==.123f);
     LH_CHECK(*(ULONGLONG *)(mc+0x38)&(1ULL<<10)); /* foreign owner wins */
     LH_CHECK(memcmp(right,adjust+16,sizeof right)==0);

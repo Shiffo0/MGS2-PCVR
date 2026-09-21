@@ -1,22 +1,20 @@
-# MGS2 PCVR — v0.3.3
+# MGS2 PCVR v0.3.4
 
 Playable on PS VR 2 / SteamVR.
 
-## What changed
+Includes the persistent hand-alignment changes from candidate **0237AC10**:
 
-- Fixed the SteamVR gameplay “Waiting” problem caused by graphics-device initialization.
-- Retained unlimited VR sessions with the included `seconds=0` setting.
-- Retained recovery when rendering resolution changes, including interrupted swapchain creation.
-- Includes the existing movement, weapon, interaction, wrist radar and LIFE features.
+- Automatic defaults position the hands from controller tracking.
+- **Right trigger + B while unarmed** saves a one-time wrist-alignment override for both hands. Hold both hands in a comfortable neutral pose with both controllers tracked. A later deliberate calibration replaces the override.
+- The override persists across game restarts in `dg_hand_calibration.bin`.
+- Weapon changes, animations, first/third-person switches, new levels, cutscenes and tracking loss preserve the calibration/default.
 
-## Install or update
+Native animations can temporarily take control of the hands, and reach limits still apply. Headset testing remains necessary to confirm the visible result across those transitions.
 
-Download **MGS2-PCVR-v0.3.3-62E9EEAF.zip** below. Close the game and back up existing mod files before extracting beside **METAL GEAR SOLID2.exe**.
+**Known regression: this release breaks entering lockers from first-person (FPS) mode.**
 
-Existing users can replace **dg_hook.asi** and set **seconds=0** in their existing **dg_hook.on** to keep their settings. The included loaders are unchanged from the previous release.
+Retains the v0.3.3 SteamVR gameplay Waiting fix, unlimited sessions (`seconds=0`) and synchronized projection-swapchain resize recovery with partial-creation cleanup.
 
-Use **SteamVR as the active OpenXR runtime for PS VR2**. For Quest Link / Air Link, use Meta's OpenXR runtime. The README control table uses Quest button labels; PS VR2 assignments can differ through SteamVR.
+Development measurements and recordings are compiled out of the player build; bounded support logging remains. Source downloads contain the corresponding mod source, excluding original game source and source references. The playable ZIP contains no source code.
 
-Development recording and GPU measurement probes are disabled in this player build. Bounded error and support logging remains available.
-
-This remains a Tanker-focused mod. Plant/Raiden, hanging and grenades retain the limitations described in the [README](https://github.com/Shiffo0/MGS2-PCVR#known-limitations).
+Build: **0237AC10**. SHA256: `0237AC10E1BE3136A565945E87C156CC938F5ED995F1B421BA5218F382D2C7EE`.

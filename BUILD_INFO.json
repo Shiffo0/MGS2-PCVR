@@ -1,20 +1,20 @@
 {
-  "version": "v0.3.3",
-  "build": "62E9EEAF",
-  "baseline_build": "4F95FE0F",
-  "binary_sha256": "62E9EEAFBAD5E057DDEBC44F0AD123BC4B157341A790D36E4B85434653349DC6",
+  "version": "v0.3.4",
+  "build": "0237AC10",
+  "baseline_build": "62E9EEAF",
+  "binary_sha256": "0237AC10E1BE3136A565945E87C156CC938F5ED995F1B421BA5218F382D2C7EE",
   "diagnostics_enabled": false,
   "support_logging": "Bounded error and capture reports; no development GPU probes or recordings",
-  "headset_acceptance": "PS VR2 / SteamVR playability reported by maintainer; Quest 3 previously tested",
+  "headset_acceptance": "Persistent calibration transitions require headset validation",
   "tests": {
-    "release_timer": 39,
-    "release_gpu": 11,
-    "resize_warp": 48,
-    "factory_shared_texture": "passed",
-    "xr_diagnostic": 1199,
-    "xr_player": 1075,
-    "main": "passed",
-    "ik": "passed",
-    "recorder": "9/9"
-  }
+    "candidate_main": "passed",
+    "candidate_ik": "passed",
+    "candidate_recorder": "9/9",
+    "candidate_release_timer": 39,
+    "candidate_release_gpu": 11,
+    "unchanged_v0.3.3_render_checks": "resize 48; factory passed; XR diagnostic 1199 and player 1075"
+  },
+  "known_regressions": [
+    "Entering lockers from first-person (FPS) mode is broken"
+  ]
 }

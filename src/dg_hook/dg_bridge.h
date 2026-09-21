@@ -10,6 +10,11 @@ void dg_bridge_mod_menu_status(unsigned *actual,unsigned *available);
 #include "dg_position_target.h"
 #include "dg_m9_runtime.h"
 #include "dg_free_wrist.h"
+#include "dg_hand_profile.h"
+void dg_bridge_hand_profile_get(DG_HAND_PROFILE *out);
+/* Worker only: load once, then atomically save accepted manual updates.
+   Returns 1 saved, 2 loaded, 3 defaults, -1 I/O/validation failure, 0 no change. */
+int dg_bridge_hand_profile_worker(void);
 #include "dg_interact_adapter.h"
 
 /* MAT is the camera matrix shared with the hook.  Keeping it here makes the
@@ -375,6 +380,8 @@ typedef struct {
 
     unsigned long stream_id;
     unsigned long left_stream_id; /* physical calibration and camera/arm identity */
+    int persistent_hands;
+    unsigned long hand_calibration_request;
     double   wrist_view[3];
     /* The PLAYER's shoulder in the same mapped frame as wrist_view: an
        anthropometric constant, run through the identical axis map so it stays

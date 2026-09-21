@@ -2068,6 +2068,36 @@ static void auto_recenter_present(int allowed)
     }
 }
 
+/* Camera-seam ownership. Manual requests are bounded to the current safe,
+   unarmed pose stream; a held gesture or stale request cannot recalibrate a
+   later level. The profile itself is pair-latched below. */
+static void persistent_hand_input(DG_BRIDGE_ARM_TARGET *t,int absolute) {
+    static DG_HAND_REQUEST request;
+    static DG_HAND_PROFILE pair_profile;
+    unsigned long press=input_secondary_presses(DG_XR_HAND_RIGHT);
+    unsigned long previous=request.request;
+    int eligible=absolute && g_source==SRC_XR && t->hands_coherent &&
+        t->free_left.valid && t->free_right.valid && t->aim_weapon_id==0 &&
+        t->position.valid && t->left_position.valid;
+    t->persistent_hands=absolute && g_source==SRC_XR;
+    t->hand_calibration_request=dg_hand_request_step(&request,press,eligible,t->stream_id,GetTickCount());
+    if(t->hand_calibration_request && t->hand_calibration_request!=previous)
+        logf_("  hands: manual unarmed alignment requested\r\n");
+    if(!t->persistent_hands)return;
+    if(!(t->pose_flags&DG_POSE_F_LATCHED) || !dg_hand_profile_valid(&pair_profile))
+        dg_bridge_hand_profile_get(&pair_profile);
+    t->free_left.persistent=t->free_right.persistent=1;
+    memcpy(t->free_left.alignment,pair_profile.rotation[0],sizeof t->free_left.alignment);
+    memcpy(t->free_right.alignment,pair_profile.rotation[1],sizeof t->free_right.alignment);
+}
+static void hand_profile_worker(void) {
+    int status=dg_bridge_hand_profile_worker();
+    if(status==1)logf_("  hands: manual alignment saved to dg_hand_calibration.bin\r\n");
+    if(status==2)logf_("  hands: saved alignment loaded\r\n");
+    if(status==3)logf_("  hands: automatic controller-grip defaults active\r\n");
+    if(status<0)logf_("  hands: calibration file invalid or I/O failed; keeping current alignment\r\n");
+}
+
 static DG_FREE_WRIST_INPUT free_wrist_input(const DG_XR_HAND_POSE *p,
                                              const DG_XR_CONFIG *cfg,int enabled)
 {
@@ -2427,6 +2457,7 @@ static int arm_pose_target(DG_BRIDGE_ARM_TARGET *target)
         if(!target->hands_coherent || target->m9_pose.sequence!=target->left_sample_seq ||
            target->m9_pose.sequence!=target->aim_sample_seq)target->m9_pose.valid=0;
     }
+    persistent_hand_input(target,absolute);
     return 1;
 }
 
@@ -5023,10 +5054,9 @@ static const char *run_once(const char *marker) {
     rec_dump_token_seen = InterlockedCompareExchange(&g_rec_cfg_dump, 0, 0);
     InterlockedExchange(&g_rec_on,
                         menu_session ? 0 : InterlockedCompareExchange(&g_rec_cfg_on, 0, 0));
-    active_arm_pos.hand_zero =
-        arm_hand_zero_total(active_arm_pos.hand_zero,
-                            input_secondary_presses(
-                                arm_tracked_xr_hand(active_arm_track)));
+    if(source!=SRC_XR || !active_arm_pos.absolute_aim)
+        active_arm_pos.hand_zero=arm_hand_zero_total(active_arm_pos.hand_zero,
+            input_secondary_presses(arm_tracked_xr_hand(active_arm_track)));
     InterlockedExchange(&g_arm_hand_zero_now, active_arm_pos.hand_zero);
     arm_pos_cfg_apply(&active_arm_pos);
     memcpy(g_arm_qmap, active_arm_qmap, sizeof active_arm_qmap);
@@ -5307,6 +5337,7 @@ static const char *run_once(const char *marker) {
         g_phase_stage_addr&&g_phase_consume_addr);
     logf_("  render link: requested %ld anchors %s (buffer-linked pose/FOV; no guessed fallback)\r\n",
         g_link_requested,g_phase_stage_addr?"verified":"UNAVAILABLE");
+    if(source==SRC_XR)hand_profile_worker();
     InterlockedIncrement(&g_auto_recenter_session);
     InterlockedExchange(&g_armed, 1);
     dg_xr_set_capture_observer(capture_observed);
@@ -5505,10 +5536,9 @@ static const char *run_once(const char *marker) {
                restarts the stream through exactly the same path a marker edit
                does. Read once per pass; the count cannot go backwards, so a
                press between two passes is never lost. */
-            ap2.hand_zero =
-                arm_hand_zero_total(ap2.hand_zero,
-                                    input_secondary_presses(
-                                        arm_tracked_xr_hand(arm_track2)));
+            if(source!=SRC_XR || !g_arm_absolute_aim)
+                ap2.hand_zero=arm_hand_zero_total(ap2.hand_zero,
+                    input_secondary_presses(arm_tracked_xr_hand(arm_track2)));
             if (bridge_on) dg_bridge_configure(&bc2);
             if(source==SRC_XR) {
                 LONG choice=InterlockedCompareExchange(&g_mod_stereo_override,0,0);
@@ -5558,6 +5588,7 @@ static const char *run_once(const char *marker) {
                of it on this worker thread; the game threads only ever see
                the interlocked pending/active pointers. */
             dg_policy_poll(g_policy_path);
+            if(source==SRC_XR)hand_profile_worker();
             if (arm_track2 != active_arm_track || arm_hand2 != active_arm_hand ||
                 memcmp(arm_qmap2, active_arm_qmap,
                        sizeof active_arm_qmap) != 0 ||
@@ -5635,6 +5666,8 @@ session_cleanup:
     Sleep(50);
     RemoveVectoredExceptionHandler(g_veh);
     g_veh = NULL;
+
+    if(source==SRC_XR)hand_profile_worker(); /* flush a just-accepted override */
 
     /* The session's last act: the ring becomes a file, so whatever just
        happened in the headset is replayable at a desk. After the VEH is
@@ -7516,12 +7549,35 @@ static int test_absolute_aim_transport(void)
         unsigned long left_epoch;
         g_stereo=0;g_test_aim_selection=0;g_absolute_stream=0;
         g_left_arm=1;
+        /* Earlier stale-AIM tests deliberately split these timestamps.
+           The manual two-hand gesture requires one coherent observation. */
+        g_aim_camera.frame.right_hand.aim.sample_seq=g_aim_camera.frame.right_hand.grip.sample_seq;
+        g_aim_camera.frame.right_hand.aim.xr_time=g_aim_camera.frame.right_hand.grip.xr_time;
         for(i=0;i<20;i++) {
             InterlockedIncrement(&g_present_frame);
             AIM_CHECK(arm_pose_target(&t));
         }
         AIM_CHECK(t.left_valid && t.left_weight>.999 && t.left_stream_id);
         AIM_CHECK(t.position.enabled && t.position.valid && !t.aim_write);
+        { /* Full producer transport, including the existing trigger+B mailbox. */
+            LONG saved_source=g_source;
+            DG_HAND_PROFILE profile;
+            g_source=SRC_XR;
+            persistent_hand_input(&t,1);
+            persistent_hand_input(&t,1);
+            dg_bridge_hand_profile_get(&profile);
+            AIM_CHECK(t.persistent_hands && t.free_left.persistent && t.free_right.persistent);
+            AIM_CHECK(!memcmp(t.free_right.alignment,profile.rotation[1],sizeof t.free_right.alignment));
+            dg_xr_test_press_secondary(DG_XR_HAND_RIGHT);
+            persistent_hand_input(&t,1);
+            AIM_CHECK(t.hand_calibration_request==dg_xr_secondary_presses(DG_XR_HAND_RIGHT));
+            t.free_left.valid=0;persistent_hand_input(&t,1);
+            AIM_CHECK(!t.hand_calibration_request);t.free_left.valid=1;
+            t.aim_weapon_id=1;persistent_hand_input(&t,1);
+            dg_xr_test_press_secondary(DG_XR_HAND_RIGHT);persistent_hand_input(&t,1);
+            AIM_CHECK(!t.hand_calibration_request);t.aim_weapon_id=0;
+            g_source=saved_source;
+        }
         /* None publishes the same live camera-height input as armed hands. */
         g_aim_camera.camera.m[3][1]-=40;
         InterlockedIncrement(&g_present_frame);

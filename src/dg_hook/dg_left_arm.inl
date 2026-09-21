@@ -131,6 +131,7 @@ static void left_wrist_now(ULONGLONG base,int stride,ULONGLONG mc,ULONGLONG adj,
         dg_ik_quat_mul(in.new_fore,in.new_upper,chain);
         dg_ik_quat_mul(chain,native,native);
     }
+    hand_profile_stage(0,t,&t->free_left,native);
     if(!dg_free_wrist_step(&g_left.wrist,&t->free_left,native,want))goto refuse_wrist;
     if(contact_q)memcpy(want,contact_q,sizeof want);
     memcpy(in.desired,want,sizeof want);
@@ -318,14 +319,16 @@ static void left_arm_now(ULONGLONG arm, const DG_BRIDGE_ARM_TARGET *t,
        the left from its native support animation bakes in a second offset.
        Seed only an uncalibrated left hand: equipment must not replace a
        previously accepted unarmed mapping or depend on right-arm settling. */
-    if(t->left_position.enabled && t->position.enabled && !g_b.arm_map_unarmed &&
+    if(t->left_position.enabled && t->position.enabled && !t->persistent_hands && !g_b.arm_map_unarmed &&
        !g_left.camera_position.ready) {
         if(!right_committed || !g_b.camera_position.ready) goto refuse;
         g_left.camera_position=g_b.camera_position;
     }
-    if(t->left_position.enabled && g_left.camera_position.ready) {
+    if(t->left_position.enabled && (t->persistent_hands || g_left.camera_position.ready)) {
         double camera_target[3];
-        if(!dg_position_target(&g_left.camera_position,&t->left_position,camera_target) ||
+        int ok=t->persistent_hands ? dg_hand_profile_position(&t->left_position,camera_target) :
+            dg_position_target(&g_left.camera_position,&t->left_position,camera_target);
+        if(!ok ||
            !arm_world_to_view(root,camera_target,mi.desired_view)) goto refuse;
         mi.explicit_target=1;
     }
@@ -334,7 +337,7 @@ static void left_arm_now(ULONGLONG arm, const DG_BRIDGE_ARM_TARGET *t,
         goto refuse;
     }
     arm_view_to_world(root,mo.target_view,target);
-    if(t->left_position.enabled && !g_left.camera_position.ready &&
+    if(t->left_position.enabled && !t->persistent_hands && !g_left.camera_position.ready &&
        !dg_position_calibrate(&g_left.camera_position,&t->left_position,
                               target,mo.scale)) goto refuse;
     /* Slide attachment owns the hand ahead of ordinary support grip. */

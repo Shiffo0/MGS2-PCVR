@@ -1902,6 +1902,8 @@ static struct {
     volatile LONG c_hud_cleared;
 } g_b;
 
+#include "dg_hand_profile_store.inl"
+
 static DG_FPS_EVENT g_ring[DG_RING];
 static volatile LONG g_ring_head;
 static volatile LONG g_ring_tail;
@@ -6637,9 +6639,11 @@ static void arm_ik_now(ULONGLONG arm, const DG_BRIDGE_ARM_TARGET *target)
     }
     map_in.upper = vdist3(point[2], point[3]);
     map_in.fore = vdist3(point[3], point[4]);
-    if(target->position.enabled && g_b.camera_position.ready) {
+    if(target->position.enabled && (target->persistent_hands || g_b.camera_position.ready)) {
         double camera_target[3];
-        if(!dg_position_target(&g_b.camera_position,&target->position,camera_target) ||
+        int ok=target->persistent_hands ? dg_hand_profile_position(&target->position,camera_target) :
+            dg_position_target(&g_b.camera_position,&target->position,camera_target);
+        if(!ok ||
            !arm_world_to_view(root,camera_target,map_in.desired_view)) goto refuse_pair;
         map_in.explicit_target=1;
     }
@@ -6737,7 +6741,7 @@ static void arm_ik_now(ULONGLONG arm, const DG_BRIDGE_ARM_TARGET *target)
 
     for (k = 0; k < 3; k++) root_pos[k] = root[3][k];
     arm_view_to_world(root, map_out.target_view, target_world);
-    if(target->position.enabled && !g_b.camera_position.ready &&
+    if(target->position.enabled && !target->persistent_hands && !g_b.camera_position.ready &&
        !dg_position_calibrate(&g_b.camera_position,&target->position,
                               target_world,map_out.scale)) goto refuse_pair;
     /* And the other half of the kick: the hand driven back toward the
@@ -7046,6 +7050,7 @@ static void arm_ik_now(ULONGLONG arm, const DG_BRIDGE_ARM_TARGET *target)
             if (g_b.arm_map_unarmed) {
                 if (!unarmed_wrist_target(arm,&g_b.pair_frame,q4,q5,
                                           recover_cached,unarmed_desired)) goto refuse_pair;
+                hand_profile_stage(1,target,&target->free_right,unarmed_desired);
                 if(target->free_right.enabled &&
                    !dg_free_wrist_step(&g_b.free_right,&target->free_right,
                                        unarmed_desired,unarmed_desired)) goto refuse_pair;
@@ -8090,8 +8095,12 @@ void dg_bridge_arm_seam_now(const DG_BRIDGE_ARM_TARGET *target)
         adj_probe_now(arm);
     } else if (target) {
         LONG accepted_before = g_b.c_arm_pairs_accepted;
+        unsigned long left_before=g_left.accepted;
+        memset(&g_hand_capture,0,sizeof g_hand_capture);
         arm_ik_now(arm, target);
         left_arm_now(arm, target, g_b.c_arm_pairs_accepted != accepted_before);
+        hand_profile_commit(target,g_b.c_arm_pairs_accepted != accepted_before &&
+            g_left.active && g_left.accepted!=left_before && g_left.wrist_world_valid);
         if(g_b.c_arm_pairs_accepted != accepted_before) hand_pose_now(arm,target);
         else if(!target->write || !g_b.ik_active || !g_left.active) hand_pose_release();
     } else {
@@ -17897,6 +17906,7 @@ static int t_camera_gate_now(void)
 #include "dg_left_arm_test.inl"
 #include "dg_left_model_test.inl"
 #include "dg_unarmed_right_test.inl"
+#include "dg_hand_profile_test.inl"
 #include "dg_unarmed_prone_test.inl"
 #include "dg_hand_pose_test.inl"
 #include "dg_interact_bridge_test.inl"
@@ -17973,6 +17983,7 @@ int dg_bridge_self_test(void)
     bad += t_left_seam();
     bad += t_left_model_transport();
     bad += t_unarmed_right();
+    bad += t_persistent_hand_profile();
     bad += t_unarmed_prone_tables();
     bad += t_hand_pose_mirror();
     bad += t_hand_pose_mirror_heading();
