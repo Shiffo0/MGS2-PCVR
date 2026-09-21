@@ -8,9 +8,6 @@ Play **METAL GEAR SOLID 2: Sons of Liberty — Master Collection Version** in PC
 
 The **Tanker chapter with Snake** is the focus of this beta. Switch between VR and Third Person as needed, and check your wrist for radar and LIFE information. **Plant / Raiden support is still in development** and is not ready for a complete VR playthrough.
 
-> [!IMPORTANT]
-> **The support candidate removes the automatic cutoff with `seconds=0`.** If keeping older settings, install the candidate binary and change `seconds=3600` to `seconds=0` with the game closed. Older binaries do not support zero as unlimited.
-
 ## Requirements
 
 - Your own Steam copy of **MGS2 — Master Collection Version** on Windows.
