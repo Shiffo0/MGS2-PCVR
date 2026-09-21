@@ -1,14 +1,20 @@
 {
-  "version": "v0.3.2-beta.3-rc.1",
-  "build": "4F95FE0F",
-  "baseline_build": "479DF688",
-  "binary_sha256": "4F95FE0F114CA314BCA1FAD41E6BB725B1901408F9C80399C80F197C81523AD4",
+  "version": "v0.3.3",
+  "build": "62E9EEAF",
+  "baseline_build": "4F95FE0F",
+  "binary_sha256": "62E9EEAFBAD5E057DDEBC44F0AD123BC4B157341A790D36E4B85434653349DC6",
   "diagnostics_enabled": false,
-  "support_logging": "Bounded capture counters, no GPU probes",
-  "headset_acceptance": "Pending; issue #2 cause unconfirmed",
+  "support_logging": "Bounded error and capture reports; no development GPU probes or recordings",
+  "headset_acceptance": "PS VR2 / SteamVR playability reported by maintainer; Quest 3 previously tested",
   "tests": {
     "release_timer": 39,
     "release_gpu": 11,
-    "resize_warp": 48
+    "resize_warp": 48,
+    "factory_shared_texture": "passed",
+    "xr_diagnostic": 1199,
+    "xr_player": 1075,
+    "main": "passed",
+    "ik": "passed",
+    "recorder": "9/9"
   }
 }

@@ -1,6 +1,6 @@
 # Building the mod
 
-Support candidate 4F95FE0F starts from beta 479DF688. It fixes resize synchronization, supports seconds=0 and adds bounded capture logging. Run test_release.bat and test_xr_resize.bat with the documented compiler/SDK setup. SteamVR issue #2 remains under investigation.
+Version v0.3.3 contains the corresponding mod source for build 62E9EEAF. It includes DXGI 1.1 factory initialization for SteamVR, synchronized swapchain resizing, unlimited sessions and bounded support logging. Run test_release.bat, test_xr_resize.bat and test_factory.bat with the compiler/SDK setup below.
 
 ## Requirements
 
@@ -23,4 +23,4 @@ Run `src\test_release.bat` from the same developer prompt to test legacy-setting
 
 Flight recording, GPU trials/readback probes, phase/pair traces, HUD watches, optional captures and debug visuals require the diagnostic profile. Player logs keep a bounded subset of startup/error messages (maximum 256 lines per process). No FPS improvement is claimed without measurement.
 
-This source has curated comments and three relative development-only diagnostic paths. A local rebuild is a separate artifact; byte identity with the packaged build is not guaranteed.
+This directory contains the mod source and relative development-only diagnostic paths. A local rebuild is a separate artifact; byte identity with the packaged build is not guaranteed.

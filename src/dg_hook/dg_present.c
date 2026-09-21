@@ -10,7 +10,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <d3d11.h>
-#include <dxgi.h>
+#include <dxgi1_2.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
@@ -365,7 +365,10 @@ static int patch_factory(IDXGIFactory *factory) {
 }
 
 static HRESULT WINAPI hook_create_factory(REFIID iid, void **factory) {
-    HRESULT hr = g_create_factory(iid, factory);
+    /* SteamVR requires DXGI 1.1 shared sync textures. Upgrade before the
+       game selects its adapter and creates D3D11, preserving its IID. */
+    HRESULT hr = CreateDXGIFactory1(iid, factory);
+    log_msg("OpenXR: CreateDXGIFactory1 hr=0x%08lX\r\n", (unsigned long)hr);
     if (SUCCEEDED(hr) && factory && *factory &&
         !patch_factory((IDXGIFactory *)*factory)) {
         count_error("factory vtable hook failed");

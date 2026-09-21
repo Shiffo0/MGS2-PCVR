@@ -1,10 +1,10 @@
-# MGS2 PCVR — Public Beta
+# MGS2 PCVR — v0.3.3
 
 Play **METAL GEAR SOLID 2: Sons of Liberty — Master Collection Version** in PC VR, with headset tracking and motion-controller controls.
 
-**Tested on Meta Quest 3.** This unofficial mod uses **OpenXR** and **AER (Alternate Eye Rendering)**. It runs on a Windows gaming PC; it is not a standalone Quest app.
+**Playable on PS VR 2 / SteamVR. Also tested on Meta Quest 3.** This unofficial mod uses **OpenXR** and **AER (Alternate Eye Rendering)**. It runs on a Windows gaming PC; it is not a standalone Quest app.
 
-**[Download the Beta](https://github.com/Shiffo0/MGS2-PCVR/releases/tag/v0.3.2-beta.3-rc.1)** · [Installation](#installation) · [Controls](#controls) · [Known limitations](#known-limitations) · [Report a problem](https://github.com/Shiffo0/MGS2-PCVR/issues)
+**[Download v0.3.3](https://github.com/Shiffo0/MGS2-PCVR/releases/tag/v0.3.3)** · [Installation](#installation) · [Controls](#controls) · [Known limitations](#known-limitations) · [Report a problem](https://github.com/Shiffo0/MGS2-PCVR/issues)
 
 The **Tanker chapter with Snake** is the focus of this beta. Switch between VR and Third Person as needed, and check your wrist for radar and LIFE information. **Plant / Raiden support is still in development** and is not ready for a complete VR playthrough.
 
@@ -12,21 +12,21 @@ The **Tanker chapter with Snake** is the focus of this beta. Switch between VR a
 
 - Your own Steam copy of **MGS2 — Master Collection Version** on Windows.
 - A Windows gaming PC capable of running the game and PC VR.
-- **Meta Quest 3 with Touch Plus controllers**, connected to the PC through your PC VR software.
+- **PS VR2 with Sense controllers and a supported PC connection**, or **Meta Quest 3 with Touch Plus controllers**, connected to PC VR.
 - An active OpenXR runtime for your PC VR setup.
 
-Other headsets and game versions have not been validated for this beta.
+Other headsets and game versions have not been validated for this release.
 
-Support candidate **4F95FE0F** fixes swapchain resize synchronization and adds bounded capture reports. The cause of issue #2 remains unconfirmed: the supplied log shows different sizes across runtime startups, not a demonstrated in-session resize.
+Version **v0.3.3** fixes the SteamVR gameplay “Waiting” problem caused by graphics-device initialization. It also retains unlimited sessions and recovery when the game changes rendering resolution.
 
 ## Installation
 
 1. Launch the unmodified game once, then close it.
-2. Connect your Quest 3 to PC VR. Start your PC VR software and make sure its OpenXR runtime is active.
-3. Download **`MGS2-PCVR-v0.3.2-beta.3-rc.1-4F95FE0F.zip`** from the [release page](https://github.com/Shiffo0/MGS2-PCVR/releases/tag/v0.3.2-beta.3-rc.1). Choose the mod ZIP under **Assets**, not GitHub's automatic **Source code** downloads.
+2. Connect your headset and start your PC VR software. For **PS VR2**, use **SteamVR** and select it under **SteamVR Settings → OpenXR**. For **Quest Link / Air Link**, select Meta as active under **Meta Quest Link → Settings → General → OpenXR Runtime**. Close the game before switching runtimes.
+3. Download **`MGS2-PCVR-v0.3.3-62E9EEAF.zip`** from the [release page](https://github.com/Shiffo0/MGS2-PCVR/releases/tag/v0.3.3). Choose the mod ZIP under **Assets**, not GitHub's automatic **Source code** downloads.
 4. In Steam, right-click the game → **Manage → Browse local files**. Extract the ZIP into the folder containing **`METAL GEAR SOLID2.exe`**, keeping its folder structure.
 5. Back up any existing files before replacing them. If other mods already provide `winmm.dll` or `openxr_loader.dll`, start with a clean mod setup; compatibility with other mods has not been validated.
-6. Launch the game through Steam with your headset connected. Use the left controller's **Menu** button for Start. During gameplay, press **A** to switch between VR and Third Person. Face forward and **hold Y** to recenter.
+6. Launch the game through Steam with your headset connected. The control table below uses **Quest button names**; for PS VR2, check the corresponding actions in SteamVR controller bindings.
 7. Start with **Tanker**, and check the controls and limitations below.
 
 ### Updating or uninstalling
@@ -37,7 +37,7 @@ Close the game before changing files. Back up your mod files and settings before
 
 ![Quest 3 controller mappings](media/quest3-controls.png)
 
-Controls below use the **default right-handed layout**. To open the Codec, bring your right hand near your right ear before pressing the grip.
+Controls below use **Quest button names** and the **default right-handed layout**. PS VR2 button assignments can differ through SteamVR; check its controller bindings for the corresponding actions. To open the Codec, bring your right hand near your right ear before pressing the grip.
 
 | Input | Action |
 | --- | --- |
@@ -70,7 +70,7 @@ Controls below use the **default right-handed layout**. To open the Codec, bring
 - **Hanging and moving while hanging:** still experimental; use **Third Person** for these actions.
 - **Grenades:** not supported in VR yet.
 - **Plant / Raiden:** incomplete. Experimental weapon features are included, but a full VR campaign is not supported yet.
-- **Session length:** this candidate supplies `seconds=0` for no automatic cutoff; update older settings explicitly.
+- **Session length:** the included configuration uses `seconds=0` for no automatic cutoff; update older settings explicitly.
 
 ## AER and performance
 
@@ -87,14 +87,14 @@ Future work focuses on **Raiden and the Plant chapter**, including SOCOM mapping
 - **No VR image:** check your PC VR connection, active OpenXR runtime and installation folder. The mod files must sit beside the game executable. Make sure the `.on` files have not gained an extra `.txt` extension.
 - **View offset or facing the wrong way:** face forward and hold **Y** to recenter.
 - **Stuck at a camera or hanging section:** press **A** to switch to Third Person.
-- **VR stops after about an hour:** install this candidate, close the game and set `seconds=0` in `dg_hook.on`.
+- **VR stops after about an hour:** install v0.3.3, close the game and set `seconds=0` in `dg_hook.on`.
 - **Problems with other mods:** try this beta on its own before reporting the problem.
 
 [Report a problem](https://github.com/Shiffo0/MGS2-PCVR/issues) with your mod version, game version, headset, PC VR software, GPU, chapter/location and steps to reproduce it. Mention whether it happens in VR, Third Person or both. Review logs before sharing them and avoid uploading personal data or game files.
 
 ## Credits and license
 
-Created by **Shiffo0**. This is an unofficial fan project, not affiliated with or endorsed by Konami or Meta. The game is sold separately.
+Created by **Shiffo0**. This is an unofficial fan project, not affiliated with or endorsed by Konami, Sony or Meta. The game is sold separately.
 
 The mod's original code and documentation are available under the **[MIT License](LICENSE)**. This license covers the contributors' own work, not the game, its assets or trademarks. Third-party components retain their own licenses; notices are included in the download.
 
