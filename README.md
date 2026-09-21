@@ -81,7 +81,7 @@ Keep this file when updating. To restore defaults, close the game, rename `dg_ha
 - **Grenades:** not supported in VR yet.
 - **Plant / Raiden:** incomplete. Experimental weapon features are included, but a full VR campaign is not supported yet.
 - **Visual Stereo bugs:** from certain angles stereo image produces a double image.
-- **Janky Arms:** You need to hold Y (recalibrate) or switch perspective to fix the hand positions, these positions do not persist to new levels.
+- **Janky Arms:** You need to hold Y (recalibrate) or switch perspective to fix the hand positions, these positions do not persist to new levels. (persistent hand alignment seems to fix this Right Trigger + A)
 - **Session length:** the included configuration uses `seconds=0` for no automatic cutoff; update older settings explicitly.
 
 ## AER and performance
