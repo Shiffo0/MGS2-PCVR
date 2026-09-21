@@ -70,6 +70,8 @@ Controls below use **Quest button names** and the **default right-handed layout*
 - **Hanging and moving while hanging:** still experimental; use **Third Person** for these actions.
 - **Grenades:** not supported in VR yet.
 - **Plant / Raiden:** incomplete. Experimental weapon features are included, but a full VR campaign is not supported yet.
+- **Visual Stereo bugs:** from certain angles stereo image produces a double image.
+- **Janky Arms:** You need to hold Y (recalibrate) or switch perspective to fix the hand positions, these positions do not persist to new levels.
 - **Session length:** the included configuration uses `seconds=0` for no automatic cutoff; update older settings explicitly.
 
 ## AER and performance
