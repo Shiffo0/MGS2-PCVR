@@ -10,8 +10,7 @@ The **Tanker chapter with Snake** is the focus of this beta. Switch between VR a
 
 ## New in v0.3.5
 
-Game Over controller recovery, HUD/cutscene placement fixes, held coolant spraying, standing coolant/microphone movement and arm positioning, shared USP/SOCOM reload hooks, and improved rigid hand attachment selection. Development measurements are excluded from the player build and removed from the corresponding mod-source paths where separate from gameplay. Limited startup/error logging remains.
-
+Game Over controller recovery, HUD/cutscene placement fixes, fixed double vision and improved rigid hand attachment selection. 
 See [the release notes](RELEASE_NOTES.md) for changes since v0.3.4 and validation limits. This source-cleaned rebuild is **1007DD0B**; it has not replaced the maintainer's installed playtest build.
 
 ## Requirements
@@ -81,14 +80,11 @@ Keep this file when updating. To restore defaults, close the game, rename `dg_ha
 ## Known limitations
 
 - **First-person locker entry:** the problem reported in v0.3.4 has not been verified as fixed; use Third Person if affected.
+- **Camera tanker:** The camera is not creating a picture from the correct location in FPS mode, this needs to be fixed in future updates.
 
 - **Security-camera sections:** use **Third Person** to get past cameras, then switch back to VR with **A**.
 - **Hanging and moving while hanging:** still experimental; use **Third Person** for these actions.
-- **Grenades:** not supported in VR yet.
 - **Plant / Raiden:** incomplete. Experimental weapon features are included, but a full VR campaign is not supported yet.
-- **Visual Stereo bugs:** from certain angles stereo image produces a double image.
-- **Arm placement:** native animations and reach limits can affect the visible pose. Recenter with Y or switch perspective if needed. Saved wrist alignment persists; it does not guarantee correct placement in every animation. (persistent hand alignment seems to fix this Right Trigger + A)
-- **Session length:** the included configuration uses `seconds=0` for no automatic cutoff; update older settings explicitly.
 
 ## AER and performance
 
@@ -98,7 +94,7 @@ You may notice ghosting or judder during motion. Keep the game's frame rate stab
 
 ## What's next?
 
-Future work focuses on **Raiden and the Plant chapter**, including further coolant and SOCOM validation, scope and sniper-rifle support, further Stinger work, and Nikita support. Hanging and grenades also need more work. There is no release date for complete Raiden support yet.
+Future work focuses on **Raiden and the Plant chapter**, including further coolant and SOCOM validation, scope and sniper-rifle support, further Stinger work, HF-blade support, and Nikita support. There is no release date for complete Raiden support yet.
 
 ## Troubleshooting and feedback
 
