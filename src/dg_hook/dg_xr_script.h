@@ -73,14 +73,14 @@ void   dg_xr_script_turn_rate(double deg_per_s);
 double dg_xr_script_turn_offset_rad(void);
 void   dg_xr_script_recenter(void);
 
-#ifdef DG_HOOK_TEST
-/* Manual live-player seam for deterministic unit tests. It runs the same edge,
-   recenter, turn, transform and neutral-release code as the worker, without a
-   thread, foreground checks or sleeps. */
-int dg_xr_script_test_begin(const DG_XR_SCRIPT_PROGRAM *program,
-                            const DG_XR_CONFIG *cfg);
-int dg_xr_script_test_step(DG_XR_FRAME *frame);
-int dg_xr_script_test_abort(DG_XR_FRAME *neutral_frame);
-#endif
+
+
+
+
+
+
+
+
+
 
 #endif

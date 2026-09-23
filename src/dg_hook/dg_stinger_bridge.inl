@@ -5,9 +5,9 @@
 static DG_DETOUR g_stinger_detour[4];
 static struct { uint64_t base; int resolved; volatile LONG live,fault; } g_stinger;
 int dg_bridge_stinger_enabled(void) {return g_stinger.live && !g_stinger.fault;}
-#ifdef DG_HOOK_TEST
-void dg_bridge_test_stinger_available(int available){g_stinger.live=available;g_stinger.fault=0;}
-#endif
+
+
+
 static const unsigned stinger_sites[4]={0x715394,0x715569,0x4a0979,0x4a0bb1};
 static const unsigned char stinger_bytes[4][12]={
     {0x4d,0x8b,0x86,0xa0,0,0,0,0x85,0xca},

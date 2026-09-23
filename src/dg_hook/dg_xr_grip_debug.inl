@@ -130,55 +130,55 @@ static void gripdbg_parent_destroyed(int destroyed) {
     free(g_gripdbg_gpu_images);g_gripdbg_gpu_images=NULL;g_gripdbg_gpu_image_count=0;
     memset(&g_gripdbg_overlay,0,sizeof g_gripdbg_overlay);
 }
-static void gripdbg_quad(XrCompositionLayerQuad *q,int tile,const double pos[3],float w,float h) {
-    memset(q,0,sizeof *q);q->type=XR_TYPE_COMPOSITION_LAYER_QUAD;
-    q->layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT|XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
-    q->space=g_local_space;q->eyeVisibility=XR_EYE_VISIBILITY_BOTH;
-    q->subImage.swapchain=g_gripdbg_gpu_swap;
-    q->subImage.imageRect.offset.x=(tile%2)*128;q->subImage.imageRect.offset.y=(tile/2)*128;
-    q->subImage.imageRect.extent.width=128;q->subImage.imageRect.extent.height=tile==3?32:128;
-    q->pose.orientation.w=1;q->pose.position.x=(float)pos[0];q->pose.position.y=(float)pos[1];q->pose.position.z=(float)pos[2];
-    q->size.width=w;q->size.height=h;
-}
+
+
+
+
+
+
+
+
+
+
 static void gripdbg_append(XrFrameEndInfo *end,const XrCompositionLayerBaseHeader **layers,
     unsigned capacity,XrCompositionLayerQuad q[6],int render,int theater,int views,XrTime when,uint64_t now) {
-#if DG_ENABLE_DIAGNOSTICS
 
-    DG_GRIP_DEBUG s;double a[3],b[3],mid[3],distance=0;int ready,k;
-    XrSpaceLocation head={XR_TYPE_SPACE_LOCATION};
-    const XrSpaceLocationFlags need=XR_SPACE_LOCATION_ORIENTATION_VALID_BIT|XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT|
-        XR_SPACE_LOCATION_POSITION_VALID_BIT|XR_SPACE_LOCATION_POSITION_TRACKED_BIT;
-    ready=g_cfg.grip_debug && !g_gripdbg_gpu_quarantined && g_session_running &&
-        g_state==XR_SESSION_STATE_FOCUSED && render && !theater && views &&
-        end->layerCount && end->layers && end->layers[0]->type==XR_TYPE_COMPOSITION_LAYER_PROJECTION &&
-        end->layerCount+6<=capacity && end->layerCount+6<=g_radial_max_layers && g_local_space && g_view_space;
-    if(ready)ready=dg_bridge_grip_debug_snapshot(&s) && dg_grip_debug_points(&s,now,a,b,&distance);
-    if(ready)ready=pfn_LocateSpace && pfn_LocateSpace(g_view_space,g_local_space,when,&head)==XR_SUCCESS && (head.locationFlags&need)==need;
-    if(ready)dg_grip_debug_raster(&s,distance,g_gripdbg_pixels);
-    if(!dg_health_upload(&g_gripdbg_overlay,&g_gripdbg_ops,ready,g_gripdbg_pixels))return;
-    for(k=0;k<3;k++)gripdbg_quad(&q[k],0,a,(float)(2*DG_M9_GRAB_RADIUS_M),(float)(2*DG_M9_GRAB_RADIUS_M));
-    q[1].pose.orientation.x=.70710678f;q[1].pose.orientation.w=.70710678f;
-    q[2].pose.orientation.y=.70710678f;q[2].pose.orientation.w=.70710678f;
-    gripdbg_quad(&q[3],1,b,.008f,.008f);q[3].pose.orientation=head.pose.orientation;
-    for(k=0;k<3;k++)mid[k]=(a[k]+b[k])*.5;
-    gripdbg_quad(&q[4],2,mid,(float)(distance>.0001?distance:.0001),.016f);
-    {
-        double h[3]={head.pose.position.x,head.pose.position.y,head.pose.position.z},rot[4];
-        if(dg_grip_line_q(a,b,h,rot)) {
-            q[4].pose.orientation.x=(float)rot[0];q[4].pose.orientation.y=(float)rot[1];
-            q[4].pose.orientation.z=(float)rot[2];q[4].pose.orientation.w=(float)rot[3];
-        } else q[4].pose.orientation=head.pose.orientation;
-        /* OpenXR quads are one-sided. Flip each great circle towards the head. */
-        if(h[2]<a[2]){q[0].pose.orientation.x=1;q[0].pose.orientation.w=0;}
-        if(h[1]>a[1])q[1].pose.orientation.x=-.70710678f;
-        if(h[0]<a[0])q[2].pose.orientation.y=-.70710678f;
-    }
-    mid[1]+=.055;gripdbg_quad(&q[5],3,mid,.12f,.03f);q[5].pose.orientation=head.pose.orientation;
-    for(k=0;k<6;k++)layers[end->layerCount++]=(const XrCompositionLayerBaseHeader *)&q[k];
-    end->layers=layers;
-    if(!g_gripdbg_logged && g_log){g_log("  M9 debug: actual hit-test sphere/point/line/mm submitted; headset placement unverified\r\n");g_gripdbg_logged=1;}
 
-#else
 
-#endif
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 }

@@ -148,13 +148,13 @@ static void script_menu_callbacks_stop(void) {
 /* Select once per call, never advance a scenario in a consumer. The script
    owns a separate publication; it cannot race the real XR writer or fall
    back to physical controllers on EOF/error. All input routes use these. */
-#ifdef DG_HOOK_TEST
-static unsigned g_controls_input_reads;
-#endif
+
+
+
 static int input_get_frame(DG_XR_FRAME *out) {
-#ifdef DG_HOOK_TEST
-    g_controls_input_reads++;
-#endif
+
+
+
     return g_source == SRC_SCRIPT ? dg_xr_script_get_frame(out)
                                   : dg_xr_get_stereo(out);
 }
@@ -178,10 +178,10 @@ static unsigned long input_secondary_presses(unsigned int hand) {
     return g_source == SRC_SCRIPT ? dg_xr_script_secondary_presses(hand)
                                   : dg_xr_secondary_presses(hand);
 }
-static unsigned long input_secondary_ignored(unsigned int hand) {
-    return g_source == SRC_SCRIPT ? dg_xr_script_secondary_ignored(hand)
-                                  : dg_xr_secondary_ignored(hand);
-}
+
+
+
+
 static uint64_t input_menu_press_seq(void) {
     return g_source == SRC_SCRIPT ? dg_xr_script_menu_press_seq()
                                   : dg_xr_menu_press_seq();
@@ -459,22 +459,22 @@ static void camera_yaw_anchor_reset(void)
     g_camera_yaw_anchor_camera = 0;
 }
 
-#ifdef DG_HOOK_TEST
-static int g_test_camera_gate_override = -1;
-static DG_CAMERA_GATE g_test_camera_gate;
-#endif
+
+
+
+
 
 static int camera_gate_now(DG_CAMERA_GATE *out)
 {
-#ifdef DG_HOOK_TEST
-    if (g_test_camera_gate_override >= 0) {
-        if (out) {
-            if (g_test_camera_gate_override) *out = g_test_camera_gate;
-            else memset(out, 0, sizeof(*out));
-        }
-        return g_test_camera_gate_override;
-    }
-#endif
+
+
+
+
+
+
+
+
+
     return dg_bridge_camera_gate_now(out);
 }
 
@@ -510,7 +510,7 @@ static void logf_(const char *fmt, ...) {
         n = (int)strlen(buf);
         cut = 1;
     }
-#if !DG_ENABLE_DIAGNOSTICS
+
     {
         static volatile LONG lines;
         char lower[sizeof buf]; size_t i;
@@ -522,7 +522,7 @@ static void logf_(const char *fmt, ...) {
             !strstr(lower,"openxr") && !strstr(lower,"session state")) return;
         if (InterlockedIncrement(&lines)>256) return;
     }
-#endif
+
     h = CreateFileA(g_logpath, FILE_APPEND_DATA, FILE_SHARE_READ, NULL,
                     OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (h == INVALID_HANDLE_VALUE) return;
@@ -822,6 +822,11 @@ static uint64_t g_zoom_last_identity;
 /* Runs on the game's thread with the camera complete and nothing having read
    it yet. Convention is settled bitwise (2.12): eye_pers = eye_inv * pers. */
 static void apply_transform(void) {
+    /* Raw gameplay context closes this before theater's display hysteresis.
+       No D3D calls here: restoration belongs to the next native draw. */
+    dg_ui2d_gameplay(g_armed && g_source==SRC_XR && g_stereo &&
+        !script_menu_blocked() && !dg_bridge_theater_verdict() &&
+        dg_bridge_controller_gameplay_now());
     MAT d, d_inv, n_eye_inv, n_eye, base_eye_inv, base_eye;
     MAT *pers2 = M(O_PERS2), *raise_pers = M(O_RAISE_PERS);
     MAT *raise_pers2 = M(O_RAISE_PERS2), *pers_no_offset = M(O_PERS_NO_OFFSET);
@@ -1267,12 +1272,12 @@ static const char *arm_frame_name(int frame)
    without a seated origin is yaw. A silent fallback is the failure mode where
    a knob is set, believed, and quietly not in effect, so the log says which
    one is running rather than which one was requested. */
-static const char *arm_frame_running(int frame)
-{
-    if (frame == DG_XR_REL_FRAME_ROOM && !g_arm_frame_have)
-        return "room (nothing frozen yet - running as yaw)";
-    return arm_frame_name(frame);
-}
+
+
+
+
+
+
 
 /* The player's own shoulder-to-wrist length at full extension, millimetres.
    Supplied rather than measured: see the header of dg_arm_map.h for why one
@@ -1706,20 +1711,20 @@ static long          g_rec_last_torn;
    a plain buffer, by the same argument as the other worker-only state. */
 static char g_policy_path[MAX_PATH];
 
-#ifdef DG_HOOK_TEST
-/* Replay must feed the pose blender the dt the session really had; live QPC
-   would make "bit-identical" unachievable by construction. Negative means
-   live. Set only by the desk harness - the shipping DLL never touches it. */
-static double g_test_dt_override = -1.0;
-#endif
+
+
+
+
+
+
 
 static double arm_pose_dt(void)
 {
     LARGE_INTEGER now;
     double dt = 1.0 / 90.0;
-#ifdef DG_HOOK_TEST
-    if (g_test_dt_override >= 0.0) return g_test_dt_override;
-#endif
+
+
+
     QueryPerformanceCounter(&now);
     if (g_arm_pose_have_qpc && g_qpf.QuadPart > 0)
         dt = (double)(now.QuadPart - g_arm_pose_last_qpc.QuadPart) /
@@ -1743,74 +1748,74 @@ static size_t rec_log_dir(char *path, size_t cap)
     return strlen(path);
 }
 
-static void aim_observation_dump(void)
-{
-#if DG_ENABLE_DIAGNOSTICS
 
-    char path[MAX_PATH];
-    SYSTEMTIME st;
-    size_t dir = rec_log_dir(path, sizeof path);
-    long count;
-    GetLocalTime(&st);
-    _snprintf_s(path + dir, sizeof path - dir, _TRUNCATE,
-                "dg_aim_%04u%02u%02u-%02u%02u%02u-%llu.jsonl",
-                st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond,
-                (unsigned long long)GetTickCount64());
-    count = dg_aim_capture_dump(path);
-    if (count < 0) logf_("  aim observation: FAILED dump -> %s (I/O or busy capture)\r\n", path);
-    else if (count) logf_("  aim observation: %ld rows -> %s (camera seam; final draw unproven)\r\n",
-                         count, path);
 
-#else
 
-#endif
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 static int rec_dump(const char *why)
 {
-#if DG_ENABLE_DIAGNOSTICS
 
-    char path[MAX_PATH];
-    SYSTEMTIME st;
-    FILE *f = NULL;
-    long written, torn = 0;
-    size_t dir;
 
-    aim_observation_dump();
 
-    if (!g_rec.appended) {
-        logf_("  rec: nothing to dump (%s) - no XR frames were captured\r\n",
-              why);
-        return 0;
-    }
-    dir = rec_log_dir(path, sizeof path);
-    GetLocalTime(&st);
-    _snprintf_s(path + dir, sizeof path - dir, _TRUNCATE,
-                "dg_rec_%04u%02u%02u-%02u%02u%02u.dgrec",
-                st.wYear, st.wMonth, st.wDay,
-                st.wHour, st.wMinute, st.wSecond);
-    if (fopen_s(&f, path, "wb") != 0 || !f) {
-        InterlockedIncrement(&g_rec_dump_fail);
-        logf_("  rec: dump FAILED to open %s (%s)\r\n", path, why);
-        return 0;
-    }
-    written = dg_rec_write(&g_rec, (long long)g_qpf.QuadPart, f, &torn);
-    fclose(f);
-    if (written < 0) {
-        InterlockedIncrement(&g_rec_dump_fail);
-        logf_("  rec: dump FAILED writing %s (%s)\r\n", path, why);
-        return 0;
-    }
-    InterlockedIncrement(&g_rec_dumps);
-    g_rec_last_torn = torn;
-    logf_("  rec: dumped %ld frames to %s (%s; seen %ld, dup %ld,"
-          " torn %ld)\r\n",
-          written, path, why, g_rec.seen, g_rec.dup, torn);
-    return 1;
 
-#else
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 return 0;
-#endif
+
 }
 
 #define DG_REC_SNAPSHOT_S 60
@@ -1822,30 +1827,30 @@ return 0;
    existence stands on, because it is written FOR the sessions that die
    without running any exit path. On failure <path> is untouched and the
    .tmp does not survive. */
-static long rec_write_atomic(const char *path, long *torn)
-{
-#if DG_ENABLE_DIAGNOSTICS
 
-    char tmp[MAX_PATH];
-    FILE *f = NULL;
-    long written;
-    size_t n = strlen(path);
 
-    if (n == 0 || n + 5 >= sizeof tmp) return -1;
-    memcpy(tmp, path, n);
-    memcpy(tmp + n, ".tmp", 5);
-    if (fopen_s(&f, tmp, "wb") != 0 || !f) return -1;
-    written = dg_rec_write(&g_rec, (long long)g_qpf.QuadPart, f, torn);
-    if (fclose(f) != 0) written = -1;
-    if (written >= 0 && !MoveFileExA(tmp, path, MOVEFILE_REPLACE_EXISTING))
-        written = -1;
-    if (written < 0) remove(tmp);
-    return written;
 
-#else
-return 0;
-#endif
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 /* When is a live snapshot due? Every DG_REC_SNAPSHOT_S seconds, only while
    the recorder is on, and only when the ring moved since the last one - an
@@ -1869,25 +1874,25 @@ static int rec_snapshot_due(int on, long appended, int elapsed,
    minute of input. */
 static void rec_snapshot(void)
 {
-#if DG_ENABLE_DIAGNOSTICS
 
-    char path[MAX_PATH];
-    long written, torn = 0;
-    size_t dir = rec_log_dir(path, sizeof path);
 
-    _snprintf_s(path + dir, sizeof path - dir, _TRUNCATE, DG_REC_LIVE_NAME);
-    written = rec_write_atomic(path, &torn);
-    if (written < 0) {
-        InterlockedIncrement(&g_rec_snapshot_fail);
-        logf_("  rec: live snapshot FAILED (%s)\r\n", path);
-        return;
-    }
-    InterlockedIncrement(&g_rec_snapshots);
-    logf_("  rec: live snapshot %ld frames (torn %ld)\r\n", written, torn);
 
-#else
 
-#endif
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 }
 
 /* Produces one policy-owned target whenever controller driving is configured.
@@ -1925,23 +1930,23 @@ static unsigned long arm_left_calibration_stream(void)
     }
     return g_left_calibration.epoch;
 }
-#ifdef DG_HOOK_TEST
-static int g_test_aim_selection = -1;
-#endif
+
+
+
 
 static int arm_absolute_prepare(DG_AIM_SELECTION *selection)
 {
     if (!g_aim_camera.valid ||
         (g_arm_track != ARM_TRACK_R_GRIP && g_arm_track != ARM_TRACK_R_AIM)) return 0;
-#ifdef DG_HOOK_TEST
-    if (g_test_aim_selection >= 0) {
-        if (!dg_weapon_hand_aim(g_test_aim_selection)) return 0;
-        memset(selection, 0, sizeof *selection);
-        selection->arm = g_aim_camera.gate.arm_body;
-        selection->subobject = selection->subobjs = selection->hand = selection->model = 100;
-        selection->weapon_id = (uint64_t)g_test_aim_selection;
-    } else
-#endif
+
+
+
+
+
+
+
+
+
     if (!dg_aim_capture_hand_selection((uintptr_t)g_base,
                                      g_aim_camera.gate.arm_body, selection)) return 0;
     if(selection->weapon_id==13 && !dg_bridge_blade_enabled())return 0;
@@ -2544,17 +2549,17 @@ static int move_from_frame(const DG_XR_FRAME *frame, DG_BRIDGE_MOVE *cmd)
     return 1;
 }
 
-#ifdef DG_HOOK_TEST
-/* Compatibility checks exercise the same shaping without a live bridge. */
-static int fire_command(DG_BRIDGE_FIRE *cmd) {
-    DG_XR_FRAME f;
-    return fire_from_frame((input_get_frame(&f)&1) ? &f : NULL,cmd);
-}
-static int move_command(DG_BRIDGE_MOVE *cmd) {
-    DG_XR_FRAME f;
-    return move_from_frame((input_get_frame(&f)&1) ? &f : NULL,cmd);
-}
-#endif
+
+
+
+
+
+
+
+
+
+
+
 static volatile LONG g_action_route_denied;
 static volatile LONG g_camera_route_denied=1;
 static void action_from_frame(DG_ACTION_SAMPLE *out) {
@@ -2700,6 +2705,7 @@ static LONG CALLBACK veh(EXCEPTION_POINTERS *ep) {
     InterlockedIncrement(&g_traps);
     if (InterlockedCompareExchange(&g_script_menu_active, 0, 0)) {
         /* Detector only: never enter camera/policy/gameplay callbacks. */
+        dg_ui2d_gameplay(0);
         script_menu_sample_context();
         c->EFlags |= 0x10000;
         c->Dr6 = 0;
@@ -2966,7 +2972,7 @@ static int parse_config(char *buf, POSE *p, double *seconds,
         if (*s != '=') continue;                /* malformed token: skip it */
         s++;
 
-#if !DG_ENABLE_DIAGNOSTICS
+
         { char *lower=key; for (; *lower; ++lower)
             if (*lower>='A' && *lower<='Z') *lower=(char)(*lower+('a'-'A')); }
         if (strstr(key, "probe") || strstr(key, "dump") || strstr(key, "debug") ||
@@ -2975,7 +2981,7 @@ static int parse_config(char *buf, POSE *p, double *seconds,
             while (*s && *s!='\n' && *s!='\r') ++s;
             continue;
         }
-#endif
+
         if (_stricmp(key, "sweep_axis") == 0) {  /* non-numeric values */
             if      (_strnicmp(s, "pitch", 5) == 0) p->sweep_axis = 1;
             else if (_strnicmp(s, "roll", 4) == 0)  p->sweep_axis = 2;
@@ -3990,33 +3996,33 @@ static int script_request_current(const char *marker,
 /* Just enough of the VK table to name a key in the log. Anything unnamed still
    prints its hex, which is enough to look up. The point is to stop asking the
    player to press a button nobody in this conversation can name. */
-static const char *vk_name(int vk)
-{
-    static char buf[8];
-    switch (vk) {
-    case VK_LBUTTON:  return "Mouse Left";
-    case VK_RBUTTON:  return "Mouse Right";
-    case VK_MBUTTON:  return "Mouse Middle";
-    case VK_XBUTTON1: return "Mouse 4";
-    case VK_XBUTTON2: return "Mouse 5";
-    case VK_SPACE:    return "Space";
-    case VK_RETURN:   return "Enter";
-    case VK_TAB:      return "Tab";
-    case VK_ESCAPE:   return "Esc";
-    case VK_LSHIFT:   return "Left Shift";
-    case VK_RSHIFT:   return "Right Shift";
-    case VK_LCONTROL: return "Left Ctrl";
-    case VK_RCONTROL: return "Right Ctrl";
-    case VK_LMENU:    return "Left Alt";
-    case VK_RMENU:    return "Right Alt";
-    default: break;
-    }
-    if ((vk >= '0' && vk <= '9') || (vk >= 'A' && vk <= 'Z')) {
-        buf[0] = (char)vk; buf[1] = 0;
-        return buf;
-    }
-    return "?";
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 /* The actuator probe's drain: one line per captured sample, the six deciders
    of FPS_AIM_ACTUATOR_ONDERZOEK.md par. 6. flag3 set = H-A's windowed
@@ -4028,35 +4034,35 @@ static const char *vk_name(int vk)
    long before a 30 s heartbeat came round. */
 static void drain_turn_probe(void)
 {
-#if DG_ENABLE_DIAGNOSTICS
 
-    DG_TURN_PROBE_SAMPLE ps;
-    while (dg_bridge_turn_probe_take(&ps)) {
-        if (ps.pw_ok)
-            logf_("  turn probe: tick %ld byte %u%s fire %ld"
-                  "  flag3 %d homing %d  turn.vy %+d rot.vy %+d"
-                  "  camdir.vy %+d pad %+d  act %llX/%llX"
-                  "  gap %+.1f drift %+.1f head %+.1f tilt %.1f age %ld\r\n",
-                  ps.tick, (unsigned)ps.byte, ps.wrote ? "" : " idle",
-                  ps.fire_state,
-                  (int)((ps.flags >> 3) & 1),
-                  (int)((ps.flags >> 45) & 1),
-                  (int)ps.turn_vy, (int)ps.rot_vy,
-                  (int)ps.cam_vy, (int)ps.cam_pad,
-                  ps.action, ps.action2,
-                  (double)ps.gap_deg, (double)ps.drift_deg,
-                  (double)ps.head_deg, (double)ps.root_tilt_deg,
-                  ps.gap_age);
-        else
-            logf_("  turn probe: tick %ld byte %u%s fire %ld"
-                  "  player work UNREADABLE\r\n",
-                  ps.tick, (unsigned)ps.byte, ps.wrote ? "" : " idle",
-                  ps.fire_state);
-    }
 
-#else
 
-#endif
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 }
 
 /* The adjust probe's per-cycle drain (Meetplan A', ROLL V5.1 par. 3): one
@@ -4067,908 +4073,908 @@ static void drain_turn_probe(void)
    ring long before a 30 s heartbeat. */
 static void drain_adj_cycles(void)
 {
-#if DG_ENABLE_DIAGNOSTICS
 
-    DG_ADJ_CYCLE cy;
-    while (dg_bridge_adj_cycle_take(&cy))
-        logf_("  adj cycle: tick %ld ok %d rot.vy %+d/%+d  yaw %.2f"
-              "  ang %.2f/%.2f/%.2f  ydot %.4f\r\n",
-              cy.tick, (int)cy.ok, (int)cy.rot0, (int)cy.rot3,
-              (double)cy.yaw_deg, (double)cy.ang_deg[0],
-              (double)cy.ang_deg[1], (double)cy.ang_deg[2],
-              (double)cy.ydot);
 
-#else
 
-#endif
+
+
+
+
+
+
+
+
+
+
+
 }
 
 static void log_bridge_summary(const char *when) {
-#if DG_ENABLE_DIAGNOSTICS
 
-    DG_BRIDGE_STATS bs;
-    dg_bridge_stats(&bs);
-    /* Wall clock and tick on every heartbeat. Run 15 (2026-09-05) had to be
-       timed by counting stale ticks backwards from a file's mtime; the
-       tick matches the stamps the XR session-state lines print. */
-    {   SYSTEMTIME st;
-        GetLocalTime(&st);
-        logf_("  --- heartbeat %02d:%02d:%02d (tick %llu ms) ---\r\n",
-              (int)st.wHour, (int)st.wMinute, (int)st.wSecond,
-              (unsigned long long)GetTickCount64());
-    }
-    /* Split, for the reason the arm block was split: one call per group means a
-       line added later cannot silently push the tail of the block off the end
-       of the logger's buffer. */
-    logf_("  bridge (%s) ticks %ld  requested %ld  entered %ld  left %ld"
-          "  transitions %ld  edges %ld  writes %ld\r\n"
-          "  bridge suspends: mask-zero %ld  level-load %ld  unsafe %ld"
-          "  timeouts %ld  dropped %ld\r\n"
-          "  bridge state %s(%s)  native active %d  mgshdfix owner %d"
-          "  restored %d\r\n",
-          when, bs.ticks, bs.fps_requested, bs.fps_entered, bs.fps_left,
-          bs.fps_transitions, bs.fps_edges_injected, bs.fps_writes_applied,
-          bs.fps_refused_mask_zero, bs.fps_suspend_level_load,
-          bs.fps_suspend_unsafe, bs.fps_timeouts, bs.fps_events_dropped,
-          dg_fps_state_name(bs.fps_state),
-          dg_fps_reason_name(bs.fps_suspend_reason),
-          bs.fps_native_active, bs.mgshdfix_fps_owner, bs.restored);
-    logf_("  bridge values: Override %d  Toggle %d  Move %d"
-          "  PL_SubjectMove %d (set on %ld ticks)  PL_SubjectToggle %d\r\n"
-          "  bridge masks: PL_PAD_SUBJECT 0x%08X  PL_PAD_STOP_AIM 0x%08X\r\n"
-          "  bridge status: player 0x%016llX  game 0x%08X  menu 0x%08X\r\n",
-          bs.override_value, bs.toggle_value, bs.move_value,
-          bs.subject_move_value, bs.subject_move_ticks, bs.subject_toggle_value,
-          bs.pad_subject_mask, bs.pad_stop_aim_mask,
-          bs.player_status, bs.game_status, bs.menu_status);
-    /* F4. The flag word is decoded rather than only printed, because "0x3000"
-       is not something anyone should have to decode at 2am: 0x1000 is
-       DG_FLAG_INVISIBLE0, and channel n shifts it left by n. Two channels are
-       named because that is what the retail hide does (or 0x3000), and the
-       stereo question - whether both eyes agree - is exactly whether these two
-       ever differ. */
-    /* Observed, never written. Degrees are printed beside the raw units
-       because 4096-to-a-turn is not a number anyone reads at a glance, and
-       whether these are small angles is the whole question. */
-    /* Printed unconditionally, all-zero included, because a gate that never
-       fired and a gate that never ran must not produce the same line. The
-       camera-seam refusals are the interesting half: the tick seam runs at a
-       fifth of its normal rate during a codec or a cutscene, so the suspends
-       counted on the line above can be zero while the writer stood down
-       hundreds of times on this seam's own reading. */
-    logf_("  bridge gate: camera-seam status samples %ld (latch stale %ld)"
-          "  writer stood down on its own reading %ld times" DG_EOL,
-          bs.late_status_samples, bs.late_status_stale,
-          bs.seam_refused_unsafe);
-    /* The theater, phase 0's instrument: the per-bit occupancy plus the flank
-       tallies are what one headset evening needs to prove the mask's
-       semantics per moment. Printed unconditionally and zeros included -
-       samples is the denominator that separates "never happened" from "never
-       ran", the same contract as the gate line above. */
-    logf_("  theater: mode %s%s  verdict %d  samples %ld (theater-masked %ld,"
-          "  ui-masked %ld)" DG_EOL,
-          bs.thea_mode == DG_THEATER_ON ? "on"
-              : bs.thea_mode == DG_THEATER_MEASURE ? "measure" : "off",
-          bs.thea_ui_on ? " +ui" : "", bs.thea_verdict, bs.thea_samples,
-          bs.thea_masked, bs.thea_ui_masked);
-    logf_("  theater flanks: enter %ld exit %ld (ui %ld/%ld)  hysteresis held"
-          " enter %ld exit %ld" DG_EOL,
-          bs.thea_enter, bs.thea_exit, bs.thea_ui_enter, bs.thea_ui_exit,
-          bs.thea_enter_held, bs.thea_exit_held);
-    logf_("  theater bits: DEMO %ld  SCN_DEMO %ld  PAD_DEMO %ld  RADIO %ld"
-          "  WEAPON_OPEN %ld  ITEM_OPEN %ld" DG_EOL,
-          bs.thea_bit_demo, bs.thea_bit_scn, bs.thea_bit_pad,
-          bs.thea_bit_radio, bs.thea_bit_weapon, bs.thea_bit_item);
-    /* The flat fallback's own line: how long the camera hook has been
-       silent, and how many Presents that put on the quad. A title screen
-       that stays black now says which of the two halves failed - never
-       silent (the camera IS handing over) or silent but never shown (the
-       mode is off, or stereo/armed is not what it looks like). */
-    logf_("  screen fallback: mode %s  camera silent %ld frames"
-          "  shown %ld" DG_EOL,
-          InterlockedCompareExchange(&g_flat_mode, 0, 0) ? "on" : "off",
-          InterlockedCompareExchange(&g_flat_silent, 0, 0),
-          InterlockedCompareExchange(&g_flat_frames, 0, 0));
-    /* U2's own line, printed only when the feature was switched on so the
-       heartbeat does not grow a row of zeros for every off feature.
-       What it has to show before anyone writes a byte to the game: `open`
-       climbing on the title screen (the front-end detector works at all), then
-       `steps` and `confirm` climbing while the stick and trigger move (the
-       whole controller-to-pad-word chain works), with `no-input` flat (the XR
-       frame is being believed) and `bad-config` at zero. `nowhere` equals the
-       number of decisions that had no route into the game, which in this build
-       is all of them - see the vr_menu block near g_flat_mode. A run where
-       `open` climbs and `steps` never does means the stick is not being read;
-       one where neither climbs means the screen was never judged flat, which
-       is a vr_flat problem and not a vr_menu one. */
-    if (InterlockedCompareExchange(&g_menu_mode, 0, 0)) {
-        /* The anchor's own state is NOT on this line, and that is a gap with a
-           name: DG_ANCHORS.pad_press_ok lives inside dg_bridge's private
-           resolve and nothing publishes it. One field on DG_BRIDGE_STATS and
-           three lines in dg_bridge_stats() would put it here; until then the
-           offline scanner is where to read it (dg_f1b --image, the
-           "[GV_PadPress scenario-press array]" block). Saying so beats a line
-           that quietly prints nothing. */
-        /* The write route exists now (dg_bridge's pad detour), so this line
-           reports the whole chain instead of explaining its absence: the
-           OPTIONAL anchor, whether the detour actually installed, and what
-           the seam did with what it was handed. A live detour with zero
-           writes and a rising gate count is a different story from a
-           detour that never installed, and both are different from a
-           marker that was never switched on. */
-        logf_("  menu: %s  anchor %s  detour %s  confirm 0x%04X"
-              "  cancel 0x%04X  %s stick" DG_EOL,
-              (InterlockedCompareExchange(&g_menu_mode, 0, 0) ==
-                   DG_MENU_MODE_WRITE) ? "on (writing)" : "measure",
-              bs.menu_anchor_ok ? "ok" : "NOT FOUND",
-              bs.menu_detour_live ? "live" : "not installed",
-              (unsigned int)InterlockedCompareExchange(&g_menu_confirm, 0, 0),
-              (unsigned int)InterlockedCompareExchange(&g_menu_cancel, 0, 0),
-              InterlockedCompareExchange(&g_menu_hand_right, 0, 0)
-                  ? "right" : "left");
-        if (InterlockedCompareExchange(&g_menu_sweep_on, 0, 0))
-            logf_("  menu SWEEP: %ld confirms sent, last bit 0x%08X"
-                  "  (next 0x%08X of %d)" DG_EOL,
-                  InterlockedCompareExchange(&g_menu_sweep_idx, 0, 0),
-                  (unsigned int)InterlockedCompareExchange(
-                      &g_menu_sweep_last, 0, 0),
-                  g_menu_sweep[InterlockedCompareExchange(
-                      &g_menu_sweep_idx, 0, 0) % DG_MENU_SWEEP_N],
-                  DG_MENU_SWEEP_N);
-        {
-            union { float f; LONG l; } tv, cv;
-            LONG b = InterlockedCompareExchange(&g_menu_dbg_buttons, 0, 0);
-            tv.l = InterlockedCompareExchange(&g_menu_dbg_trigger, 0, 0);
-            cv.l = InterlockedCompareExchange(&g_menu_dbg_click, 0, 0);
-            logf_("  menu input seen: trigger %.3f (click %.3f)  A %d  B %d"
-                  "  vouched %d  over %ld samples" DG_EOL,
-                  (double)tv.f, (double)cv.f, (b & 1) ? 1 : 0,
-                  (b & 2) ? 1 : 0, (b & 4) ? 1 : 0,
-                  InterlockedCompareExchange(&g_menu_dbg_samples, 0, 0));
-        }
-        {
-            /* The ten candidate assignment globals, live. Whichever holds
-               0x00040040 is the CANCEL slot; the other half of that pair
-               is the confirm word. See g_pad_asgn_rva. */
-            unsigned char *mod = (unsigned char *)GetModuleHandleA(NULL);
-            MEMORY_BASIC_INFORMATION mbi;
-            int gi;
-            for (gi = 0; gi < DG_PAD_ASGN_N; gi += 2) {
-                DWORD a = 0, b = 0;
-                unsigned char *pa = mod + g_pad_asgn_rva[gi];
-                unsigned char *pb = mod + g_pad_asgn_rva[gi + 1];
-                if (VirtualQuery(pa, &mbi, sizeof mbi) &&
-                    mbi.State == MEM_COMMIT)
-                    a = *(volatile DWORD *)pa;
-                if (VirtualQuery(pb, &mbi, sizeof mbi) &&
-                    mbi.State == MEM_COMMIT)
-                    b = *(volatile DWORD *)pb;
-                logf_("  pad assign candidate %d: [+0x%08X]=0x%08X"
-                      "  [+0x%08X]=0x%08X%s" DG_EOL,
-                      gi / 2, g_pad_asgn_rva[gi], a,
-                      g_pad_asgn_rva[gi + 1], b,
-                      (a == 0x00040040u || b == 0x00040040u)
-                          ? "   <- THIS PAIR (holds the measured cancel)"
-                          : "");
-            }
-        }
-        logf_("  menu clear mask in force: 0x%08X%s" DG_EOL,
-              (unsigned int)InterlockedCompareExchange(&g_menu_clear_bits,
-                                                       0, 0),
-              InterlockedCompareExchange(&g_menu_clear_bits, 0, 0)
-                  ? "" : "   <- nothing is being silenced");
-        logf_("  menu seam: writes %ld  refused stale %ld  refused gate %ld"
-              "  asked %ld" DG_EOL,
-              bs.menu_writes, bs.menu_refused_stale, bs.menu_refused_gate,
-              InterlockedCompareExchange(&g_menu_writes_asked, 0, 0));
 
-        logf_("  menu observed (game's own record): status 0x%08X"
-              "  press 0x%08X  [we send confirm 0x%04X]" DG_EOL,
-              bs.menu_seen_status, bs.menu_seen_press,
-              (unsigned int)InterlockedCompareExchange(&g_menu_confirm, 0, 0));
-        {
 
-            int pk;
-            for (pk = 0; pk < DG_PAD_PRESS_RING; pk++)
-                if (bs.menu_press_word[pk])
-                    logf_("  menu press seen: 0x%08X  x%ld" DG_EOL,
-                          bs.menu_press_word[pk], bs.menu_press_count[pk]);
-            /* The same presses in ORDER, which is the line that can actually
-               name a button. A histogram over a thirty-second window only
-               names one if the window can be lined up with the presses by
-               hand, and that alignment is what went wrong last time: the
-               words were read, a guess was made about which was confirm, and
-               it was the wrong half of the pair. An ordered list needs no
-               alignment - "the last three were the confirm key" reads
-               straight off it. The oldest are dropped, not the newest. */
-            if (bs.menu_press_seq_n > 0) {
-                long total = bs.menu_press_seq_n;
-                long kept = total < DG_PAD_PRESS_SEQ
-                                ? total : DG_PAD_PRESS_SEQ;
-                long first = total - kept;
-                long i;
-                logf_("  menu press ORDER (%ld press%s, showing the last %ld,"
-                      " oldest first):" DG_EOL,
-                      total, (total == 1) ? "" : "es", kept);
-                for (i = first; i < total; i++) {
-                    long slot = i % DG_PAD_PRESS_SEQ;
-                    logf_("    #%ld  0x%08X  at %ld ms" DG_EOL,
-                          i + 1, bs.menu_press_seq[slot],
-                          bs.menu_press_seq_ms[slot]);
-                }
-            }
-        }
-        logf_("  menu counts: open %ld  steps %ld (repeat %ld)  confirm %ld"
-              "  cancel %ld  yielded %ld  no-input %ld  bad-config %ld"
-              "  nowhere-to-write %ld%s" DG_EOL,
-              InterlockedCompareExchange(&g_menu_open_frames, 0, 0),
-              InterlockedCompareExchange(&g_menu_steps, 0, 0),
-              InterlockedCompareExchange(&g_menu_repeats, 0, 0),
-              InterlockedCompareExchange(&g_menu_confirms, 0, 0),
-              InterlockedCompareExchange(&g_menu_cancels, 0, 0),
-              InterlockedCompareExchange(&g_menu_yields, 0, 0),
-              InterlockedCompareExchange(&g_menu_no_input, 0, 0),
-              InterlockedCompareExchange(&g_menu_bad_config, 0, 0),
-              InterlockedCompareExchange(&g_menu_unwritable, 0, 0),
-              (InterlockedCompareExchange(&g_menu_open_frames, 0, 0) &&
-               !InterlockedCompareExchange(&g_menu_steps, 0, 0))
-                  ? "   <- a screen was up and the stick moved nothing"
-                  : "");
-    }
-    logf_("  pad seam: entries %ld  START queued %ld dequeued %ld"
-          "  context refused %ld" DG_EOL,
-          bs.pad_seam_entries, bs.start_queued, bs.start_consumed,
-          bs.pad_context_refused);
-    logf_("  theater consumers: camera released %ld frames  mono captures %ld"
-          "  quad frames %ld;  hud %s (writes %ld, cleared %ld)" DG_EOL,
-          InterlockedCompareExchange(&g_thea_cam_released, 0, 0),
-          InterlockedCompareExchange(&g_thea_mono_frames, 0, 0),
-          dg_xr_screen_frames(),
-          bs.hud_hide ? "HIDDEN" : "native", bs.hud_writes, bs.hud_cleared);
-    logf_("  bridge hand: ArmCamRotateShift 0x%016llX  = [%d %d %d]"
-          " = [%.2f %.2f %.2f] deg%s" DG_EOL,
-          bs.arm_cam_rotate_shift,
-          bs.arm_cam_rot[0], bs.arm_cam_rot[1], bs.arm_cam_rot[2],
-          bs.arm_cam_rot[0] * 360.0 / 4096.0,
-          bs.arm_cam_rot[1] * 360.0 / 4096.0,
-          bs.arm_cam_rot[2] * 360.0 / 4096.0,
-          bs.arm_cam_rot[1] ? "" : "  (vy 0: SetPos takes the 2-DOF XAfterY"
-                                   " branch)");
-    /* Printed whenever the probe wrote anything, including the case where it
-       wrote and never got to read - "writes 240, reads 0" says the camera seam
-       never ran, which is a completely different finding from a bad match and
-       must not look like one. */
-    if (bs.hand_probe_writes || bs.hand_probe_reads) {
-        logf_("  bridge hand probe: wrote [%d %d %d]  read back [%d %d %d]"
-              "  (writes %ld, reads %ld)" DG_EOL,
-              bs.hand_probe_wrote[0], bs.hand_probe_wrote[1],
-              bs.hand_probe_wrote[2], bs.hand_probe_read[0],
-              bs.hand_probe_read[1], bs.hand_probe_read[2],
-              bs.hand_probe_writes, bs.hand_probe_reads);
-        logf_("  bridge hand probe: adjust[6] %.6f %.6f %.6f %.6f  predicted"
-              " %.6f %.6f %.6f %.6f  worst |diff| %.6f  no-SetPos %ld" DG_EOL,
-              bs.hand_probe_adjust6[0], bs.hand_probe_adjust6[1],
-              bs.hand_probe_adjust6[2], bs.hand_probe_adjust6[3],
-              bs.hand_probe_predicted[0], bs.hand_probe_predicted[1],
-              bs.hand_probe_predicted[2], bs.hand_probe_predicted[3],
-              bs.hand_probe_worst_diff, bs.hand_probe_no_setpos);
-    }
-    logf_("  bridge arm: GM_PlayerArmBody 0x%016llX  objs 0x%016llX"
-          "  flag 0x%08X [ch0 %s, ch1 %s, ch2 %s, ch3 %s]"
-          "  created %ld  destroyed %ld\r\n",
-          bs.arm_body, bs.arm_objs, bs.arm_flag,
-          (bs.arm_flag & 0x1000) ? "hidden" : "SHOWN",
-          (bs.arm_flag & 0x2000) ? "hidden" : "SHOWN",
-          (bs.arm_flag & 0x4000) ? "hidden" : "SHOWN",
-          (bs.arm_flag & 0x8000) ? "hidden" : "SHOWN",
-          bs.arm_created, bs.arm_destroyed);
-    /* The line the previous run needed and did not have. "seen" alone cannot
-       distinguish "hidden the whole time" from "shown only while a button was
-       held", because an OR accumulator has no way to record a bit going clear.
-       visible-ticks can, and it is the number to read first. */
-    logf_("  bridge arm: visible on %ld of %ld ticks at the TICK seam"
-          " (or 0x%08X, and 0x%08X)\r\n"
-          "  bridge arm: visible on %ld ticks at the CAMERA seam, flag 0x%08X"
-          " (or 0x%08X, and 0x%08X)  <- the one the frame is drawn with\r\n",
-          bs.arm_visible_ticks, bs.ticks, bs.seen_arm_flag, bs.held_arm_flag,
-          bs.arm_visible_late_ticks, bs.arm_flag_late, bs.seen_arm_flag_late,
-          bs.held_arm_flag_late);
-    /* Printed next to the arm on purpose. One object hidden and the other shown
-       in the same frame is the whole finding; either flag alone says nothing
-       about what is on screen.
-       No verdict without a reading, either: the probe this replaced printed
-       "ch0 SHOWN" off a flag word it had never read, because objs was null and
-       0 & 0x1000 is 0. Nothing here prints unless the Work resolved. */
-    if (bs.arm_work) {
-        logf_("  bridge armwork: Work 0x%016llX  arm camera on %d"
-              " (set on %ld of %ld ticks)  arm_trigger 0x%08X"
-              " (invisible %s, seen 0x%08X)\r\n",
-              bs.arm_work, bs.arm_camera_on, bs.arm_camera_on_ticks, bs.ticks,
-              bs.arm_trigger, (bs.arm_trigger & 1) ? "SET" : "clear",
-              bs.seen_arm_trigger);
-        logf_("  bridge armwork: PlayerWork 0x%016llX (derived, trigger-0xCF4)"
-              "  pbody 0x%016llX  objs 0x%016llX\r\n",
-              bs.player_work, bs.body_cand, bs.body_objs);
-        if (bs.body_objs)
-            logf_("  bridge armwork: player body flag 0x%08X [ch0 %s]"
-                  "  visible on %ld ticks (or 0x%08X, and 0x%08X)\r\n",
-                  bs.body_flag, (bs.body_flag & 0x1000) ? "hidden" : "SHOWN",
-                  bs.body_visible_ticks, bs.seen_body_flag, bs.held_body_flag);
-    }
-    /* F5. n_joints is printed even with the bend off, because 21 is what says
-       the struct reading is right, and it is the gate every write is behind. */
-    /* Printed whenever a bend is configured, not only when it got far enough
-       to read a joint count: "writes 0" is the finding when a gate refuses. */
-    if (bs.arm_bend_deg || bs.arm_joints || bs.arm_adjust)
-        logf_("  bridge bend: n_joints %d (55 on the arm rig)  adjust 0x%016llX"
-              "  joint %d  angle %d deg  writes %ld\r\n",
-              bs.arm_joints, bs.arm_adjust, bs.arm_bend_joint,
-              bs.arm_bend_deg, bs.arm_bend_writes);
-    logf_("  bridge IK: writes %ld  refused %ld (implausible %ld)  clamped %ld"
-          "  weight %.3f  pose-flags 0x%02X;"
-          " pose lost %ld, stale %ld" DG_EOL,
-          bs.arm_track_writes, bs.arm_ik_refused, bs.arm_ik_implausible,
-          bs.arm_ik_clamped, bs.arm_ik_weight, bs.arm_pose_flags,
-          InterlockedCompareExchange(&g_arm_pose_untracked, 0, 0),
-          InterlockedCompareExchange(&g_arm_pose_stale, 0, 0));
-    if (g_arm_raw_have)
-        logf_("  bridge IK: controller as OpenXR gave it, relative to the live "
-              "head: [%.3f %.3f %.3f] m  (+X right, +Y up, -Z forward)" DG_EOL,
-              g_arm_raw_rel[0], g_arm_raw_rel[1], g_arm_raw_rel[2]);
-    logf_("  bridge IK: view [%.2f %.2f %.2f]  root [%.2f %.2f %.2f]"
-          "  target [%.2f %.2f %.2f]  root-distance %.2f / limit %.2f mm"
-          DG_EOL,
-          bs.arm_ik_view[0], bs.arm_ik_view[1], bs.arm_ik_view[2],
-          bs.arm_ik_root[0], bs.arm_ik_root[1], bs.arm_ik_root[2],
-          bs.arm_ik_target[0], bs.arm_ik_target[1], bs.arm_ik_target[2],
-          bs.arm_ik_root_distance, bs.arm_ik_root_limit);
-    logf_("  bridge arm-map pairs: seen %ld  eligible %ld  accepted %ld"
-          "  refused %ld  calibration/settle %ld  replays %ld" DG_EOL,
-          bs.arm_pairs_seen, bs.arm_pairs_eligible, bs.arm_pairs_accepted,
-          bs.arm_pairs_refused, bs.arm_pairs_calibration,
-          bs.arm_pair_replays);
-    logf_("  bridge left: mode %d accepted %ld refused %ld support-pairs %ld reason %d"
-          " blend %.3f target [%.2f %.2f %.2f]" DG_EOL,
-          bs.left_status,bs.left_pairs_accepted,bs.left_pairs_refused,
-          bs.left_support_pairs,bs.left_refuse_reason,bs.left_blend,
-          bs.left_target[0],bs.left_target[1],bs.left_target[2]);
-    logf_("  bridge support gates: aim/input %ld right-commit %ld anchor %ld"
-          " unreachable %ld distance %ld dwell %ld attached %ld" DG_EOL,
-          bs.left_support_gate[0],bs.left_support_gate[1],bs.left_support_gate[2],
-          bs.left_support_gate[3],bs.left_support_gate[4],bs.left_support_gate[5],
-          bs.left_support_gate[6]);
-    logf_("  bridge arm-map: stream %lu pair %lu flags 0x%02X"
-          "  scale %.4f source-span %.2f reach %.2f mm  map-clamped %ld"
-          "  soft-zone %ld  owner-mismatch %ld" DG_EOL,
-          bs.arm_map_stream, bs.arm_map_pair, bs.arm_map_flags,
-          bs.arm_map_scale, bs.arm_map_source_span, bs.arm_map_reach,
-          bs.arm_pairs_map_clamped, bs.arm_pairs_map_soft,
-          bs.arm_release_owner_mismatch);
-    logf_("  bridge arm-map: delta [%.2f %.2f %.2f]  target-view"
-          " [%.2f %.2f %.2f]" DG_EOL,
-          bs.arm_map_delta[0], bs.arm_map_delta[1], bs.arm_map_delta[2],
-          bs.arm_map_target[0], bs.arm_map_target[1], bs.arm_map_target[2]);
-    /* The arm-root basis, read off the character instead of assumed. The
-       shoulder and the animated wrist are two points whose real-world relation
-       everyone already knows - a hanging arm puts its wrist below its shoulder
-       and outboard of it - so their difference names the axes. This line is
-       what settled vr_arm_pos_sign, and it is the first place to look whenever
-       the arm goes somewhere unexpected. */
-    logf_("  bridge arm-basis: frame %s @ %+.1f deg (freeze %ld,"
-          " recentres %ld)  anchor %s  hand-zero %ld (B pressed %lu, ignored %lu: no trigger)"
-          "  character shoulder [%.1f %.1f %.1f]"
-          "  animated wrist [%.1f %.1f %.1f] mm"
-          "  body-drift %+.1f deg (uncompensated %ld)  comp %s (no-stick %ld)" DG_EOL,
-          arm_frame_running(g_arm_frame),
-          atan2(g_arm_frame_q[1], g_arm_frame_q[3]) * 2.0 / DEG2RAD,
-          g_arm_frame_freezes, input_recenter_count(),
-          bs.arm_anchor ? "shoulder" : "wrist",
-          InterlockedCompareExchange(&g_arm_hand_zero_now, 0, 0),
-          input_secondary_presses(arm_tracked_xr_hand(g_arm_track)),
-          input_secondary_ignored(arm_tracked_xr_hand(g_arm_track)),
-          bs.arm_shoulder_view[0], bs.arm_shoulder_view[1],
-          bs.arm_shoulder_view[2], bs.arm_native_wrist_view[0],
-          bs.arm_native_wrist_view[1], bs.arm_native_wrist_view[2],
-          bs.arm_body_drift_deg, bs.arm_body_uncompensated,
-          bs.arm_comp ? "organic" : "full", bs.comp_no_stick);
-    /* One line answers "will there be a recording": frames only move when
-       capture is on and XR frames are arriving, dup says the seam is being
-       read faster than XR publishes (expected), and a failed dump is the
-       only way this feature can silently not exist at diagnosis time. */
-    logf_("  rec: frames %ld (seen %ld, dup %ld)  dumps %ld"
-          " (failed %ld, torn %ld)  live snapshots %ld (failed %ld)" DG_EOL,
-          g_rec.appended, g_rec.seen, g_rec.dup,
-          InterlockedCompareExchange(&g_rec_dumps, 0, 0),
-          InterlockedCompareExchange(&g_rec_dump_fail, 0, 0),
-          g_rec_last_torn,
-          InterlockedCompareExchange(&g_rec_snapshots, 0, 0),
-          InterlockedCompareExchange(&g_rec_snapshot_fail, 0, 0));
-    /* The residual is the whole point of this line. It is the angle between
-       what the previous pair asked joint 6 to become and what the next
-       hierarchy pass actually produced, measured rather than assumed. A few
-       degrees is the frame of lag every write here has; tens of degrees means
-       the composition model is wrong, and no amount of smoothing will fix
-       that. Zero samples with writes > 0 means nothing was ever checked. */
-    logf_("  bridge hand: %s  basis %s  published %ld  refused %ld  tick-writes %ld"
-          "  residual %.2f deg (worst %.2f over %ld samples)" DG_EOL,
-          InterlockedCompareExchange(&g_arm_hand, 0, 0) ? "on" : "off",
-          bs.arm_hand_basis_world ? "world" : "root",
-          bs.arm_hand_written, bs.arm_hand_refused, bs.arm_hand_tick_writes,
-          bs.arm_hand_residual_deg, bs.arm_hand_worst_deg,
-          bs.arm_hand_measured);
-    /* The residual cut at the SetPos slot instead of the hierarchy. The
-       matrix a bad residual leaves open: dirty echo = the game is not
-       reconstructing our published angles (conversion/pull/another writer);
-       clean echo + bad residual = the slot is ours but the hierarchy does
-       something else with it (adjust application, hand part frame). */
-    logf_("  bridge hand slot-echo: %.2f deg (worst %.2f, dirty %ld)"
-          "  offset-drift %.2f deg (worst %.2f)  adjust-bits lost %ld" DG_EOL,
-          bs.arm_hand_slot_echo_deg, bs.arm_hand_slot_echo_worst_deg,
-          bs.arm_hand_slot_dirty,
-          bs.arm_hand_off_drift_deg, bs.arm_hand_off_drift_worst_deg,
-          bs.arm_adjust_bits_lost);
-    /* The SVECTOR channel (run 13): past `reach` units per component the
-       engine folds the precompensated short and the hand flips 90 degrees.
-       alt-named = renamed to the second ZYX solution (same rotation);
-       scaled = shortened along its axis, with the fraction kept. Scaled
-       pairs are a shortfall the player can see; a growing count says the
-       hand is being asked further from its animation than the channel
-       carries in one pull. */
-    logf_("  bridge hand channel: reach %ld units  alt-named %ld  scaled %ld"
-          "  fraction %.3f (worst shortfall %.3f)" DG_EOL,
-          bs.arm_hand_reach_units, bs.arm_hand_alt_named, bs.arm_hand_scaled,
-          bs.arm_hand_fit_frac, bs.arm_hand_shortfall_worst);
-    logf_("  bridge hand rest: auto-recaptured %ld (after long pair gaps)"
-          "  base-drift %.2f deg (worst %.2f)  cmd-drift %.2f deg"
-          " (worst %.2f)" DG_EOL,
-          bs.arm_rest_recaptured,
-          bs.arm_base_drift_deg, bs.arm_base_drift_worst_deg,
-          bs.arm_cmd_drift_deg, bs.arm_cmd_drift_worst_deg);
-    /* The caps ride on this line because "limited" only means something
-       against them: a limited count near the pair count says the arm has
-       run out of roll, which is the hand no longer following the player. */
-    logf_("  bridge hand envelope: fore-twist pairs %ld  limited %ld  "
-          "raw-twist %.2f deg -> fore %.2f + wrist %.2f deg; wrist-swing "
-          "%.2f deg  caps %.0f/%.0f/%.0f" DG_EOL,
-          bs.arm_hand_fore_twist, bs.arm_hand_limited,
-          bs.arm_hand_raw_twist_deg, bs.arm_hand_fore_twist_deg,
-          bs.arm_hand_wrist_twist_deg, bs.arm_hand_wrist_swing_deg,
-          bs.arm_cap_fore_deg, bs.arm_cap_wrist_deg, bs.arm_cap_swing_deg);
-    logf_("  bridge hand gate: no-command %ld stale %ld no-player %ld"
-          " owner-mismatch %ld bad-weapon %ld microphone %ld no-SetPos %ld"
-          "  release-zeros %ld" DG_EOL,
-          bs.arm_hand_tick_no_command, bs.arm_hand_tick_stale,
-          bs.arm_hand_tick_no_player, bs.arm_hand_tick_owner_mismatch,
-          bs.arm_hand_tick_bad_weapon, bs.arm_hand_tick_mic,
-          bs.arm_hand_no_setpos, bs.arm_hand_zeroed);
-    /* F5 step 2. Printed whenever the probe found anything at all, including
-       the case where it found a joint count but no stride - "n_models 55,
-       stride none after 100 candidates" is a finding, and a silent probe is
-       the failure mode that has cost this project the most runs. */
-    if (bs.skel_n_models || bs.skel_stride) {
-        int i;
-        logf_("  bridge skel: objs 0x%016llX  region +0x%X  n_models %d"
-              "  stride 0x%X (score %d, %d rejected)" DG_EOL,
-              bs.skel_objs, bs.skel_region_end, bs.skel_n_models,
-              bs.skel_stride, bs.skel_stride_score, bs.skel_stride_tried);
-        logf_("  bridge skel: m_ctrl trans 0x%016llX [%s]" DG_EOL,
-              bs.skel_mctrl_trans,
-              bs.skel_mctrl_trans ? "LIVE - a direct route to joint position"
-                                  : "null - position must be solved for");
-        if (bs.skel_chain_len) {
-            /* Hand first, then up. Consecutive distances are the bone lengths,
-               and the indices are what the model says its arm is - not what
-               HUMAN21 says a body's arm would be. */
-            logf_("  bridge skel: chain from joint 6 (the proven hand), %d deep:"
-                  DG_EOL, bs.skel_chain_len);
-            for (i = 0; i < bs.skel_chain_len && i < DG_SKEL_CHAIN; i++) {
-                double d = -1.0;
-                if (i > 0) {
-                    double dx = bs.skel_chain_pos[i][0] - bs.skel_chain_pos[i-1][0];
-                    double dy = bs.skel_chain_pos[i][1] - bs.skel_chain_pos[i-1][1];
-                    double dz = bs.skel_chain_pos[i][2] - bs.skel_chain_pos[i-1][2];
-                    d = sqrt(dx * dx + dy * dy + dz * dz);
-                }
-                logf_("  bridge skel:   [%d] joint %-3d world %10.2f %10.2f "
-                      "%10.2f   bone %.2f" DG_EOL,
-                      i, (int)bs.skel_chain[i], bs.skel_chain_pos[i][0],
-                      bs.skel_chain_pos[i][1], bs.skel_chain_pos[i][2], d);
-            }
-        }
-        /* Sixteen to a line, fixed width, so the whole table can be read as a
-           grid and any joint's parent found by counting. Fixed width also means
-           the buffer size is arithmetic rather than a truncation question. */
-        {
-            int total = bs.skel_parents_read;
-            if (total > DG_SKEL_MAX) total = DG_SKEL_MAX;
-            for (i = 0; i < total; i += 16) {
-                char line[16 * 5 + 1];
-                int k, n = 0;
-                for (k = i; k < i + 16 && k < total; k++) {
-                    /* A root joint usually reports -1, so the sign has to
-                       survive - it is the terminator the chain walk relies
-                       on, not a formatting detail. */
-                    int v = bs.skel_parents[k];
-                    int a = v < 0 ? -v : v;
-                    line[n++] = v < 0 ? '-' : ' ';
-                    line[n++] = (char)('0' + (a / 100) % 10);
-                    line[n++] = (char)('0' + (a / 10) % 10);
-                    line[n++] = (char)('0' + a % 10);
-                }
-                line[n] = 0;
-                logf_("  bridge skel: parent[%2d..]:%s" DG_EOL, i, line);
-            }
-        }
-        for (i = 0; i < DG_SKEL_WINDOW; i++)
-            if (bs.skel_window_pos[i][0] || bs.skel_window_pos[i][1] ||
-                bs.skel_window_pos[i][2])
-                logf_("  bridge skel: window joint %-3d world %10.2f %10.2f "
-                      "%10.2f" DG_EOL, bs.skel_base + i,
-                      bs.skel_window_pos[i][0], bs.skel_window_pos[i][1],
-                      bs.skel_window_pos[i][2]);
-    }
-    /* A probe that measured nothing has to say which of the two nothings it
-       was. The run of 2026-08-17 23:14 came back completely silent because
-       first person was never entered, and silence is indistinguishable from a
-       broken probe - which cost the run twice over, once to make and once to
-       diagnose. */
-    if (!bs.seam_active_samples)
-        logf_("  bridge seam: the camera seam never reached the probes this"
-              " session - first person was not held (entered %ld). The skeleton"
-              " and adjust probes are behind that gate by design." DG_EOL,
-              bs.fps_entered);
-    /* F5 step 3. Printed as raw matrices on purpose: the convention gets solved
-       offline from exactly these numbers, and rounding them for readability
-       here would throw away the precision that solving needs. */
-    if (bs.adj_probe_samples[0] || bs.adj_probe_samples[1]) {
-        static const char *WHO[DG_ADJ_JOINTS] =
-            { "root  ", "parent", "joint ", "child " };
-        int c, k, r;
-        logf_("  bridge adj: joint %d  held %ld  (indices root %d parent %d"
-              " joint %d child %d)" DG_EOL,
-              bs.adj_probe_joint, bs.adj_probe_held,
-              bs.adj_probe_indices[0], bs.adj_probe_indices[1],
-              bs.adj_probe_indices[2], bs.adj_probe_indices[3]);
-        for (c = 0; c < DG_ADJ_CASES; c++)
-            logf_("  bridge adj: case %d wrote quat %.6f %.6f %.6f %.6f"
-                  "  samples %ld" DG_EOL, c,
-                  bs.adj_probe_quat[c][0], bs.adj_probe_quat[c][1],
-                  bs.adj_probe_quat[c][2], bs.adj_probe_quat[c][3],
-                  bs.adj_probe_samples[c]);
-        /* Meetplan A' (ROLL V5.1 par. 3): the actor's heading words that
-           bracket each case - at the write and at the read, raw int16 on the
-           4096 grid, so the mapping yaw in the matrices below can be laid
-           against rot.vy in DIFFERENCES (sign) and in the absolute
-           (DG_FRAME_ZERO) with the skew between the two reads on record. */
-        for (c = 0; c < DG_ADJ_CASES; c++) {
-            const long *w0 = bs.adj_probe_words[c][0];
-            const long *w1 = bs.adj_probe_words[c][1];
-            if (!w0[1] && !w1[1]) continue;
-            logf_("  bridge adj: case %d src write tick %ld ok %ld rot.vy %+ld"
-                  " turn.vy %+ld camdir.vy %+ld | read tick %ld ok %ld"
-                  " rot.vy %+ld turn.vy %+ld camdir.vy %+ld" DG_EOL, c,
-                  w0[0], w0[1], w0[2], w0[3], w0[4],
-                  w1[0], w1[1], w1[2], w1[3], w1[4]);
-        }
-        /* The rate that broke the first attempt at this measurement, printed
-           so it never has to be reconstructed from two counters again. The
-           camera seam runs once per tick in third person and several times per
-           tick in first person, while the hierarchy pass runs once - so a case
-           held for less than a tick is read back before it was ever applied. */
-        logf_("  bridge adj: %ld active seams over %ld active ticks = %.2f"
-              " per active tick, case held %d ticks" DG_EOL,
-              bs.seam_active_samples, bs.seam_active_ticks,
-              bs.seam_active_ticks
-                  ? (double)bs.seam_active_samples /
-                    (double)bs.seam_active_ticks
-                  : 0.0,
-              DG_ADJ_SETTLE_TICKS);
-        for (c = 0; c < DG_ADJ_CASES; c++) {
-            if (!bs.adj_probe_samples[c]) continue;
-            for (k = 0; k < DG_ADJ_JOINTS; k++) {
-                for (r = 0; r < 4; r++)
-                    logf_("  bridge adj: case %d %s row %d  %14.6f %14.6f"
-                          " %14.6f %14.6f" DG_EOL, c, WHO[k], r,
-                          bs.adj_probe_world[c][k][r * 4 + 0],
-                          bs.adj_probe_world[c][k][r * 4 + 1],
-                          bs.adj_probe_world[c][k][r * 4 + 2],
-                          bs.adj_probe_world[c][k][r * 4 + 3]);
-            }
-        }
-    }
-    if (bs.arm_obj_head[0])
-        logf_("  bridge bend: OBJECT +0x00: %016llX %016llX %016llX %016llX"
-              DG_EOL
-              "  bridge bend: OBJECT +0x20: %016llX %016llX %016llX %016llX"
-              "   (+0x00 objs, +0x08 m_ctrl, +0x30 evmobj)" DG_EOL,
-              bs.arm_obj_head[0], bs.arm_obj_head[1], bs.arm_obj_head[2],
-              bs.arm_obj_head[3], bs.arm_obj_head[4], bs.arm_obj_head[5],
-              bs.arm_obj_head[6], bs.arm_obj_head[7]);
-    if (bs.arm_mctrl) {
-        int i;
-        for (i = 0; i < 10; i += 5)
-            logf_("  bridge bend: m_ctrl 0x%016llX +0x%02X: "
-                  "%016llX %016llX %016llX %016llX %016llX" DG_EOL,
-                  bs.arm_mctrl, i * 8,
-                  bs.arm_mctrl_head[i], bs.arm_mctrl_head[i + 1],
-                  bs.arm_mctrl_head[i + 2], bs.arm_mctrl_head[i + 3],
-                  bs.arm_mctrl_head[i + 4]);
-    }
-    if (bs.arm_forced || bs.arm_forced_late)
-        logf_("  bridge arm: visibility forced %ld at the tick seam, "
-              "%ld at the camera seam\r\n",
-              bs.arm_forced, bs.arm_forced_late);
-    /* The line that separates "we saw nothing" from "nothing happened". Every
-       bit each word has held at any point, not the one tick the heartbeat
-       happened to land on. */
-    logf_("  bridge seen (whole session): player 0x%016llX  game 0x%08X"
-          "  menu 0x%08X  arm flag 0x%08X\r\n",
-          bs.seen_player, bs.seen_game, bs.seen_menu, bs.seen_arm_flag);
-    /* And the same words at the camera seam, which unlike the tick seam is not
-       gated on holding first person and so keeps sampling through a codec or a
-       cutscene. The sample count is the half that makes a zero readable: zero
-       bits over zero samples says nothing at all, zero bits over thousands of
-       samples with a cutscene played says the anchor is wrong. */
-    logf_("  bridge seen (camera seam, %ld samples): player 0x%016llX"
-          "  game 0x%08X  menu 0x%08X%s" DG_EOL,
-          bs.late_status_samples, bs.seen_player_late, bs.seen_game_late,
-          bs.seen_menu_late,
-          (bs.late_status_samples && !bs.seen_game_late)
-              ? "   <- game word never moved here either" : "");
-    /* And the same words at the PRESENT seam, the only one of the three that
-       keeps running while the game is paused - which is to say the only one
-       that can ever see a menu open (UI-U1). Bits here that are missing from
-       the two lines above are the expected reading, not a contradiction, and
-       the sample count is again what separates "never looked" from "never
-       happened". 0x300 is MENU_WEAPON_OPEN|MENU_ITEM_OPEN. */
-    /* The roll branch, live. The pose anchor is proved on the desk; this
-       says whether the live rig ever offers it a reference, which is a
-       different question and the one that decides what a persisting
-       tumble means. */
-    /* Totals, because the defect is smooth: fifteen revolutions at under a
-       degree a frame read as perfectly calm on every per-pair instrument
-       above. "hand" is the hierarchy measured passively (it keeps counting
-       with vr_arm_track=off, which is how the 2026-08-21 run proved the
-       spin is ours), "we asked" is the rotation our own two joints turned
-       over the same stretch. Hand far above ours means the hierarchy is
-       compounding what we write; the two rising together means the
-       solution itself is winding. */
-    /* The assumption the whole strip rests on, finally measured. Anything
-       but ~0 here means the hierarchy did not keep what we wrote into
-       joints 4 and 5, so removing the CACHED rotation leaves a residue of
-       our own last write inside the "animation" we solve against - and the
-       roll anchor references exactly those recovered points. */
-    /* The adjust frame's health (V5.1 par. 4.6): which heading the
-       conversions used, how many live pairs had none, and the largest
-       heading change measured inside one pair's processing. */
-    logf_("  bridge adjust frame: %s  missing %ld  skew-worst %.2f deg"
-          "  wrist-miss worst %.1f mm  over-20mm %ld" DG_EOL,
-          bs.adjust_frame_live ? "live" : "legacy", bs.frame_missing,
-          (double)bs.frame_skew_worst, (double)bs.wrist_miss_worst,
-          bs.wrist_miss_over);
-    logf_("  bridge adjust echo (j4/j5): %.2f deg (worst %.2f, dirty %ld)"
-          DG_EOL,
-          (double)bs.arm_adj_echo_deg, (double)bs.arm_adj_echo_worst_deg,
-          bs.arm_adj_echo_dirty);
-    logf_("  bridge turned totals: hand %.0f deg over %ld samples;"
-          "  we asked j4 %.0f  j5 %.0f" DG_EOL,
-          (double)bs.skel_hand_turned_deg, bs.skel_hand_samples,
-          (double)bs.adj_turned4_deg, (double)bs.adj_turned5_deg);
-    /* The bar the totals above cannot state. They sum absolute steps, so a
-       hand that shakes and a hand that winds read alike; this is the angle
-       against a reference captured once and never moved. Stand still and a
-       healthy arm keeps `max` in single digits however long it runs. */
-    logf_("  bridge hand NET (vs fixed reference): now %.1f deg  max %.1f deg"
-          DG_EOL,
-          (double)bs.skel_hand_net_deg, (double)bs.skel_hand_net_max_deg);
-    {
-        int fz = (int)InterlockedCompareExchange(&g_arm_freeze_cfg, 0, 0);
-        logf_("  bridge arm FREEZE: %s  pairs replayed unsolved %ld%s" DG_EOL,
-              (fz == 2) ? "rest (reference frozen, target live)"
-            : (fz == 1) ? "on (constant-replay, solver bypassed)" : "off",
-              bs.arm_pairs_frozen,
-              (fz == 1 && !bs.arm_pairs_frozen)
-                  ? "   <- nothing frozen yet: no pair has solved" : "");
-        /* The number the rest mode exists to produce. Read it against the
-           hand NET meter: reference drifting while the hand is parked is
-           the strip residue accumulating - the feedback caught directly.
-           Reference at ~0 while the hand still winds acquits the strip
-           and convicts the solver's own maths. */
-        if (fz == 2)
-            logf_("  bridge REST ref: %s  drift vs recovered now %.2f deg"
-                  "  max %.2f deg" DG_EOL,
-                  bs.rest_ref_captured ? "captured (root frame)"
-                                       : "NOT CAPTURED - no calibration yet",
-                  (double)bs.rest_ref_drift_deg,
-                  (double)bs.rest_ref_drift_max_deg);
-    }
-    logf_("  bridge orient roll: anchored %ld  fell back %ld"
-          "  up-rolled %ld  skipped %ld%s%s" DG_EOL,
-          bs.orient_anchored, bs.orient_fallback,
-          bs.orient_uprolled, bs.uproll_skipped,
-          (bs.orient_fallback > bs.orient_anchored)
-              ? "   <- the anchor is NOT reaching these frames" : "",
-          (bs.arm_uproll_on && bs.orient_anchored > 0 &&
-           bs.orient_uprolled == 0)
-              ? "   <- the grip roll is NOT reaching these frames" : "");
-    logf_("  bridge seen (present seam, %ld samples): game 0x%08X"
-          "  menu 0x%08X%s" DG_EOL,
-          bs.screen_status_samples, bs.seen_game_screen, bs.seen_menu_screen,
-          (bs.screen_status_samples && !(bs.seen_menu_screen & 0x300))
-              ? "   <- no weapon or item menu was opened this session" : "");
-    /* Which pad bits this session has actually seen, and how often the weapon
-       button among them. The game is on keyboard and mouse here and the binding
-       is not something to guess at - press keys, read the count. */
-    logf_("  bridge pad: seen 0x%08X  PL_PAD_WEAPON 0x%08X  weapon presses %ld"
-          " (%ld in first person)\r\n",
-          bs.seen_pad_status, bs.pad_weapon_mask, bs.weapon_presses,
-          bs.weapon_presses_in_fps);
-    if (bs.weapon_presses) {
-        char keys[96];
-        int i, n = 0;
-        keys[0] = 0;
-        for (i = 0; i < 4 && bs.weapon_vk[i]; i++)
-            n += _snprintf_s(keys + n, sizeof(keys) - n, _TRUNCATE,
-                             "%s%s (VK 0x%02X)", n ? ", " : "",
-                             vk_name(bs.weapon_vk[i]), bs.weapon_vk[i]);
-        logf_("  bridge pad: weapon button is %s\r\n",
-              n ? keys : "<nothing was down - a pad, or released too fast>");
-    }
-    if (bs.fire_mode != InterlockedCompareExchange(&g_fire_mode, 0, 0)) {
-        /* The marker asked for one thing and the bridge is doing another. That
-           has happened - a stale second gate downgraded ON to OFF, and because
-           the block below is keyed on the bridge's mode the whole session went
-           quiet instead of complaining. Never again silently. */
-        logf_("  bridge fire: MARKER ASKED FOR MODE %ld, THE WRITER IS RUNNING"
-              " MODE %d - the run below is not the run that was asked for\r\n",
-              InterlockedCompareExchange(&g_fire_mode, 0, 0), bs.fire_mode);
-    }
-    if (bs.move_mode) {
-        /* One line: what we wrote and every reason we did not. yielded is the
-           write contract made visible - the player's own pad silencing us -
-           and a run that walks fine shows idle counting whenever the stick is
-           at rest, which is the cheapest proof the deadzone gate is alive. */
-        logf_("  bridge move: writes %ld  yielded %ld  idle %ld  stale %ld"
-              "  no-command %ld  gate %ld  not-subject %ld  published %ld"
-              "  deadzone %.2f\r\n",
-              bs.move_writes, bs.move_yielded, bs.move_idle, bs.move_stale,
-              bs.move_no_command, bs.move_blocked_gate, bs.move_not_subject,
-              bs.move_published, bs.move_deadzone);
-        if (bs.move_third || bs.move_prone)
-            logf_("  bridge move ext: third %d (writes %ld, refused %ld)"
-                  "  prone %d (capped writes %ld)  dir writes %ld  padTo writes %ld (no-workL %ld)"
-                  "  cam-dir %ld  last org %ld dir %ld  seam %s\r\n",
-                  bs.move_third, bs.move_third_writes, bs.move_not_third,
-                  bs.move_prone, bs.move_prone_writes, bs.move_dir_writes,
-                  bs.move_padto_writes, bs.move_no_workl,
-                  bs.move_cam_dir, bs.move_last_org, bs.move_last_dir,
-                  bs.tick_seam_copy ? "copy" : "publish");
-        if (bs.mp_w_tick)
-            logf_("  bridge move probe: wrote tick %ld dir %ld status 0x%08lX bytes %02lX/%02lX"
-                  " | camera seam tick %ld (seen %ld) dir %ld status 0x%08lX analog 0x%04lX"
-                  " bytes %02lX/%02lX act 0x%llX act2 0x%llX rot %ld turn %ld org %s\r\n",
-                  bs.mp_w_tick, bs.mp_w_dir, bs.mp_w_status,
-                  (bs.mp_w_bytes >> 8) & 0xFF, bs.mp_w_bytes & 0xFF,
-                  bs.mp_c_tick, bs.mp_c_seen, bs.mp_c_dir, bs.mp_c_status, bs.mp_c_analog,
-                  (bs.mp_c_bytes >> 8) & 0xFF, bs.mp_c_bytes & 0xFF,
-                  bs.mp_c_act, bs.mp_c_act2, bs.mp_c_rot, bs.mp_c_turn,
-                  bs.move_dir_org ? "body" : "camera");
-        if (bs.mp_w_tick)
-            logf_("  bridge move probe: work->pad 0x%llX  our record 0x%llX (%s)  GV_PadData.flag 0x%08lX%s"
-                  "  through work->pad: status 0x%08lX dir %ld bytes %02lX/%02lX\r\n",
-                  bs.mp_c_work_pad, bs.mp_c_our_pad,
-                  bs.mp_c_work_pad == bs.mp_c_our_pad ? "SAME" : "DIFFERENT",
-                  bs.mp_c_gv_flag, (bs.mp_c_gv_flag & 0x103) ? " <- RELEASE set" : "",
-                  bs.mp_c_wp_status, bs.mp_c_wp_dir,
-                  (bs.mp_c_wp_bytes >> 8) & 0xFF, bs.mp_c_wp_bytes & 0xFF);
-        if (bs.mp_w_tick)
-            logf_("  bridge move probe: workL 0x%llX  PadTo %ld  WallTo %ld  Liable %ld  PadForce %ld  |  work->data %ld  data2 %ld\r\n",
-                  bs.mp_c_workl, bs.mp_c_padto, bs.mp_c_wallto, bs.mp_c_liable,
-                  bs.mp_c_padforce, bs.mp_c_data, bs.mp_c_data2);
-    }
-    if (bs.turn_mode) {
-        logf_("  bridge turn: writes %ld  yielded %ld  idle %ld  gain %.2f"
-              "  soft-turn %+.1f deg since recentre\r\n",
-              bs.turn_writes, bs.turn_yielded, bs.turn_idle, bs.turn_gain,
-              input_turn_offset_rad() / DEG2RAD);
-        /* The body-follow's whole story in one line: how often it spoke,
-           the gap it steers on, whether the byte sign has committed - dir
-           0 with a standing gap means it is still learning from the
-           player's own stick - and every refusal by name. A session
-           ending "writes 0" must be explainable from this line alone: the
-           2026-08-23 run needed exactly that and the line could not say
-           no-sign. */
-        logf_("  bridge turn follow: writes %ld  src %s  aim %s  aim-gap %+.1f deg  "
-              "dir %+d (votes %ld)  refused: no-sign %ld  stale %ld"
-              "  under-thresh %ld  aim-hold %ld\r\n",
-              bs.turn_follow_writes,
-              bs.follow_src == 2 ? "stick" : bs.follow_src ? "hand" : "head",
-              bs.follow_aim ? "on" : "hold",
-              (double)bs.turn_aim_gap,
-              bs.turn_dir, bs.turn_dir_votes, bs.follow_gate_no_sign,
-              bs.follow_gate_stale, bs.follow_gate_under,
-              bs.follow_gate_aim_hold);
-        /* The one-byte intake gap, forever: nonzero means some path still
-           writes 176/80, which the game's strict gate ignores. */
-        if (bs.turn_write_dead)
-            logf_("  bridge turn DEAD-BYTES: %ld writes at exactly 176/80"
-                  " - the intake gap is back\r\n", bs.turn_write_dead);
-        drain_turn_probe();
-    }
-    drain_adj_cycles();
-    if (bs.move_mode || bs.turn_mode)
-        /* The driver's own bytes, before anything of ours. If a phantom turn
-           or walk ever appears, this line says in one run whether a second
-           input path (a runtime emulating a gamepad) is feeding the pad or
-           whether it is us. 128 everywhere = nobody but us is speaking. */
-        logf_("  bridge pad analog (driver's own): right [%u %u]  left"
-              " [%u %u]\r\n",
-              bs.pad_right_dx, bs.pad_right_dy,
-              bs.pad_left_dx, bs.pad_left_dy);
-    if (bs.fire_mode != DG_FIRE_MODE_OFF) {
-        /* Two lines, split the way every block here is split: what the
-           contract decided, then why it was refused. In DRY the whole thing is
-           arithmetic - nothing below has touched the game. */
-        logf_("  bridge fire (%s): published %ld  drawn %ld  released %ld"
-              "  aborted %ld  auto ticks %ld\r\n",
-              bs.fire_mode == DG_FIRE_MODE_DRY ? "dry, writes nothing"
-                                               : "writing",
-              bs.fire_published, bs.fire_drawn, bs.fire_released,
-              bs.fire_aborted, bs.fire_auto_ticks);
-        logf_("  bridge fire gate: no command %ld  stale %ld  game refused %ld"
-              "  player's own button %ld  repeats %ld  forced %ld\r\n"
-              "    coasted %ld aim ticks across sample gaps (grace %d)\r\n"
-              "    state %d  last pressure %d  weapon type 0x%08X (%s)\r\n",
-              bs.fire_no_command, bs.fire_stale, bs.fire_blocked_gate,
-              bs.fire_blocked_phys, bs.fire_repeats, bs.fire_forced,
-              bs.fire_coasting, DG_FIRE_GRACE_TICKS,
-              bs.fire_state, bs.fire_pressure, bs.fire_wtype,
-              (bs.fire_wtype & DG_FIRE_WP_CONSECUTIVE) ? "automatic"
-                  : (bs.fire_wtype & DG_FIRE_WP_PRESSURE) ? "release to fire"
-                  : "neither");
-        /* Third line, and it means something only in ON: what actually left
-           this process, per pad field. In DRY every one of these is zero by
-           construction, which is the cheapest possible check that DRY is
-           still dry. */
-        logf_("  bridge fire wrote: press %ld  status %ld  release %ld"
-              "  pressure %ld (game byte kept %ld)  yielded %ld\r\n"
-              "    PL_PAD_PRESS_WEAPON is index %d into pressure[12]"
-              "  (outside it %ld times)\r\n",
-              bs.fire_wrote_press, bs.fire_wrote_status,
-              bs.fire_wrote_release, bs.fire_wrote_pressure,
-              bs.fire_pressure_kept, bs.fire_yielded,
-              bs.fire_press_index, bs.fire_no_index);
-        /* And the witness. These two are the Bluepoint layer own answer, not
-           ours: WS_Draw (2) means our press was taken, WS_HolsterQuick (1)
-           means it was refused, BS_SoftRelease (3) is the cancel path. A run
-           where we wrote and this never moved is a run where we wrote into a
-           record nobody reads. */
-        logf_("  bridge fire witness: weaponState %d (seen 0x%04X)"
-              "  buttonState %d (seen 0x%04X)\r\n",
-              bs.weapon_state, bs.weapon_state_seen,
-              bs.button_state, bs.button_state_seen);
-        if (bs.recoil_climb_mdeg || bs.recoil_push_um) {
-            /* Motion we invented, so it gets its own line and its own
-               accounting. kicks should equal released - every shot is one
-               impulse - and amplitude should read 0.000 at the end of any
-               session that is not mid-burst, because a spring that does not
-               come home is a standing aim error. */
-            logf_("  bridge recoil: %.2f deg climb + %.1f mm push per round"
-                  "  kicks %ld (shots %ld)  climb frames %ld  push frames %ld"
-                  "\r\n"
-                  "    no axis %ld  push refused %ld  amplitude now %.3f"
-                  "  worst %.3f shots\r\n",
-                  bs.recoil_climb_mdeg / 1000.0, bs.recoil_push_um / 1000.0,
-                  bs.recoil_kicks, bs.fire_released,
-                  bs.recoil_climb_writes, bs.recoil_push_writes,
-                  bs.recoil_no_axis, bs.recoil_push_refused,
-                  bs.recoil_amplitude, bs.recoil_worst);
-        }
-    }
 
-#else
 
-#endif
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 }
 
 /* One armed session: wait for a live camera, arm, run, disarm. Returns the
@@ -5429,7 +5435,7 @@ static const char *run_once(const char *marker) {
                   (double)g_eye_shift_half_x100 / 100.0,
                   (long)g_stereo_eye_x_sign, g_stereo_eye_x_sign < 0 ? "-x" : "+x");
         if (elapsed % 10 == 0 && g_stereo) {
-            char ui[1100]; dg_ui2d_stats(ui, sizeof ui); logf_("  %s\r\n", ui);
+            char ui[1800]; dg_ui2d_stats(ui, sizeof ui); logf_("  %s\r\n", ui);
             logf_("  eye truth: mode %ld  label L rendered +%ld/-%ld  label R rendered +%ld/-%ld  no-camera %ld"
                   "  MISLABELLED %ld  dropped %ld  relabelled %ld  no-camera dropped %ld passed %ld\r\n",
                   (long)g_eye_truth_mode, g_eye_truth_n[0][0], g_eye_truth_n[0][1],
@@ -5746,6 +5752,7 @@ static void menu_seam(int front_end)
 
     if (script_menu_blocked()) {
         DG_BRIDGE_MENU empty;
+        dg_ui2d_gameplay(0);
         memset(&empty, 0, sizeof empty);
         dg_bridge_menu_now(&empty);
         return;
@@ -5880,81 +5887,81 @@ static void on_present(IDXGISwapChain *sc) {
 
 static void eye_dump_step(IDXGISwapChain *sc, int eye)
 {
-#if DG_ENABLE_DIAGNOSTICS
 
-    LONG cfg = InterlockedCompareExchange(&g_eye_dump_cfg, 0, 0);
-    ID3D11Texture2D *bb = NULL, *st = NULL; ID3D11Device *dev = NULL; ID3D11DeviceContext *ctx = NULL;
-    D3D11_TEXTURE2D_DESC d; D3D11_MAPPED_SUBRESOURCE m; int ok = 0;
-    if (!g_eye_dump_have_seen) { g_eye_dump_seen = cfg; g_eye_dump_have_seen = 1; }
-    if (cfg != g_eye_dump_seen) {
-        g_eye_dump_seen = cfg; g_eye_dump_left = DG_EYE_DUMP_FRAMES; g_eye_dump_tick = GetTickCount();
-        dg_ui2d_trace(DG_EYE_DUMP_FRAMES - 1, g_bb_src_prev, g_bb_src_prev2);
-    }
-    if (g_eye_dump_left <= 0 || !sc) return;
-    g_eye_dump_left--;
-    if (FAILED(sc->lpVtbl->GetBuffer(sc, 0, &IID_ID3D11Texture2D, (void **)&bb)) || !bb) goto done;
-    bb->lpVtbl->GetDesc(bb, &d);
-    if (d.SampleDesc.Count != 1 || (d.Format != DXGI_FORMAT_B8G8R8A8_UNORM && d.Format != DXGI_FORMAT_R8G8B8A8_UNORM &&
-        d.Format != DXGI_FORMAT_B8G8R8A8_UNORM_SRGB && d.Format != DXGI_FORMAT_R8G8B8A8_UNORM_SRGB)) goto done;
-    bb->lpVtbl->GetDevice(bb, &dev); if (!dev) goto done;
-    d.Usage = D3D11_USAGE_STAGING; d.BindFlags = 0; d.CPUAccessFlags = D3D11_CPU_ACCESS_READ | D3D11_CPU_ACCESS_WRITE; d.MiscFlags = 0;
-    if (FAILED(dev->lpVtbl->CreateTexture2D(dev, &d, NULL, &st)) || !st) goto done;
-    dev->lpVtbl->GetImmediateContext(dev, &ctx); if (!ctx) goto done;
-    {   /* Validity of the dump itself: a fresh staging texture may reuse the previous dump's memory, so a copy the GPU
-           SKIPPED (predicated rendering) would look like a repeated picture. Poison first; and read the predicate. */
-        ID3D11Predicate *pred = NULL; BOOL pval = FALSE; unsigned yy;
-        if (SUCCEEDED(ctx->lpVtbl->Map(ctx, (ID3D11Resource *)st, 0, D3D11_MAP_WRITE, 0, &m))) {
-            for (yy = 0; yy < d.Height; yy++) memset((unsigned char *)m.pData + (size_t)yy * m.RowPitch, 0xAB, (size_t)d.Width * 4);
-            ctx->lpVtbl->Unmap(ctx, (ID3D11Resource *)st, 0);
-        }
-        ctx->lpVtbl->GetPredication(ctx, &pred, &pval);
-        g_eye_dump_pred = pred ? 1 + (pval ? 1 : 0) : 0;
-        if (pred) pred->lpVtbl->Release(pred);
-    }
-    ctx->lpVtbl->CopyResource(ctx, (ID3D11Resource *)st, (ID3D11Resource *)bb);
-    if (SUCCEEDED(ctx->lpVtbl->Map(ctx, (ID3D11Resource *)st, 0, D3D11_MAP_READ, 0, &m))) {
-        char path[MAX_PATH]; FILE *f = NULL; size_t dir = rec_log_dir(path, sizeof path);
-        unsigned w = d.Width / 4, h = d.Height / 4, x, y, head[4];
-        _snprintf_s(path + dir, sizeof path - dir, _TRUNCATE, "dg_eye_%lu_%d_%s.raw", (unsigned long)g_eye_dump_tick,
-                    DG_EYE_DUMP_FRAMES - 1 - g_eye_dump_left, eye == DG_EYE_RIGHT ? "R" : "L");
-        if (w && h && fopen_s(&f, path, "wb") == 0 && f) {
-            head[0] = w; head[1] = h; head[2] = (unsigned)(eye == DG_EYE_RIGHT); head[3] = (unsigned)g_present_frame;
-            if (d.Format == DXGI_FORMAT_R8G8B8A8_UNORM || d.Format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB) head[2] |= 0x100;   /* RGBA order */
-            fwrite(head, sizeof head, 1, f);
-            for (y = 0; y < h; y++) {
-                const unsigned char *row = (const unsigned char *)m.pData + (size_t)(y * 4) * m.RowPitch;
-                for (x = 0; x < w; x++) fwrite(row + (size_t)x * 16, 4, 1, f);
-            }
-            fclose(f); ok = 1;
-            {   /* picture fingerprint, so identical Presents show up in the log itself */
-                unsigned long long fp = 1469598103934665603ull; long bbi = 0; void *bbsrc = NULL; long bbd = dg_ui2d_last_frame_bb(&bbi, &bbsrc);
-                for (y = 0; y < h; y += 4) {
-                    const unsigned char *row = (const unsigned char *)m.pData + (size_t)(y * 4) * m.RowPitch;
-                    for (x = 0; x < w; x += 4) { fp ^= row[(size_t)x * 16]; fp *= 1099511628211ull; fp ^= row[(size_t)x * 16 + 1]; fp *= 1099511628211ull; fp ^= row[(size_t)x * 16 + 2]; fp *= 1099511628211ull; }
-                }
-                {   unsigned long poisoned = 0, total = 0;
-                    for (y = 0; y < h; y += 4) { const unsigned char *row = (const unsigned char *)m.pData + (size_t)(y * 4) * m.RowPitch;
-                        for (x = 0; x < w; x += 4) { const unsigned char *px = row + (size_t)x * 16; total++; if (px[0] == 0xAB && px[1] == 0xAB && px[2] == 0xAB && px[3] == 0xAB) poisoned++; } }
-                    logf_("  eye dump %d: present %ld label %s  picture %016llX  blit source %p (bb draws %ld)  all draws %ld  POISON left %lu of %lu  predicate %s\r\n",
-                          DG_EYE_DUMP_FRAMES - 1 - g_eye_dump_left, (long)g_present_frame, eye == DG_EYE_RIGHT ? "R" : "L", fp, bbsrc, bbd, dg_ui2d_last_frame_draws(),
-                          poisoned, total, g_eye_dump_pred == 0 ? "none" : g_eye_dump_pred == 1 ? "SET (value FALSE)" : "SET (value TRUE)");
-                }
-            }
-        }
-        ctx->lpVtbl->Unmap(ctx, (ID3D11Resource *)st, 0);
-    }
-done:
-    InterlockedIncrement(ok ? &g_eye_dump_written : &g_eye_dump_failed);
-    if (ctx) ctx->lpVtbl->Release(ctx);
-    if (st) st->lpVtbl->Release(st);
-    if (dev) dev->lpVtbl->Release(dev);
-    if (bb) bb->lpVtbl->Release(bb);
-    if (!g_eye_dump_left) logf_("  eye dump: done, written %ld failed %ld (logs\\dg_eye_%lu_*.raw)\r\n",
-                               (long)g_eye_dump_written, (long)g_eye_dump_failed, (unsigned long)g_eye_dump_tick);
 
-#else
 
-#endif
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 }
 
 static void on_present_body(IDXGISwapChain *sc) {
@@ -5982,6 +5989,7 @@ static void on_present_body(IDXGISwapChain *sc) {
     if (script_menu_blocked()) {
         DG_BRIDGE_MENU empty;
         controller_context_publish(0);
+        dg_ui2d_gameplay(0);
         memset(&empty, 0, sizeof empty);
         dg_bridge_menu_now(&empty);
         InterlockedIncrement(&g_present_frame);
@@ -6026,6 +6034,33 @@ static void on_present_body(IDXGISwapChain *sc) {
         InterlockedIncrement(&g_flat_frames);
     }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     /* U2. `flat` IS the front-end condition - a title or load screen is an
        image with no game camera behind it, which is exactly what the block
        above just established. Called every Present, including the ones where
@@ -6035,6 +6070,7 @@ static void on_present_body(IDXGISwapChain *sc) {
         int raw_gameplay=armed && !flat && !screen &&
             !InterlockedCompareExchange(&g_script_menu_active,0,0) &&
             dg_bridge_controller_gameplay_now();
+        dg_ui2d_gameplay(raw_gameplay && have && stereo && g_source==SRC_XR);
         int raw_special=(armed && !flat && !screen &&
             !InterlockedCompareExchange(&g_script_menu_active,0,0)) ?
             dg_bridge_controller_special_now():0;
@@ -6445,3804 +6481,3804 @@ static DWORD WINAPI worker(LPVOID unused) {
     }
 }
 
-#ifdef DG_HOOK_TEST
-#include "dg_ik.h"                  /* the desk replay runs the real solver */
-#include "dg_arm_map.h"             /* and the real map, on a stated skeleton */
-/* The anchor resolver, for its own self-test only. Test-side because the
-   shipping half of this file never touches an image - dg_bridge.c owns the
-   scan - and pulling the whole scanner into the .asi to run a test would be
-   the wrong trade. The header is include-guarded, so the bridge's own copy of
-   its statics is unaffected. */
-#include "../shared/dg_anchors.h"
-#include "camera_yaw_measured.h"
-/* dg_menu_test.c is compiled into this binary with DG_MENU_TEST_EMBED, so the
-   menu module's assertions are the SAME ones menu_test.bat runs. */
-int dg_menu_self_test(void);
-
-static void compose_ypr(MAT *o, double y, double p, double r) {
-    MAT ry, rx, rz, t;
-    rot_y(&ry, y); rot_x(&rx, p); rot_z(&rz, r);
-    mat_mul(&t, &ry, &rx);
-    mat_mul(o, &t, &rz);
-}
-
-/* dg_xr_mat_to_ypr must invert exactly the composition build_delta performs.
-   If it inverts some other Euler order the error is zero for single-axis
-   motion and grows with combined motion - i.e. invisible until it is being
-   worn on a head. */
-static int test_ypr_roundtrip(void) {
-    static const double cases[][3] = {
-        {   0,   0,   0 }, {  30,   0,   0 }, {   0,  25,   0 },
-        {   0,   0, -15 }, {  40, -20,  10 }, { -75,  35, -50 },
-        { 179,   0,   0 }, {  10,  89.9,  0 },
-    };
-    int n = (int)(sizeof(cases) / sizeof(cases[0])), i, bad = 0;
-    for (i = 0; i < n; i++) {
-        MAT r;
-        double y, p, rr, worst;
-        compose_ypr(&r, cases[i][0]*DEG2RAD, cases[i][1]*DEG2RAD, cases[i][2]*DEG2RAD);
-        dg_xr_mat_to_ypr(&r, &y, &p, &rr);
-        worst = fabs(y - cases[i][0]*DEG2RAD);
-        if (fabs(p  - cases[i][1]*DEG2RAD) > worst) worst = fabs(p  - cases[i][1]*DEG2RAD);
-        if (fabs(rr - cases[i][2]*DEG2RAD) > worst) worst = fabs(rr - cases[i][2]*DEG2RAD);
-        if (worst > 1e-4) bad++;
-        printf("  %-6s ypr(%7.1f,%6.1f,%7.1f) -> err %.2e\n",
-               worst <= 1e-4 ? "ok" : "FAIL",
-               cases[i][0], cases[i][1], cases[i][2], worst);
-    }
-    return bad;
-}
-
-/* The handedness fix, checked two ways.
-   PURITY: a rotation about exactly one OpenXR axis must stay a rotation about
-   exactly one MGS2 axis. Leakage means the mirror or the transpose is wrong,
-   and no amount of per-axis sign flipping will rescue it.
-   DIRECTION: the sign must make the camera follow the head, not oppose it.
-   Expected signs, derived in dg_xr.c's header and each checkable by hand:
-     XR +Y is a head turning LEFT (right-handed about +Y sends -Z forward to
-       -X), which must give MGS2 yaw +30: rot_y(+30) sends a point 90 deg
-       right to 60 deg right, i.e. the view swung left with the head.
-     XR +X pitches the head UP, and MGS2 pitch -30 is what follows it. This
-       one is a MEASUREMENT, not a derivation: on 2026-08-19 a headset reported
-       that with the opposite sign here, looking up sent the view down. The
-       argument that used to justify +30 rested on assuming which way MGS2's
-       view X and Y point, which nothing had ever established - see the header
-       of dg_xr.c.
-     XR +Z rolls, and it comes out with the same sign as the head for the same
-       reason and from the same measurement: the relabelling that inverts pitch
-       inverts roll with it. */
-static int test_axis_purity(void) {
-    static const struct { const char *name; int axis; int want; double sign; } t[] = {
-        { "XR +X (pitch)", 0, 1, -1.0 },
-        { "XR +Y (yaw)",   1, 0, +1.0 },
-        { "XR +Z (roll)",  2, 2, +1.0 },
-    };
-    DG_XR_CONFIG cfg;
-    int i, bad = 0;
-    const double ang = 30.0 * DEG2RAD;
-
-    memset(&cfg, 0, sizeof(cfg));
-    cfg.yaw_sign = cfg.pitch_sign = cfg.roll_sign = 1.0;
-    cfg.x_sign = cfg.y_sign = cfg.z_sign = 1.0;
-    cfg.scale = 1000.0;
-    cfg.positional = 0;
-
-    for (i = 0; i < 3; i++) {
-        double q[4] = {0,0,0,0}, out[3], on, off = 0.0;
-        DG_XR_POSE pose;
-        int k;
-        q[t[i].axis] = sin(ang * 0.5);
-        q[3] = cos(ang * 0.5);
-        dg_xr_head_to_pose(q[0], q[1], q[2], q[3], 0,0,0, &cfg, &pose);
-        out[0] = pose.yaw; out[1] = pose.pitch; out[2] = pose.roll;
-        on = out[t[i].want];
-        for (k = 0; k < 3; k++) if (k != t[i].want && fabs(out[k]) > off) off = fabs(out[k]);
-        {
-            int ok = fabs(on - t[i].sign * ang) <= 1e-4 && off <= 1e-4;
-            if (!ok) bad++;
-            printf("  %-6s %-14s -> yaw %+7.2f  pitch %+7.2f  roll %+7.2f deg"
-                   "   (want %+.0f, leak %.2e)\n",
-                   ok ? "ok" : "FAIL",
-                   t[i].name, out[0]/DEG2RAD, out[1]/DEG2RAD, out[2]/DEG2RAD,
-                   t[i].sign * ang / DEG2RAD, off);
-        }
-    }
-    return bad;
-}
-
-/* With the head both rotating and displaced, D's translation row is -t_c * R,
-   never t_c. Check the round trip: a point at the head's new position must
-   land at the view-space origin. */
-static int test_translation_composition(void) {
-    DG_XR_CONFIG cfg;
-    DG_XR_POSE xp;
-    POSE p;
-    MAT d, di;
-    double ang = 40.0 * DEG2RAD;
-    double q[4], v[4], worst = 0.0;
-    int j;
-
-    memset(&cfg, 0, sizeof(cfg));
-    cfg.yaw_sign = cfg.pitch_sign = cfg.roll_sign = 1.0;
-    cfg.x_sign = cfg.y_sign = cfg.z_sign = 1.0;
-    cfg.scale = 1000.0;
-    cfg.positional = 1;
-
-    q[0] = 0; q[1] = sin(ang*0.5); q[2] = 0; q[3] = cos(ang*0.5);
-    /* head 0.25 m right, 0.1 m up, 0.3 m forward (-Z in OpenXR) */
-    dg_xr_head_to_pose(q[0], q[1], q[2], q[3], 0.25, 0.10, -0.30, &cfg, &xp);
-
-    memset(&p, 0, sizeof(p));
-    p.yaw = xp.yaw; p.pitch = xp.pitch; p.roll = xp.roll;
-    p.tx = xp.tx;  p.ty = xp.ty;  p.tz = xp.tz;
-    build_delta(&d, &di, &p);
-
-    /* The head's position in OLD view coords, mirrored to MGS2 mm. */
-    v[0] = 0.25 * 1000.0; v[1] = 0.10 * 1000.0; v[2] = 0.30 * 1000.0; v[3] = 1.0;
-    for (j = 0; j < 3; j++) {
-        double s = v[0]*d.m[0][j] + v[1]*d.m[1][j] + v[2]*d.m[2][j] + d.m[3][j];
-        if (fabs(s) > worst) worst = fabs(s);
-    }
-    printf("  %-6s head position maps to new-view origin, residual %.3e mm\n",
-           worst < 1e-2 ? "ok" : "FAIL", worst);
-    return worst < 1e-2 ? 0 : 1;
-}
-
-/* F3 camera telemetry: run the production transform against a local channel
-   fixture, then verify the published sample is the final camera->world matrix
-   and final projection.  The asymmetric basis and literal result keep this
-   independent of the implementation's matrix products. */
-static int test_camera_telemetry_transform(void)
-{
-    MAT fake[64], base_eye, base_eye_inv;
-    MAT saved_mine, saved_src_eye_inv, saved_src_eye;
-    MAT saved_cam_eye, saved_cam_proj;
-    POSE saved_pose;
-    ULONG64 saved_chan0 = g_chan0;
-    LONG saved_source = g_source;
-    LONG saved_have_mine = g_have_mine;
-    LONG saved_have_proj = g_have_proj_mine;
-    LONG saved_applied = g_applied, saved_fresh = g_fresh;
-    LONG saved_rej_ortho = g_rej_not_ortho;
-    LONG saved_cam_valid = g_camera_telemetry_valid;
-    int i, j, bad = 0;
-    static const float want[3][3] = {
-        { 0.0f,  0.0f,  1.0f },
-        {-1.0f,  0.0f,  0.0f },
-        { 0.0f, -1.0f,  0.0f }
-    };
-
-    memset(fake, 0, sizeof fake);
-    for (i = 0; i < (int)(sizeof fake / sizeof fake[0]); i++) {
-        fake[i].m[0][0] = 1.0f;
-        fake[i].m[1][1] = 1.0f;
-        fake[i].m[2][2] = 1.0f;
-        fake[i].m[3][3] = 1.0f;
-    }
-    memset(&base_eye, 0, sizeof base_eye);
-    base_eye.m[0][1] = 1.0f;
-    base_eye.m[1][0] = -1.0f;
-    base_eye.m[2][2] = 1.0f;
-    base_eye.m[3][3] = 1.0f;
-    memset(&base_eye_inv, 0, sizeof base_eye_inv);
-    base_eye_inv.m[0][1] = -1.0f;
-    base_eye_inv.m[1][0] = 1.0f;
-    base_eye_inv.m[2][2] = 1.0f;
-    base_eye_inv.m[3][3] = 1.0f;
-    g_chan0 = (ULONG64)(ULONG_PTR)fake;
-    *M(O_EYE) = base_eye;
-    *M(O_EYE_INV) = base_eye_inv;
-    M(O_PERS)->m[0][0] = 1.7f;
-    M(O_PERS)->m[1][1] = 2.3f;
-    M(O_PERS)->m[2][3] = 1.0f;
-    M(O_PERS)->m[3][3] = 0.0f;
-
-    saved_mine = g_mine;
-    saved_src_eye_inv = g_src_eye_inv;
-    saved_src_eye = g_src_eye;
-    saved_cam_eye = g_camera_telemetry_eye_world;
-    saved_cam_proj = g_camera_telemetry_proj;
-    saved_pose = g_pose;
-    InterlockedExchange(&g_source, SRC_SYNTHETIC);
-    memset(&g_pose, 0, sizeof g_pose);
-    g_pose.yaw = 90.0 * DEG2RAD;
-    InterlockedExchange(&g_have_mine, 0);
-    InterlockedExchange(&g_have_proj_mine, 0);
-    camera_pass_begin();
-    apply_transform();
-    if (!InterlockedCompareExchange(&g_camera_telemetry_valid, 0, 0))
-        bad++;
-    for (i = 0; i < 3; i++) for (j = 0; j < 3; j++)
-        if (fabs((double)g_camera_telemetry_eye_world.m[i][j] - want[i][j]) > 1e-5)
-            bad++;
-    if (memcmp(&g_camera_telemetry_proj, M(O_PERS), sizeof(MAT)) != 0)
-        bad++;
-    if (memcmp(&g_camera_telemetry_eye_world, &base_eye, sizeof(MAT)) == 0)
-        bad++;
-    if (memcmp(&g_camera_telemetry_eye_world,
-               &fake[O_EYE_INV / sizeof(MAT)], sizeof(MAT)) == 0)
-        bad++;
-
-    /* A later rejected seam starts with the same production helper and must
-       leave the previous successful telemetry invalid. */
-    M(O_EYE_INV)->m[0][0] = 2.0f;
-    camera_pass_begin();
-    apply_transform();
-    if (DG_ENABLE_DIAGNOSTICS && InterlockedCompareExchange(&g_camera_telemetry_valid, 0, 0)) bad++;
-
-    g_chan0 = saved_chan0;
-    InterlockedExchange(&g_source, saved_source);
-    g_pose = saved_pose;
-    g_mine = saved_mine;
-    g_src_eye_inv = saved_src_eye_inv;
-    g_src_eye = saved_src_eye;
-    g_camera_telemetry_eye_world = saved_cam_eye;
-    g_camera_telemetry_proj = saved_cam_proj;
-    InterlockedExchange(&g_have_mine, saved_have_mine);
-    InterlockedExchange(&g_have_proj_mine, saved_have_proj);
-    InterlockedExchange(&g_applied, saved_applied);
-    InterlockedExchange(&g_fresh, saved_fresh);
-    InterlockedExchange(&g_rej_not_ortho, saved_rej_ortho);
-    InterlockedExchange(&g_camera_telemetry_valid, saved_cam_valid);
-    printf("  %-6s camera telemetry: final n_eye basis captured, reject clears, "
-           "inverse is not reported\n", bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-static int test_camera_step_height(void)
-{
-    MAT raw, world, inv, d, di, eye, product;
-    POSE p;
-    int i,j,k,bad=0;
-    memset(&p,0,sizeof p);
-    for (i=0;i<120;i++) {
-        float ground=(float)i*2.0f;
-        float head_y=(float)(30.0*cos(i*0.1));
-        memset(&raw,0,sizeof raw);
-        raw.m[0][0]=raw.m[1][1]=raw.m[2][2]=raw.m[3][3]=1;
-        raw.m[3][0]=(float)i*7; raw.m[3][2]=50;
-        raw.m[3][1]=ground+1500+(float)(50.0*sin(i*0.4));
-        world=raw; camera_inverse_from_world(&inv,&world);
-        if (!camera_step_height_apply(&world,&inv,1,1,ground+1500)) bad++;
-        for (j=0;j<4;j++) for (k=0;k<4;k++)
-            if (!(j==3 && k==1) && world.m[j][k]!=raw.m[j][k]) bad++;
-        /* The same production composition follows stabilization: real head Y
-           and left/right eye offsets must survive the removed 50 mm bob. */
-        p.ty=head_y; p.tx=(i&1)?32:-32;
-        build_delta(&d,&di,&p); mat_mul(&eye,&di,&world);
-        if (fabs(eye.m[3][1]-(ground+1500-head_y))>0.001 ||
-            fabs(eye.m[3][0]-(raw.m[3][0]-p.tx))>0.001) bad++;
-        mat_mul(&product,&inv,&world);
-        for(j=0;j<4;j++) for(k=0;k<4;k++)
-            if(fabs(product.m[j][k]-(j==k?1.0:0.0))>0.001) bad++;
-        eye=world;
-        if (!camera_step_height_apply(&world,&inv,1,1,ground+1500) ||
-            memcmp(&eye,&world,sizeof eye)) bad++;
-    }
-    for(i=0;i<4;i++) {
-        MAT saved_inv;
-        world=raw; camera_inverse_from_world(&inv,&world); saved_inv=inv;
-        if(camera_step_height_apply(&world,&inv,i!=0,i!=1,
-             i==2?raw.m[3][1]+251:i==3?NAN:1500) ||
-             memcmp(&world,&raw,sizeof raw) || memcmp(&inv,&saved_inv,sizeof inv)) bad++;
-    }
-    printf("  %-6s camera step transform: 120 walking/terrain/head/stereo frames, rigid inverse, repeat and bypass checks\n",bad?"FAIL":"ok");
-    return bad;
-}
-
-#include "dg_hanging_camera_test.inl"
-static int test_camera_yaw_anchor(void)
-{
-    int i, j, k, have, bad = 0;
-    double h;
-    for (i = 0; i < (int)(sizeof(camera_yaw_measured) /
-                          sizeof(camera_yaw_measured[0])); i++) {
-        MAT first, cur, expected, di;
-        POSE test_pose;
-        h = 0.0;
-        have = 0;
-        memset(&first, 0, sizeof first);
-        memset(&cur, 0, sizeof cur);
-        for (j = 0; j < 3; j++) {
-            memcpy(first.m[j], camera_yaw_measured[i].initial_base[j],
-                   3 * sizeof(float));
-            memcpy(cur.m[j], camera_yaw_measured[i].current_base[j],
-                   3 * sizeof(float));
-        }
-        first.m[3][3] = cur.m[3][3] = 1.0f;
-        if (!camera_yaw_anchor_apply(&first, &h, &have) ||
-            !camera_yaw_anchor_apply(&cur, &h, &have)) bad++;
-        memset(&test_pose, 0, sizeof test_pose);
-        test_pose.yaw = camera_yaw_measured[i].mapped_yaw_deg * DEG2RAD;
-        build_delta(&expected, &di, &test_pose);
-        mat_mul(&expected, &di, &cur);
-        for (j = 0; j < 3; j++) for (k = 0; k < 3; k++)
-            if (fabs(expected.m[j][k] - camera_yaw_measured[i].expected_eye[j][k]) > 2e-4)
-                bad++;
-    }
-    {
-        MAT tilted, want, ry;
-        double q = 0.04, n = sqrt(1.0 - q*q), curh;
-        memset(&tilted, 0, sizeof tilted);
-        tilted.m[0][0] = 1.0f; tilted.m[1][0] = (float)q;
-        tilted.m[1][1] = (float)n; tilted.m[2][2] = 1.0f; tilted.m[3][3] = 1.0f;
-        if (camera_rigid_valid(&tilted)) bad++;
-        memset(&tilted, 0, sizeof tilted);
-        tilted.m[0][0] = 1.0f;
-        tilted.m[1][1] = 0.8660254f; tilted.m[1][2] = 0.5f;
-        tilted.m[2][1] = -0.5f; tilted.m[2][2] = 0.8660254f;
-        tilted.m[3][0] = 100.0f; tilted.m[3][1] = 200.0f;
-        tilted.m[3][2] = 300.0f; tilted.m[3][3] = 1.0f;
-        curh = atan2(tilted.m[2][0], tilted.m[2][2]);
-        h = curh + 90.0 * DEG2RAD; have = 1;
-        want = tilted; rot_y(&ry, 90.0 * DEG2RAD); mat_mul(&want, &tilted, &ry);
-        want.m[3][0] = tilted.m[3][0]; want.m[3][1] = tilted.m[3][1];
-        want.m[3][2] = tilted.m[3][2];
-        if (!camera_yaw_anchor_apply(&tilted, &h, &have)) bad++;
-        for (j = 0; j < 3; j++) for (i = 0; i < 3; i++)
-            if (fabs(tilted.m[j][i] - want.m[j][i]) > 2e-4) bad++;
-    }
-    {
-        static const float turns[4][2] = {
-            {0,1}, {0,-1}, {-1,0}, {-0.9998476952f,-0.0174524064f}
-        };
-        MAT m;
-        for (i = 0; i < 4; i++) {
-            memset(&m, 0, sizeof m);
-            m.m[0][0] = m.m[2][2] = turns[i][0];
-            m.m[2][0] = turns[i][1]; m.m[0][2] = -turns[i][1];
-            m.m[1][1] = m.m[3][3] = 1;
-            have = 1;
-            h = i == 3 ? 179.0 * DEG2RAD : 0.0;
-            if (!camera_yaw_anchor_apply(&m, &h, &have)) bad++;
-            if (i == 3) {
-                if (fabs(m.m[2][0] - 0.0174524064) > 2e-5 ||
-                    fabs(m.m[2][2] + 0.9998476952) > 2e-5) bad++;
-            } else if (fabs(m.m[0][0] - 1) > 2e-5 ||
-                       fabs(m.m[2][2] - 1) > 2e-5 ||
-                       fabs(m.m[2][0]) > 2e-5) bad++;
-        }
-    }
-    printf("  %-6s camera yaw anchor: measured fixtures, row order, wrap and rigid reject\n",
-           bad ? "FAIL" : "ok");
-    return bad;
-}
-
-static int test_camera_yaw_apply_integration(void)
-{
-    MAT fake[64], raw, raw_inv, current, current_inv, d, di;
-    POSE save_pose, p;
-    ULONG64 save_chan = g_chan0;
-    LONG save_src = g_source, save_mode = g_camera_yaw_anchor_mode;
-    LONG save_gen = g_camera_yaw_anchor_generation;
-    LONG save_mine = g_have_mine, save_proj = g_have_proj_mine;
-    DG_CAMERA_GATE save_gate = g_test_camera_gate;
-    MAT save_mine_mat = g_mine, save_src_inv = g_src_eye_inv, save_src_world = g_src_eye;
-    MAT save_cam_eye = g_camera_telemetry_eye_world, save_cam_proj = g_camera_telemetry_proj;
-    LONG save_cam_valid = g_camera_telemetry_valid;
-    int save_override = g_test_camera_gate_override, i, j, bad = 0;
-    double c = cos(30.0 * DEG2RAD), s = sin(30.0 * DEG2RAD);
-    static const double want_pos[3] = {115.9807621135,177.0096189432,275.1794919243};
-    static const float want_r[3][3] = {
-        {0.0f,-0.5f,0.8660254038f},
-        {0.5f,0.75f,0.4330127019f},
-        {-0.8660254038f,0.4330127019f,0.25f}
-    };
-    memset(fake, 0, sizeof fake);
-    for (i = 0; i < 64; i++) { fake[i].m[0][0]=fake[i].m[1][1]=fake[i].m[2][2]=fake[i].m[3][3]=1.0f; }
-    memset(&raw, 0, sizeof raw);
-    raw.m[0][0]=1.0f; raw.m[1][1]=(float)c; raw.m[1][2]=(float)s;
-    raw.m[2][1]=(float)-s; raw.m[2][2]=(float)c;
-    raw.m[3][0]=100.0f; raw.m[3][1]=200.0f; raw.m[3][2]=300.0f; raw.m[3][3]=1.0f;
-    camera_inverse_from_world(&raw_inv, &raw);
-    rot_y(&d, 90.0 * DEG2RAD); mat_mul(&current, &raw, &d);
-    current.m[3][0]=raw.m[3][0]; current.m[3][1]=raw.m[3][1]; current.m[3][2]=raw.m[3][2];
-    camera_inverse_from_world(&current_inv, &current);
-    memset(&p, 0, sizeof p); p.yaw=90.0*DEG2RAD; p.pitch=30.0*DEG2RAD;
-    p.tx=10.0; p.ty=20.0; p.tz=30.0;
-    save_pose=g_pose; g_pose=p; g_chan0=(ULONG64)(ULONG_PTR)fake;
-    InterlockedExchange(&g_source, SRC_SYNTHETIC); InterlockedExchange(&g_camera_yaw_anchor_mode,1);
-    InterlockedIncrement(&g_camera_yaw_anchor_generation); InterlockedExchange(&g_have_mine,0);
-    InterlockedExchange(&g_have_proj_mine,0); g_test_camera_gate_override=1;
-    memset(&g_test_camera_gate,0,sizeof g_test_camera_gate); g_test_camera_gate.valid=1;
-    g_test_camera_gate.arm_body=0x10000; g_test_camera_gate.camera=0x20000;
-    *M(O_EYE)=raw; *M(O_EYE_INV)=raw_inv; M(O_PERS)->m[0][0]=1.7f; M(O_PERS)->m[1][1]=2.3f;
-    M(O_PERS)->m[2][3]=1.0f; M(O_PERS)->m[3][3]=0.0f;
-    apply_transform();
-    *M(O_EYE)=current; *M(O_EYE_INV)=current_inv;
-    apply_transform();
-    for (i=0;i<3;i++) for (j=0;j<3;j++) if (fabs(M(O_EYE)->m[i][j]-want_r[i][j])>3e-4) bad++;
-    for (i=0;i<3;i++) if (fabs(M(O_EYE)->m[3][i]-want_pos[i])>3e-3) bad++;
-    {
-        MAT product;
-        mat_mul(&product, M(O_EYE_INV), M(O_EYE));
-        for (i=0;i<4;i++) for (j=0;j<4;j++)
-            if (fabs(product.m[i][j] - (i == j ? 1.0 : 0.0)) > 3e-3) bad++;
-    }
-
-    for (j = 0; j < 3; j++) {
-        MAT previous = *M(O_EYE);
-        apply_transform();
-        if (memcmp(&previous, M(O_EYE), sizeof previous)) bad++;
-        if (memcmp(&g_src_eye, &current, sizeof current)) bad++;
-    }
-    /* Each event starts from a proven anchor, then presents a native 90-degree
-       turn. Reset means this frame equals the existing legacy composition;
-       keeping the old heading would instead reproduce want_r above. */
-    for (j = 0; j < 9; j++) {
-        MAT legacy, legacy_inv;
-        int a, b;
-        /* Independent case setup: a preceding case must not accidentally
-           leave precisely the heading expected AFTER this case's reset. */
-        camera_yaw_anchor_reset();
-        InterlockedExchange(&g_camera_yaw_anchor_mode, 1);
-        g_test_camera_gate_override = 1;
-        InterlockedIncrement(&g_camera_yaw_anchor_generation);
-        InterlockedExchange(&g_have_mine, 0);
-        *M(O_EYE) = raw; *M(O_EYE_INV) = raw_inv;
-        M(O_PERS)->m[2][3] = 1.0f;
-        apply_transform();
-        if (!g_camera_yaw_anchor_have) bad++;
-        for (a = 0; a < 3; a++) for (b = 0; b < 3; b++)
-            if (fabs(M(O_EYE)->m[a][b] - want_r[a][b]) > 3e-4) bad++;
-        *M(O_EYE) = current; *M(O_EYE_INV) = current_inv;
-        InterlockedExchange(&g_have_mine, 0);
-        switch (j) {
-        case 0: InterlockedExchange(&g_camera_yaw_anchor_mode, 0); break;
-        case 1: g_test_camera_gate_override = 0; break;
-        case 2: g_test_camera_gate.camera++; break;
-        case 3: g_test_camera_gate.arm_body++; break;
-        case 4: g_camera_yaw_anchor_recenter = input_recenter_count() - 1; break;
-        case 5: InterlockedIncrement(&g_camera_yaw_anchor_generation); break;
-        case 6: M(O_EYE_INV)->m[0][0] = 2.0f; break;
-        case 7: M(O_PERS)->m[2][3] = 0.0f; break;
-        case 8: {
-            unsigned int nan_bits = 0x7FC00000u;
-            memcpy(&M(O_EYE_INV)->m[0][0], &nan_bits, sizeof nan_bits);
-            break;
-        }
-        }
-        apply_transform();
-        if (j >= 6) {
-            if (g_camera_yaw_anchor_have || g_camera_telemetry_valid) bad++;
-            *M(O_EYE) = current; *M(O_EYE_INV) = current_inv;
-            M(O_PERS)->m[2][3] = 1.0f;
-            InterlockedExchange(&g_have_mine, 0);
-            apply_transform();
-        }
-        build_delta(&d, &di, &p);
-        mat_mul(&legacy, &di, &current);
-        mat_mul(&legacy_inv, &current_inv, &d);
-        for (a = 0; a < 4; a++) for (b = 0; b < 4; b++) {
-            if (fabs(M(O_EYE)->m[a][b] - legacy.m[a][b]) > 3e-3 ||
-                fabs(M(O_EYE_INV)->m[a][b] - legacy_inv.m[a][b]) > 3e-3) {
-                printf("  FAIL camera epoch event %d element %d,%d\n", j, a, b);
-                bad++;
-            }
-        }
-        if (j == 0 && (memcmp(M(O_EYE), &legacy, sizeof legacy) ||
-                       memcmp(M(O_EYE_INV), &legacy_inv, sizeof legacy_inv))) bad++;
-    }
-    /* Gate loss falls back to legacy and must clear anchor state for the next
-       safe epoch; an identity change then captures a fresh first frame. */
-    g_test_camera_gate_override=0; apply_transform();
-    if (g_camera_yaw_anchor_have) bad++;
-    g_test_camera_gate_override=save_override; g_test_camera_gate=save_gate;
-    g_chan0=save_chan; g_pose=save_pose; InterlockedExchange(&g_source,save_src);
-    InterlockedExchange(&g_camera_yaw_anchor_mode,save_mode); InterlockedExchange(&g_camera_yaw_anchor_generation,save_gen);
-    InterlockedExchange(&g_have_mine,save_mine); InterlockedExchange(&g_have_proj_mine,save_proj);
-    g_mine=save_mine_mat; g_src_eye_inv=save_src_inv; g_src_eye=save_src_world;
-    g_camera_telemetry_eye_world=save_cam_eye; g_camera_telemetry_proj=save_cam_proj;
-    InterlockedExchange(&g_camera_telemetry_valid,save_cam_valid);
-    camera_yaw_anchor_reset();
-    printf("  %-6s camera yaw apply: literal tilt/head/translation, inverse, cache, off, gate, identities, recenter, generation and invalid epochs\n", bad?"FAIL":"ok");
-    return bad;
-}
-
-static int test_render_link_config(void) {
-    const char *words[]={"source=xr","source=xr vr_stereo_phase_fix=0",
-        "source=xr vr_stereo_phase_fix=1","source=xr vr_stereo_phase_fix=0oops",
-        "source=xr vr_stereo_phase_fix=2"};
-    int i,bad=0;
-    for(i=0;i<5;i++) {
-        char b[128];POSE pose;double seconds=600;int source,track,map[4],hand,ok;
-        ARM_POS_CFG ap;DG_XR_CONFIG cfg;DG_BRIDGE_CONFIG bridge;
-        strcpy_s(b,sizeof b,words[i]);
-        ok=parse_config(b,&pose,&seconds,&source,&cfg,&bridge,&track,map,&hand,&ap);
-        if(ok!=(i<3)||(ok&&cfg.stereo_phase_fix!=(i!=1)))bad++;
-    }
-    printf("  %s render-link config: default/on/off and malformed-token refusal\n",bad?"FAIL":"PASS");
-    return bad;
-}
-/* vr_radar_*: defaults (everything off, HUD radar left alone), whole-word
-   switches, all-or-nothing triples, out-of-range keeps the default. */
-static int test_radar_config(void) {
-    static const struct { const char *text; int mode, hud, local; double size, off[3], rot[3], gaze, pitch; } t[] = {
-        { "source=xr",                                   0, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 35, 15 },
-        { "source=xr vr_radar_wrist=fixed",              1, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 35, 15 },
-        { "source=xr vr_radar_wrist=wrist vr_radar_hud=off vr_radar_wrist_space=local", 2, 0, 1, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 35, 15 },
-        { "source=xr vr_radar_wrist=WRIST vr_radar_hud=on vr_radar_wrist_space=grip",   2, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 35, 15 },
-        { "source=xr vr_radar_wrist=wristy vr_radar_hud=offf vr_radar_wrist_space=loc", 0, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 35, 15 },
-        { "source=xr vr_radar_wrist=on",                 0, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 35, 15 },
-        { "source=xr vr_radar_wrist=wrist vr_radar_wrist=off", 0, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 35, 15 },
-        { "source=xr vr_radar_wrist_size=0.12 vr_radar_wrist_offset=0.03,-0.01,0.09 vr_radar_wrist_rot=10,-80.5,180 vr_radar_gaze_deg=0 vr_radar_gaze_pitch=-5 vr_radar_wrist=wrist",
-                                                         2, 1, 0, 0.12, { 0.03, -0.01, 0.09 }, { 10, -80.5, 180 }, 0, -5 },
-        { "source=xr vr_radar_wrist_size=5 vr_radar_gaze_deg=91 vr_radar_gaze_pitch=61", 0, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 35, 15 },
-        { "source=xr vr_radar_wrist_size=0.02 vr_radar_gaze_deg=-1",                     0, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 35, 15 },
-        { "source=xr vr_radar_wrist_offset=0.03,0.01 vr_radar_wrist_rot=1,2",            0, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 35, 15 },
-        { "source=xr vr_radar_wrist_offset=0.03,0.01,0.5 vr_radar_wrist_rot=1,2,400",    0, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 35, 15 },
-        { "source=xr vr_radar_wrist_offset=0.03,0.01,0.05,7 vr_radar_wrist_rot=1,2,3x",  0, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 35, 15 },
-        { "source=xr vr_radar_wrist_offset=0.03,x,0.05 vr_radar_wrist=fixed stereo=1",   1, 1, 0, 0.09, { 0.02, 0.08, 0.03 }, { 0, 90, -90 }, 35, 15 },
-    };
-    int i, j, bad = 0, stereo_kept = 0;
-    for (i = 0; i < (int)(sizeof t / sizeof t[0]); i++) {
-        char b[320]; POSE pose; double seconds = 600; int source, track, map[4], hand, ok, row = 0;
-        ARM_POS_CFG ap; DG_XR_CONFIG cfg; DG_BRIDGE_CONFIG bridge;
-        strcpy_s(b, sizeof b, t[i].text);
-        ok = parse_config(b, &pose, &seconds, &source, &cfg, &bridge, &track, map, &hand, &ap);
-        if (!ok || cfg.radar_mode != t[i].mode || cfg.radar_hud != t[i].hud || cfg.radar_space_local != t[i].local ||
-            cfg.radar_size != t[i].size || cfg.radar_gaze_deg != t[i].gaze || cfg.radar_gaze_pitch != t[i].pitch) row = 1;
-        for (j = 0; j < 3; j++) if (cfg.radar_offset[j] != t[i].off[j] || cfg.radar_rot[j] != t[i].rot[j]) row = 1;
-        if (ok && cfg.stereo) stereo_kept = 1;          /* a refused triple must not swallow the keys after it */
-        if (row) { printf("  FAIL radar config row %d: %s\n", i, t[i].text); bad++; }
-    }
-    if (!stereo_kept) bad++;
-    printf("  %s radar config: defaults off, whole words, all-or-nothing triples, ranges\n", bad ? "FAIL" : "PASS");
-    return bad;
-}
-/* The eye shift: the pair must end up exactly the separation apart along
-   the finished camera's x-axis, with zero vertical/depth component in that
-   camera's own basis, on a rolled AND pitched camera - the case the old
-   per-eye mapping got wrong by 23 mm - and eye/eye_inv must stay inverses. */
-static int test_stereo_eye_shift(void) {
-    MAT ry, rx, rz, t, world, left, right, left_inv, right_inv, id;
-    double half = 30.85, d[3], c[3];
-    int bad = 0, i, j, sign;
-    const char *words[] = {"source=xr", "source=xr stereo_eye_x_sign=-1",
-                           "source=xr stereo_eye_x_sign=+1", "source=xr stereo_eye_x_sign=0"};
-    int want[] = {-1, -1, 1, 1};
-    for (i = 0; i < 4; i++) {
-        char b[128]; POSE pose; double seconds = 600; int source, track, map[4], hand, ok;
-        ARM_POS_CFG ap; DG_XR_CONFIG cfg; DG_BRIDGE_CONFIG bridge;
-        strcpy_s(b, sizeof b, words[i]);
-        ok = parse_config(b, &pose, &seconds, &source, &cfg, &bridge, &track, map, &hand, &ap);
-        if (!ok || cfg.stereo_eye_x_sign != want[i]) bad++;
-    }
-    rot_y(&ry, 0.6); rot_x(&rx, -0.5); rot_z(&rz, 0.35);
-    mat_mul(&t, &ry, &rx); mat_mul(&world, &t, &rz);
-    world.m[3][0] = 100.0f; world.m[3][1] = 200.0f; world.m[3][2] = 300.0f;
-    for (sign = 1; sign >= -1; sign -= 2) {
-        left = world; right = world;
-        camera_inverse_from_world(&left_inv, &left);
-        camera_inverse_from_world(&right_inv, &right);
-        stereo_eye_shift(&left, &left_inv, DG_EYE_LEFT, half, sign);
-        stereo_eye_shift(&right, &right_inv, DG_EYE_RIGHT, half, sign);
-        /* Rotation rows untouched. */
-        for (i = 0; i < 3; i++) for (j = 0; j < 4; j++)
-            if (left.m[i][j] != world.m[i][j] || right.m[i][j] != world.m[i][j]) bad++;
-        /* right - left, in the camera's own basis: (sign * 2 * half, 0, 0). */
-        for (j = 0; j < 3; j++) d[j] = (double)right.m[3][j] - (double)left.m[3][j];
-        for (i = 0; i < 3; i++)
-            c[i] = d[0]*world.m[i][0] + d[1]*world.m[i][1] + d[2]*world.m[i][2];
-        if (fabs(c[0] - sign * 2.0 * half) > 1e-3 || fabs(c[1]) > 1e-3 || fabs(c[2]) > 1e-3) bad++;
-        /* Each eye sits half away from the head, symmetrically. */
-        for (j = 0; j < 3; j++) d[j] = (double)right.m[3][j] + (double)left.m[3][j] - 2.0 * world.m[3][j];
-        if (fabs(d[0]) > 1e-3 || fabs(d[1]) > 1e-3 || fabs(d[2]) > 1e-3) bad++;
-        /* eye * eye_inv == identity for both. */
-        mat_mul(&id, &left, &left_inv);
-        for (i = 0; i < 4; i++) for (j = 0; j < 4; j++)
-            if (fabs((double)id.m[i][j] - (i == j ? 1.0 : 0.0)) > 1e-4) bad++;
-        mat_mul(&id, &right, &right_inv);
-        for (i = 0; i < 4; i++) for (j = 0; j < 4; j++)
-            if (fabs((double)id.m[i][j] - (i == j ? 1.0 : 0.0)) > 1e-4) bad++;
-    }
-    /* Implausible pairs are refused, plausible ones halved, in game units. */
-    {
-        DG_XR_FRAME f; memset(&f, 0, sizeof f);
-        f.eye[1].raw.px = 0.0617;
-        if (fabs(stereo_half_separation(&f, 1000.0) - 30.85) > 1e-6) bad++;
-        f.eye[1].raw.px = 0.0; f.eye[1].raw.py = 0.0617;
-        if (fabs(stereo_half_separation(&f, 1000.0) - 30.85) > 1e-6) bad++;
-        f.eye[1].raw.py = 0.02;
-        if (stereo_half_separation(&f, 1000.0) != 0.0) bad++;
-        f.eye[1].raw.py = 0.2;
-        if (stereo_half_separation(&f, 1000.0) != 0.0) bad++;
-        left = world; camera_inverse_from_world(&left_inv, &left);
-        stereo_eye_shift(&left, &left_inv, DG_EYE_LEFT, 0.0, 1);
-        if (memcmp(&left, &world, sizeof world) != 0) bad++;
-    }
-    printf("  %s stereo eye shift: pair along camera x, symmetric, inverse kept, sign knob, plausibility\n", bad ? "FAIL" : "PASS");
-    return bad;
-}
-static int test_eye_truth(void) {
-    int bad = 0, i;
-    memset(g_eye_truth_n, 0, sizeof g_eye_truth_n);
-    g_eye_truth_none = g_eye_truth_mismatch = 0;
-    /* no camera this frame: no opinion, counted apart */
-    if (eye_truth_step(DG_EYE_LEFT, 0) != 0 || g_eye_truth_none != 1) bad++;
-    /* still learning: no verdict before 50 samples, not even on a stray */
-    for (i = 0; i < 49; i++) if (eye_truth_step(DG_EYE_LEFT, +1) != 0) bad++;
-    if (eye_truth_step(DG_EYE_LEFT, -1) != 0) bad++;
-    /* learned: left renders +, a - frame under the left label is a mismatch */
-    if (eye_truth_step(DG_EYE_LEFT, +1) != 1) bad++;
-    if (eye_truth_step(DG_EYE_LEFT, -1) != -1 || g_eye_truth_mismatch != 1) bad++;
-    /* the right eye learns on its own and the other way round */
-    for (i = 0; i < 50; i++) eye_truth_step(DG_EYE_RIGHT, -1);
-    if (eye_truth_step(DG_EYE_RIGHT, -1) != 1 || eye_truth_step(DG_EYE_RIGHT, +1) != -1) bad++;
-    /* no clear majority (labels are noise): never call a frame mislabelled */
-    memset(g_eye_truth_n, 0, sizeof g_eye_truth_n);
-    for (i = 0; i < 200; i++) eye_truth_step(DG_EYE_LEFT, (i & 1) ? 1 : -1);
-    if (eye_truth_step(DG_EYE_LEFT, +1) != 0 || eye_truth_step(DG_EYE_LEFT, -1) != 0) bad++;
-    {   /* draw skip: a frame with almost no draws against a learned usual count; never before a usual count exists */
-        long ema = 0, map[2][2] = {{0,0},{0,0}}; int k;
-        if (draw_skip_detect(3, &ema)) bad++;
-        for (k = 0; k < 10; k++) if (draw_skip_detect(1700, &ema)) bad++;
-        if (ema != 1700 || !draw_skip_detect(3, &ema) || !draw_skip_detect(120, &ema) || draw_skip_detect(400, &ema)) bad++;
-        if (draw_skip_label(map, 1) != -1) bad++;
-        map[0][0] = 60; map[1][1] = 70; map[1][0] = 2;
-        if (draw_skip_label(map, 1) != 0 || draw_skip_label(map, -1) != 1 || draw_skip_label(map, 0) != -1) bad++;
-        map[1][0] = 40; if (draw_skip_label(map, 1) != -1) bad++;
-    }
-    {   /* camera-less frames: dropped only in mode 3, at most DG_NOCAM_DROP_MAX in a row, a voted frame rearms */
-        int run = 0, k, dropped = 0;
-        if (nocam_drop_step(0, 0, &run) || nocam_drop_step(0, 1, &run) || nocam_drop_step(1, 3, &run)) bad++;
-        for (k = 0; k < 10; k++) dropped += nocam_drop_step(0, 3, &run);
-        if (dropped != DG_NOCAM_DROP_MAX) bad++;
-        if (nocam_drop_step(-1, 3, &run) || run != 0 || !nocam_drop_step(0, 3, &run)) bad++;
-    }
-    memset(g_eye_truth_n, 0, sizeof g_eye_truth_n);
-    g_eye_truth_none = g_eye_truth_mismatch = 0;
-    printf("  %s eye truth: learns sign per label eye, flags the exception, silent without majority\n", bad ? "FAIL" : "PASS");
-    return bad;
-}
-static int test_capture_gate(void) {
-    int bad = 0;
-    struct { const char *name; int have_ref, req, worn; unsigned dwell; int want; } t[] = {
-        { "not worn",       0, 0, 0,   999, 0 },
-        { "resume sticky",  1, 0, 1, 9999, 0 },
-        { "explicit unworn",1, 1, 0,   0, 1 },
-        { "explicit no dwell",0, 1, 1, 0, 1 },
-        { "dwell below",     0, 0, 1, 499, 0 },
-        { "dwell boundary",  0, 0, 1, 500, 1 },
-    };
-    int i, n = (int)(sizeof(t) / sizeof(t[0]));
-    for (i = 0; i < n; i++) {
-        int got = dg_xr_should_capture(t[i].have_ref, t[i].req,
-                                       t[i].worn, t[i].dwell);
-        if (got != t[i].want) bad++;
-        printf("  %-6s capture gate %-18s -> %d (want %d)\n",
-               got == t[i].want ? "ok" : "FAIL", t[i].name, got, t[i].want);
-    }
-    return bad;
-}
-
-static int test_stereo_alternation(void) {
-    int bad = 0, eye = DG_EYE_LEFT, i, next;
-    for (i = 0; i < 8; i++) {
-        next = next_eye(eye);
-        if (next < DG_EYE_LEFT || next > DG_EYE_RIGHT || next == eye) bad++;
-        eye = next;
-    }
-    /* A rejected frame uses the same transition as an accepted frame. */
-    eye = DG_EYE_LEFT;
-    eye = next_eye(eye);                 /* rejected frame */
-    if (eye != DG_EYE_RIGHT) bad++;
-    eye = next_eye(eye);                 /* next accepted frame */
-    if (eye != DG_EYE_LEFT) bad++;
-    printf("  %-6s stereo alternation: strict frames, rejection advances, index in eye[2]\n",
-           bad ? "FAIL" : "ok");
-    return bad;
-}
-
-static int test_stereo_projection_mirror(void) {
-    DG_PROJ_FOV original, mirrored, roundtrip;
-    int bad = 0;
-    original.left = -0.82;
-    original.right = 0.96;
-    original.up = 0.91;
-    original.down = -0.74;
-    mirrored = mirror_fov_x(original);
-    roundtrip = mirror_fov_x(mirrored);
-    if (mirrored.left != -original.right ||
-        mirrored.right != -original.left ||
-        mirrored.up != original.up ||
-        mirrored.down != original.down ||
-        memcmp(&roundtrip, &original, sizeof(original)) != 0)
-        bad++;
-    printf("  %-6s stereo projection mirror: horizontal only, exact round trip\n",
-           bad ? "FAIL" : "ok");
-    return bad;
-}
-
-/* The software turn: the stick rotates the tracking space by advancing
-   the recentre reference, pivoting about the LIVE head. Three properties
-   carry the whole design: the reference yaw moves by exactly the delta
-   (so the mapped view turns, delta > 0 = rightward); the mapped HEAD
-   position is invariant (the player turns where they stand instead of
-   sliding through the world); and the arm's frozen ROOM frame rides the
-   offset, so a stick turn reaches the arm exactly the way the player
-   turning on their feet does - the missing property the 2026-08-23
-   session measured as an arm pinned to the old facing after every stick
-   turn. */
-static int test_stick_turn_is_a_room_turn(void) {
-    int bad = 0;
-    double q[2] = { 0.0, 1.0 };            /* ref yaw 0 */
-    double p[2] = { 0.0, 0.0 };            /* ref at the origin */
-    double hx = 1.0, hz = 2.0;             /* head away from the origin */
-    double d30 = 30.0 * DEG2RAD;
-
-    dg_xr_turn_step(q, p, hx, hz, d30);
-
-    /* The reference yaw took the whole delta. */
-    if (fabs(2.0 * atan2(q[0], q[1]) - d30) > 1e-9) bad++;
-
-    /* The mapped head position is invariant: rotate (head - ref) by the
-       NEGATED new reference yaw with the same convention qrot applies
-       (x' = c*x + s*z, z' = c*z - s*x) and land back on (1, 2). */
-    {
-        double vx = hx - p[0], vz = hz - p[1];
-        double c = cos(-d30), s = sin(-d30);
-        double mx = c * vx + s * vz;
-        double mz = c * vz - s * vx;
-        if (fabs(mx - hx) > 1e-9 || fabs(mz - hz) > 1e-9) bad++;
-    }
-
-    /* A point half a metre in front of the head swings RIGHT of it: the
-       mapped forward offset (0, -0.5) gains a +X component. */
-    {
-        double ox = (hx + 0.0) - hx, oz = (hz - 0.5) - hz;
-        double c = cos(-d30), s = sin(-d30);
-        double mx = c * ox + s * oz;
-        double mz = c * oz - s * ox;
-        if (!(mx > 0.24 && mx < 0.26)) bad++;
-        if (!(mz < -0.42 && mz > -0.44)) bad++;
-    }
-
-    /* The arm's frozen frame rides the published offset: freeze at yaw 0
-       with the offset at 0, advance the offset 30 degrees, and the frame
-       reference the arm actually uses reads 30. */
-    {
-        double save_q[4];
-        double save_omega = g_arm_frame_omega0;
-        int save_have = g_arm_frame_have;
-        long save_freezes = g_arm_frame_freezes;
-        int save_frame = g_arm_frame;
-        DG_XR_RAW_POSE head, ref;
-        int j;
-        for (j = 0; j < 4; j++) save_q[j] = g_arm_frame_q[j];
-
-        memset(&head, 0, sizeof head);
-        head.qw = 1.0;
-        g_arm_frame = DG_XR_REL_FRAME_ROOM;
-        dg_xr_test_set_turn_offset(0.0);
-        arm_frame_freeze(&head);
-        dg_xr_test_set_turn_offset(d30);
-        arm_frame_reference(&head, &ref);
-        if (fabs(2.0 * atan2(ref.qy, ref.qw) - d30) > 1e-5) bad++;
-        if (fabs(ref.qx) > 1e-12 || fabs(ref.qz) > 1e-12) bad++;
-
-        /* The whole dg_hook half, stick versus feet: the same controller,
-           mapped once under a 30-degree software turn with the player
-           unmoved, and once with the player physically rotated 30 degrees
-           (head yaw and hand swung about the head) - the two must land
-           the SAME wrist target and the SAME player shoulder. The
-           shoulder half is the leg that was missing on 2026-08-23: the
-           controller rotated with the turn while the shoulder constant
-           stayed behind, and the aim ray's tail dragged the muzzle the
-           wrong way across the screen. */
-        {
-            DG_XR_CONFIG cfg;
-            DG_XR_RAW_POSE h1, h2, hand1, hand2;
-            DG_XR_REL_POSE rel;
-            double outS[3], outP[3], shS[3], shP[3];
-            double save_sign[3];
-            double off0[3] = { 0.2, -0.1, -0.5 };
-            double ca = cos(-d30), sa = sin(-d30);
-            int i2;
-
-            for (i2 = 0; i2 < 3; i2++) save_sign[i2] = g_arm_pos_sign[i2];
-            g_arm_pos_sign[0] = -1.0;
-            g_arm_pos_sign[1] = 1.0;
-            g_arm_pos_sign[2] = 1.0;
-            memset(&cfg, 0, sizeof cfg);
-            cfg.yaw_sign = cfg.pitch_sign = cfg.roll_sign = 1.0;
-            cfg.x_sign = cfg.y_sign = cfg.z_sign = 1.0;
-            cfg.scale = 1000.0;
-
-            memset(&h1, 0, sizeof h1);
-            h1.qw = 1.0; h1.px = 0.3; h1.py = 1.6; h1.pz = -0.2;
-            hand1 = h1;
-            hand1.px += off0[0]; hand1.py += off0[1]; hand1.pz += off0[2];
-
-            /* Physically turned right 30: head yaw -30 (XR positive yaw
-               is left), hand swung about the head by the same. */
-            h2 = h1;
-            h2.qy = sin(-d30 * 0.5); h2.qw = cos(-d30 * 0.5);
-            hand2 = h2;
-            hand2.px += ca * off0[0] + sa * off0[2];
-            hand2.py += off0[1];
-            hand2.pz += ca * off0[2] - sa * off0[0];
-
-            g_arm_frame = DG_XR_REL_FRAME_ROOM;
-            dg_xr_test_set_turn_offset(0.0);
-            arm_frame_freeze(&h1);
-
-            dg_xr_test_set_turn_offset(d30);
-            arm_hand_to_view(&h1, &hand1, &cfg, &rel, outS);
-            arm_player_shoulder_view(&h1, &cfg, 1.0, shS);
-
-            dg_xr_test_set_turn_offset(0.0);
-            arm_hand_to_view(&h2, &hand2, &cfg, &rel, outP);
-            arm_player_shoulder_view(&h2, &cfg, 1.0, shP);
-
-            for (i2 = 0; i2 < 3; i2++) {
-                if (fabs(outS[i2] - outP[i2]) > 1e-4) bad++;
-                if (fabs(shS[i2] - shP[i2]) > 1e-4) bad++;
-            }
-            for (i2 = 0; i2 < 3; i2++) g_arm_pos_sign[i2] = save_sign[i2];
-        }
-
-        dg_xr_test_set_turn_offset(0.0);
-        for (j = 0; j < 4; j++) g_arm_frame_q[j] = save_q[j];
-        g_arm_frame_omega0 = save_omega;
-        g_arm_frame_have = save_have;
-        g_arm_frame_freezes = save_freezes;
-        g_arm_frame = save_frame;
-    }
-
-    printf("  %-6s stick turn is a room turn: the reference takes the "
-           "delta, the head maps to where it stood, a forward point "
-           "swings right, the arm's frozen frame rides the offset, and "
-           "the legacy hook segment - wrist and player shoulder alike - maps a "
-           "stick turn and a physical turn identically\n",
-           bad ? "FAIL" : "ok");
-    return bad;
-}
-
-/* The marker's four V5.1 words default to the PROVEN stand (live frame,
-   organic comp, stick facing, follow under aim) and roll back by WORD only.
-   read_config is the shipping parser, run on real files: a minimal marker,
-   the legacy "<yaw> <seconds>" form that never reaches the key loop, the
-   four rollback words, and four typos that must read back as the default
-   they got - the house rule every other marker key follows. */
-static int cfg_words(const char *body, int want_src, int want_frame,
-                     int want_comp, int want_aim, int want_basis,
-                     int want_yaw, const char *label)
-{
-    char path[MAX_PATH];
-    POSE p;
-    double seconds = 0.0;
-    int source = 0, track = 0, qmap[4], hand = 0, bad = 0;
-    DG_XR_CONFIG xc;
-    DG_BRIDGE_CONFIG bc;
-    ARM_POS_CFG ap;
-    HANDLE h;
-    DWORD wrote = 0;
-
-    GetTempPathA(sizeof path, path);
-    strncat(path, "dg_hook_cfg_test.on", sizeof path - strlen(path) - 1);
-    h = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
-                    FILE_ATTRIBUTE_NORMAL, NULL);
-    if (h == INVALID_HANDLE_VALUE) {
-        printf("  FAIL   config words: cannot write %s\n", path);
-        return 1;
-    }
-    WriteFile(h, body, (DWORD)strlen(body), &wrote, NULL);
-    CloseHandle(h);
-
-    if (!read_config(path, &p, &seconds, &source, &xc, &bc,
-                     &track, qmap, &hand, &ap)) bad++;
-    if (bc.follow_src != want_src) bad++;
-    if (bc.adjust_frame != want_frame) bad++;
-    if (bc.arm_comp != want_comp) bad++;
-    if (bc.follow_aim != want_aim) bad++;
-    if (bc.arm_hand_basis != want_basis) bad++;
-    if (bc.camera_yaw_anchor != want_yaw) bad++;
-    DeleteFileA(path);
-    if (bad)
-        printf("  FAIL   config words (%s): src %d frame %d comp %d aim %d "
-               "basis %d, want %d %d %d %d %d\n", label, bc.follow_src,
-               bc.adjust_frame, bc.arm_comp, bc.follow_aim, bc.arm_hand_basis,
-               want_src, want_frame, want_comp, want_aim, want_basis);
-    return bad;
-}
-
-#include "dg_twohand.h"
-static int test_absolute_aim_transport(void)
-{
-    DG_BRIDGE_ARM_TARGET t, first;
-    DG_XR_CONFIG saved_cfg = g_xrcfg;
-    int saved_track = g_arm_track, saved_stereo = g_stereo;
-    LONG saved_hand = g_arm_hand, saved_absolute = g_arm_absolute_aim;
-    LONG saved_left = g_left_arm, saved_twohand = g_twohand;
-    LONG saved_eye = g_current_eye;
-    double saved_dt = g_test_dt_override;
-    unsigned long saved_stream = g_arm_pose_stream_id;
-    int bad = 0, i;
-#define AIM_CHECK(x) do { if (!(x)) { bad++; printf("  FAIL absolute aim line %d\n", __LINE__); } } while (0)
-    memset(&g_aim_camera, 0, sizeof g_aim_camera);
-    memset(&g_xrcfg, 0, sizeof g_xrcfg);
-    g_xrcfg.yaw_sign = g_xrcfg.pitch_sign = g_xrcfg.roll_sign = 1;
-    g_xrcfg.x_sign = g_xrcfg.y_sign = g_xrcfg.z_sign = 1;
-    g_xrcfg.scale = 1000;
-    g_arm_track = ARM_TRACK_R_GRIP; g_arm_hand = 1; g_arm_absolute_aim = 1;
-    g_xrcfg.positional=1;
-    g_stereo = 0; g_test_dt_override = 1.0/60.0;
-    g_test_aim_selection = 1;
-    g_arm_pose_stream_id++;
-    g_aim_camera.valid = 1; g_aim_camera.gate.arm_body = 1;
-    g_aim_camera.gate.camera = 2; g_aim_camera.view.qw = 1;
-    for (i=0;i<4;i++) g_aim_camera.camera.m[i][i] = 1;
-    g_aim_camera.frame.head_raw.qw = 1;
-    {
-        DG_XR_HAND_POSE *p = &g_aim_camera.frame.right_hand.grip;
-        p->active = p->tracked = p->orientation_valid = p->position_valid = 1;
-        p->raw_local.qw = 1;
-        g_aim_camera.frame.right_hand.aim = *p;
-        p = &g_aim_camera.frame.right_hand.aim;
-        p->hand = DG_XR_HAND_RIGHT; p->kind = DG_XR_POSE_AIM;
-        p->sample_seq = 10; p->xr_time = 100;
-        /* Grip deliberately differs. Absolute orientation must still use AIM. */
-        g_aim_camera.frame.right_hand.grip.raw_local.qw = 0;
-        g_aim_camera.frame.right_hand.grip.raw_local.qx = 1;
-    }
-    for (i=0;i<15;i++) {
-        InterlockedIncrement(&g_present_frame);
-        AIM_CHECK(arm_pose_target(&t));
-    }
-    AIM_CHECK(t.hand_write && t.aim_write && t.aim_weight > .999);
-    AIM_CHECK(t.position.enabled && !t.position.valid); /* missing grip sequence */
-    AIM_CHECK(fabs(t.aim_world[0]) < 1e-9 && fabs(t.aim_world[3]) < 1e-9);
-    AIM_CHECK(fabs(t.aim_world[1] + sqrt(.5)) < 1e-9 &&
-              fabs(t.aim_world[2] - sqrt(.5)) < 1e-9);
-    /* The left grip is a separate pose stream; neither controller's loss
-       may invalidate the other controller's publication. */
-    g_left_arm=g_twohand=1;
-    g_aim_camera.frame.right_hand.grip.sample_seq=10;
-    g_aim_camera.frame.right_hand.grip.xr_time=100;
-    g_aim_camera.frame.left_hand.grip=g_aim_camera.frame.right_hand.grip;
-    g_aim_camera.frame.left_hand.grip.hand=DG_XR_HAND_LEFT;
-    g_aim_camera.frame.left_hand.grip.kind=DG_XR_POSE_GRIP;
-    g_aim_camera.frame.left_hand.grip.raw_local.px=-.25;
-    for(i=0;i<20;i++) {
-        InterlockedIncrement(&g_present_frame);
-        AIM_CHECK(arm_pose_target(&t));
-    }
-    AIM_CHECK(t.left_enabled && t.left_valid && t.hands_coherent);
-    {int saved_source=g_source;g_source=SRC_XR;
-     InterlockedIncrement(&g_present_frame);AIM_CHECK(arm_pose_target(&t));g_source=saved_source;}
-    AIM_CHECK(t.m9_pose.valid && t.m9_pose.sequence==t.left_sample_seq &&
-              t.m9_pose.source==t.stream_id && fabs(t.m9_pose.local[0]-.25)<1e-9);
-    AIM_CHECK(t.position.valid && t.position.units==1000);
-    AIM_CHECK(t.left_position.enabled && t.left_position.valid);
-    AIM_CHECK(t.free_right.enabled && t.free_right.valid && t.free_left.enabled && t.free_left.valid);
-    AIM_CHECK(t.left_position.grip[0]==-.25);
-    AIM_CHECK(t.left_position.units==1000);
-    for(i=0;i<16;i++) AIM_CHECK(t.left_position.camera[i]==g_aim_camera.camera.m[i/4][i%4]);
-    AIM_CHECK(t.position.grip[0]==g_aim_camera.frame.right_hand.grip.raw_local.px);
-    for(i=0;i<16;i++) AIM_CHECK(t.position.camera[i]==g_aim_camera.camera.m[i/4][i%4]);
-    AIM_CHECK(fabs(t.hands_distance_m-.25)<1e-9);
-    first=t;
-    g_aim_camera.frame.left_hand.grip.raw_local.px=-.10;
-    InterlockedIncrement(&g_present_frame);AIM_CHECK(arm_pose_target(&t));
-    AIM_CHECK(memcmp(first.wrist_view,t.wrist_view,sizeof t.wrist_view)==0);
-    AIM_CHECK(memcmp(first.aim_world,t.aim_world,sizeof t.aim_world)==0);
-    AIM_CHECK(memcmp(first.left_wrist_view,t.left_wrist_view,sizeof t.left_wrist_view)!=0);
-    g_aim_camera.frame.left_hand.grip.tracked=0;
-    AIM_CHECK(arm_pose_target(&t) && !t.left_valid && t.aim_write);
-    AIM_CHECK(!t.m9_pose.valid);
-    g_aim_camera.frame.left_hand.grip.tracked=1;
-    g_aim_camera.frame.right_hand.aim.tracked=0;
-    InterlockedIncrement(&g_present_frame);
-    AIM_CHECK(arm_pose_target(&t) && t.left_valid && !t.aim_write);
-    AIM_CHECK(t.left_position.valid); /* right tracking loss is independent */
-    g_aim_camera.frame.right_hand.aim.tracked=1;
-    g_aim_camera.frame.left_hand.grip.sample_seq=9;
-    InterlockedIncrement(&g_present_frame);
-    AIM_CHECK(arm_pose_target(&t) && t.left_valid && !t.hands_coherent && t.aim_write);
-    AIM_CHECK(!t.m9_pose.valid);
-    {
-        DG_TWOHAND latch;
-        int n;
-        dg_twohand_reset(&latch);
-        g_stereo=1;g_arm_pose_stream_id++;
-        for(n=0;n<30;n++) {
-            unsigned long long seq=100+n;
-            long long time=1000000000LL+n*16666667LL;
-            g_current_eye=(n&1)?DG_EYE_RIGHT:DG_EYE_LEFT;
-            g_aim_camera.frame.left_hand.grip.raw_local.px=(n&1)?-.15:-.10;
-            g_aim_camera.frame.left_hand.grip.sample_seq=seq;
-            g_aim_camera.frame.right_hand.grip.sample_seq=seq;
-            g_aim_camera.frame.right_hand.aim.sample_seq=seq;
-            g_aim_camera.frame.left_hand.grip.xr_time=time;
-            g_aim_camera.frame.right_hand.grip.xr_time=time;
-            g_aim_camera.frame.right_hand.aim.xr_time=time;
-            InterlockedIncrement(&g_present_frame);
-            AIM_CHECK(arm_pose_target(&t));
-            AIM_CHECK(t.left_sample_seq==t.aim_sample_seq &&
-                      t.left_sample_time==t.aim_sample_time);
-            if(n&1) {
-                AIM_CHECK(t.hands_distance_m==first.hands_distance_m);
-                AIM_CHECK(memcmp(t.free_left.world,first.free_left.world,sizeof t.free_left.world)==0);
-                AIM_CHECK(memcmp(t.free_right.world,first.free_right.world,sizeof t.free_right.world)==0);
-            }
-            else first=t;
-            dg_twohand_step(&latch,t.left_valid,
-                t.hands_coherent && t.aim_write &&
-                t.left_sample_seq==t.aim_sample_seq &&
-                t.left_sample_time==t.aim_sample_time,
-                t.hands_distance_m,t.left_sample_seq,t.left_sample_time);
-        }
-        AIM_CHECK(latch.engaged && latch.blend==1);
-        g_aim_camera.frame.left_hand.grip.tracked=0;
-        AIM_CHECK(arm_pose_target(&t) && !t.left_valid && !t.hands_coherent);
-        AIM_CHECK(dg_twohand_step(&latch,t.left_valid,t.hands_coherent,
-                  t.hands_distance_m,t.left_sample_seq,t.left_sample_time)==0);
-        g_aim_camera.frame.left_hand.grip.tracked=1;
-        g_stereo=0;
-        g_arm_pose_stream_id++;
-        g_aim_camera.frame.right_hand.aim.sample_seq=10;
-        g_aim_camera.frame.right_hand.aim.xr_time=100;
-        InterlockedIncrement(&g_present_frame);
-        AIM_CHECK(arm_pose_target(&t));
-    }
-    g_left_arm=g_twohand=0;
-    first = t;
-    g_arm_pose_stream_id++; /* B changes the calibration, never absolute forward. */
-    InterlockedIncrement(&g_present_frame);
-    AIM_CHECK(arm_pose_target(&t) && t.aim_write);
-    for (i=0;i<4;i++) AIM_CHECK(fabs(t.aim_world[i]-first.aim_world[i])<1e-9);
-    g_stereo = 1; g_current_eye = DG_EYE_LEFT;
-    g_arm_pose_stream_id++;
-    InterlockedIncrement(&g_present_frame);
-    AIM_CHECK(arm_pose_target(&first) && first.aim_write);
-    g_current_eye = DG_EYE_RIGHT;
-    g_aim_camera.frame.right_hand.aim.raw_local.qy = sin(.2);
-    g_aim_camera.frame.right_hand.aim.raw_local.qw = cos(.2);
-    g_aim_camera.frame.right_hand.aim.sample_seq = 11;
-    g_aim_camera.frame.right_hand.aim.xr_time = 110;
-    InterlockedIncrement(&g_present_frame);
-    AIM_CHECK(arm_pose_target(&t) && t.aim_write && t.pair_id == first.pair_id);
-    AIM_CHECK(t.aim_sample_seq == first.aim_sample_seq && t.aim_sample_time == first.aim_sample_time);
-    for (i=0;i<4;i++) AIM_CHECK(t.aim_world[i] == first.aim_world[i]);
-    /* Same frame, eye and object addresses, but a different equipped pistol:
-       the USP must start from its fresh AIM instead of the M9 eye latch. */
-    g_test_aim_selection = 2;
-    AIM_CHECK(arm_pose_target(&t) && t.hand_write && t.aim_write);
-    AIM_CHECK(t.aim_weapon_id == 2 && t.stream_id != first.stream_id);
-    AIM_CHECK(t.left_stream_id && t.left_stream_id==first.left_stream_id);
-    AIM_CHECK(g_absolute_record.input.reset && t.aim_sample_seq == 11);
-    AIM_CHECK(dg_ik_quat_angle(t.aim_world, first.aim_world) > .1);
-    first = t;
-    g_test_aim_selection = 1;
-    AIM_CHECK(arm_pose_target(&t) && t.hand_write && t.aim_write);
-    AIM_CHECK(t.aim_weapon_id == 1 && t.stream_id != first.stream_id);
-    AIM_CHECK(t.left_stream_id==first.left_stream_id);
-    AIM_CHECK(g_absolute_record.input.reset);
-    for (i=0;i<4;i++) AIM_CHECK(fabs(t.aim_world[i]-first.aim_world[i]) < 1e-9);
-    {
-        const int weapons[]={3,15,18,5,14,12,7};
-        int w;
-        dg_bridge_test_stinger_available(1);
-        g_twohand=1;
-        for(w=0;w<7;w++) {
-            first=t;g_test_aim_selection=weapons[w];
-            AIM_CHECK(arm_pose_target(&t) && t.hand_write && t.aim_write);
-            AIM_CHECK(t.aim_weapon_id==(uint64_t)weapons[w] && t.stream_id!=first.stream_id);
-            AIM_CHECK(t.left_stream_id==first.left_stream_id);
-            AIM_CHECK(g_absolute_record.input.reset);
-            AIM_CHECK(t.twohand_enabled==(weapons[w]==3));
-        }
-        dg_bridge_test_stinger_available(0);
-        g_test_aim_selection=7;
-        AIM_CHECK(arm_pose_target(&t) && !t.hand_write && !t.aim_write);
-        g_twohand=0;
-        g_test_aim_selection=6;
-        AIM_CHECK(arm_pose_target(&t) && !t.hand_write && !t.aim_write);
-        g_test_aim_selection=1;
-        AIM_CHECK(arm_pose_target(&t) && t.aim_write);
-    }
-    /* First equip after None has no previous absolute weapon selection.
-       Exercise the actual producer path: left validity and its calibration
-       survive both that first equip and subsequent weapon-stream changes. */
-    {
-        unsigned long left_epoch;
-        g_stereo=0;g_test_aim_selection=0;g_absolute_stream=0;
-        g_left_arm=1;
-        /* Earlier stale-AIM tests deliberately split these timestamps.
-           The manual two-hand gesture requires one coherent observation. */
-        g_aim_camera.frame.right_hand.aim.sample_seq=g_aim_camera.frame.right_hand.grip.sample_seq;
-        g_aim_camera.frame.right_hand.aim.xr_time=g_aim_camera.frame.right_hand.grip.xr_time;
-        for(i=0;i<20;i++) {
-            InterlockedIncrement(&g_present_frame);
-            AIM_CHECK(arm_pose_target(&t));
-        }
-        AIM_CHECK(t.left_valid && t.left_weight>.999 && t.left_stream_id);
-        AIM_CHECK(t.position.enabled && t.position.valid && !t.aim_write);
-        { /* Full producer transport, including the existing trigger+B mailbox. */
-            LONG saved_source=g_source;
-            DG_HAND_PROFILE profile;
-            g_source=SRC_XR;
-            persistent_hand_input(&t,1);
-            persistent_hand_input(&t,1);
-            dg_bridge_hand_profile_get(&profile);
-            AIM_CHECK(t.persistent_hands && t.free_left.persistent && t.free_right.persistent);
-            AIM_CHECK(!memcmp(t.free_right.alignment,profile.rotation[1],sizeof t.free_right.alignment));
-            dg_xr_test_press_secondary(DG_XR_HAND_RIGHT);
-            persistent_hand_input(&t,1);
-            AIM_CHECK(t.hand_calibration_request==dg_xr_secondary_presses(DG_XR_HAND_RIGHT));
-            t.free_left.valid=0;persistent_hand_input(&t,1);
-            AIM_CHECK(!t.hand_calibration_request);t.free_left.valid=1;
-            t.aim_weapon_id=1;persistent_hand_input(&t,1);
-            dg_xr_test_press_secondary(DG_XR_HAND_RIGHT);persistent_hand_input(&t,1);
-            AIM_CHECK(!t.hand_calibration_request);t.aim_weapon_id=0;
-            g_source=saved_source;
-        }
-        /* None publishes the same live camera-height input as armed hands. */
-        g_aim_camera.camera.m[3][1]-=40;
-        InterlockedIncrement(&g_present_frame);
-        AIM_CHECK(arm_pose_target(&t) && t.position.valid);
-        AIM_CHECK(t.position.camera[13]==g_aim_camera.camera.m[3][1]);
-        g_aim_camera.camera.m[3][1]+=40;
-        left_epoch=t.left_stream_id;
-        g_test_aim_selection=1;
-        InterlockedIncrement(&g_present_frame);
-        AIM_CHECK(arm_pose_target(&t) && t.left_valid && t.left_weight>.999);
-        AIM_CHECK(t.left_stream_id==left_epoch);
-        first=t;g_test_aim_selection=2;
-        InterlockedIncrement(&g_present_frame);
-        AIM_CHECK(arm_pose_target(&t) && t.left_valid && t.left_weight>.999);
-        AIM_CHECK(t.stream_id!=first.stream_id && t.left_stream_id==left_epoch);
-    }
-    /* FPS/level replacement while looking sideways must reset native latches
-       without redefining physical forward. No old actor writes are retained. */
-    {
-        long freezes = g_arm_frame_freezes;
-        unsigned long left_epoch=t.left_stream_id;
-        double room[4];
-        memcpy(room, g_arm_frame_q, sizeof room);
-        g_aim_camera.frame.head_raw.qy = sin(.55);
-        g_aim_camera.frame.head_raw.qw = cos(.55);
-        g_aim_camera.valid = 0;
-        AIM_CHECK(arm_pose_target(&t) && !t.aim_write);
-        g_aim_camera.valid = 1;
-        g_aim_camera.gate.camera++;
-        g_aim_camera.gate.arm_body++;
-        AIM_CHECK(arm_pose_target(&t) && t.aim_write);
-        AIM_CHECK(g_absolute_record.input.reset);
-        AIM_CHECK(t.left_stream_id && t.left_stream_id!=left_epoch);
-        left_epoch=t.left_stream_id;
-        AIM_CHECK(g_arm_frame_freezes == freezes);
-        AIM_CHECK(!memcmp(room, g_arm_frame_q, sizeof room));
-        /* Manual calibration retains precedence even during replacement. */
-        g_arm_pose_stream_id++;
-        g_aim_camera.gate.camera++;
-        AIM_CHECK(arm_pose_target(&t) && t.aim_write);
-        AIM_CHECK(g_arm_frame_freezes == freezes + 1);
-        AIM_CHECK(t.left_stream_id!=left_epoch);
-        AIM_CHECK(fabs(g_arm_frame_q[1] - sin(.55)) < 1e-9);
-    }
-    /* A repeated frame with invalid camera must refuse before pose latching. */
-    g_aim_camera.valid = 0;
-    AIM_CHECK(arm_pose_target(&t) && !t.hand_write && !t.aim_write);
-    AIM_CHECK(!t.position.valid);
-    g_aim_camera.valid = 1; g_test_aim_selection = 0;
-    AIM_CHECK(arm_pose_target(&t) && !t.hand_write);
-    g_test_aim_selection = 1;
-    InterlockedIncrement(&g_present_frame);
-    g_aim_camera.frame.right_hand.aim.pose_age_ms = 101;
-    AIM_CHECK(arm_pose_target(&t) && !t.hand_write);
-    g_aim_camera.frame.right_hand.aim.pose_age_ms = 0;
-    g_aim_camera.frame.right_hand.aim.sample_seq = 0;
-    AIM_CHECK(arm_pose_target(&t) && !t.hand_write);
-    g_test_aim_selection = -1;
-    g_arm_track = saved_track; g_arm_hand = saved_hand; g_stereo = saved_stereo;
-    g_current_eye = saved_eye;
-    g_arm_absolute_aim = saved_absolute; g_test_dt_override = saved_dt;
-    g_left_arm=saved_left;g_twohand=saved_twohand;
-    g_arm_pose_stream_id = saved_stream; g_xrcfg = saved_cfg;
-    g_absolute_stream = 0; memset(&g_aim_camera, 0, sizeof g_aim_camera);
-    dg_pose_init(&g_arm_pose_state, NULL);
-    printf("  %s absolute aim: exact camera AIM, calibration invariant, invalid duplicate/selection/stale release\n",
-           bad ? "FAIL" : "ok");
-#undef AIM_CHECK
-    return bad != 0;
-}
-
-static int test_absolute_record_replay(void)
-{
-    static DG_REC_RING ring;
-    DG_AIM_REPLAY_STATE live, replay;
-    DG_REC_FRAME record, back;
-    DG_XR_FRAME xr;
-    FILE *file;
-    char path[MAX_PATH];
-    int i,bad=0,compat=0,seeded=0;
-    long count=0;
-    long long frequency=0;
-    memset(&live,0,sizeof live);
-    memset(&xr,0,sizeof xr); xr.head_raw.qw=1;
-    dg_rec_reset(&ring);
-    for(i=0;i<300;i++) {
-        DG_AIM_REPLAY_IN *input;
-        double a=.3*sin(i*.07);
-        double body=i<150?0:.6*sin((i-150)*.07);
-        double camera=a+body;
-        dg_rec_pack(&xr,i*166667,7,(unsigned int)i,(unsigned int)i,0,&record);
-        input=&record.absolute.input;
-        input->camera[0][0]=input->camera[2][2]=cos(camera);
-        input->camera[0][2]=sin(camera); input->camera[2][0]=-sin(camera);
-        input->camera[1][1]=1;
-        input->view[1]=sin(a*.5); input->view[3]=cos(a*.5);
-        /* Independent countersteer: body yaw +b, raw AIM yaw -b keeps
-           the same world ray while the head separately moves by a. */
-        input->aim[1]=-sin(body*.5); input->aim[3]=cos(body*.5);
-        input->frame=i; input->eye=(unsigned int)DG_POSE_EYE_MONO;
-        input->dt=1.0/60; input->sample_seq=i+1; input->sample_time=(i+1)*1000;
-        input->source_valid=1; input->pose_flags=15;
-        if(i>=120)input->pose_flags|=DG_AIM_REPLAY_BLADE;
-        input->hand_tag=DG_XR_HAND_RIGHT; input->kind_tag=DG_XR_POSE_AIM;
-        input->reset=(i==0 || i==75 || i==120); input->stream=i<75?7:(i<120?8:9);
-        input->camera_id=1; input->arm=2; input->subobject=3;
-        input->subobjs=4; input->hand=5; input->model=6;
-        if(i==100) input->source_valid=0;
-        if(i==110) input->age_ms=101;
-        record.absolute.before=live;
-        absolute_aim_step(&live,input,&record.absolute.observed);
-        record.absolute.present=1;
-        /* Independent expected fixed world orientation while head/camera
-           move together; no production target builder used as the oracle. */
-        if(record.absolute.observed.write) {
-            const double *q=record.absolute.observed.pose.quat;
-            if(i<120) {
-                if(fabs(q[0])>1e-8 || fabs(q[3])>1e-8 ||
-                   fabs(q[1]+sqrt(.5))>1e-8 || fabs(q[2]-sqrt(.5))>1e-8) bad++;
-            } else {
-
-                double v[4]={3.454840660095215,-383.86553955078125,759.2001342773438,0};
-                double inverse[4],world[4],n=sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);
-                dg_ik_quat_conj(q,inverse);dg_ik_quat_mul(q,v,world);
-                dg_ik_quat_mul(world,inverse,world);
-                if(fabs(world[0]/n)>1e-8 || fabs(world[1]/n)>1e-8 || fabs(world[2]/n-1)>1e-8)bad++;
-            }
-        }
-        if((i==100 || i==110) && record.absolute.observed.write) bad++;
-        /* Start mid-stream, as an overwritten ring does. The checkpoint must
-           reproduce the filter without replaying the unavailable prefix. */
-        if(i>=37 && dg_rec_capture(&ring,&record)!=1) bad++;
-    }
-    GetTempPathA(sizeof path,path);
-    strcat_s(path,sizeof path,"mgs2_absolute_replay_fixture.dgrec");
-    file=fopen(path,"wb");
-    if(!file) return 1;
-    if(dg_rec_write(&ring,10000000,file,NULL)!=263) bad++;
-    fclose(file); file=fopen(path,"rb");
-    if(!file) return 1;
-    if(!dg_rec_read_open(file,&count,&frequency,&compat) || compat || count!=263) bad++;
-    for(i=0;dg_rec_read_next(file,compat,&back);i++) {
-        DG_AIM_REPLAY_OUT out;
-        if(!seeded) { replay=back.absolute.before; seeded=1; }
-        if(memcmp(&replay,&back.absolute.before,sizeof replay)) bad++;
-        absolute_aim_step(&replay,&back.absolute.input,&out);
-        if(memcmp(&out,&back.absolute.observed,sizeof out)) bad++;
-        if(i==0) {
-            DG_AIM_REPLAY_STATE mutated=back.absolute.before;
-            DG_AIM_REPLAY_IN changed=back.absolute.input;
-            changed.source_valid=0;
-            absolute_aim_step(&mutated,&changed,&out);
-            if(!memcmp(&out,&back.absolute.observed,sizeof out)) bad++;
-        }
-    }
-    if(i!=263) bad++;
-    fclose(file);
-    printf("  %s absolute replay: serialized exact raw inputs, mid-stream seed, head/body countersteer cancellation, resets, refusals, sequential bit identity (%d failures)\n",
-           bad?"FAIL":"ok",bad);
-    return bad!=0;
-}
-
-static int test_aim_probe_config(void) {
-    static const struct { const char *words; int ok, on; } cases[] = {
-        {"source=xr\nvr_aim_probe=on\n",1,1},
-        {"source=xr\n",1,0},
-        {"source=xr\nvr_aim_probe=ON\n",1,1},
-        {"source=synthetic\nvr_geometry_probe=on\n",1,1},
-        {"source=xr\nvr_grip_debug=on\n",1,0},
-        {"source=xr\nvr_grip_debug=onjunk\n",0,0},
-        {"source=xr\nvr_geometry_probe=offjunk\n",0,0},
-        {"source=xr\nvr_aim_probe=off\n",1,0},
-        {"source=xr\nvr_aim_probe=onjunk\n",0,0},
-        {"source=xr\nvr_aim_probe=offjunk\n",0,0},
-        {"source=xr\nvr_aim_probe=\n",0,0},
-        {"source=xr\nvr_aim_probe=on\nvr_aim_probe=offjunk\n",0,0},
-        {"0 3600\n",1,0}
-    };
-    int i,bad=0,saved=dg_aim_capture_enabled();
-    for(i=0;i<(int)(sizeof cases/sizeof cases[0]);i++) {
-        char text[160]; POSE p; double seconds=3600;
-        int source,track,map[4],hand,ok;
-        DG_XR_CONFIG xc; DG_BRIDGE_CONFIG bc; ARM_POS_CFG ap;
-        strcpy_s(text,sizeof text,cases[i].words);
-        ok=parse_config(text,&p,&seconds,&source,&xc,&bc,&track,map,&hand,&ap);
-        if(ok!=cases[i].ok || dg_aim_capture_enabled()!=cases[i].on) bad++;
-    }
-    dg_aim_capture_configure(saved);
-    printf("  %-6s aim observation probe: opt-in, deletion and malformed tokens fail closed\n",
-           bad?"FAIL":"ok");
-    return bad;
-}
-
-static int test_config_defaults_are_the_proven_stand(void) {
-    int bad = 0;
-    bad += cfg_words("source=xr\nseconds=3600\n", 2, 1, 1, 1, 1, 0, "minimal");
-    bad += cfg_words("0 3600\n", 2, 1, 1, 1, 1, 0, "legacy form");
-    bad += cfg_words("source=xr\n"
-                     "vr_turn_follow_src=head\n"
-                     "vr_adjust_frame=legacy\n"
-                     "vr_arm_comp=full\n"
-                     "vr_turn_follow_aim=hold\n"
-                     "vr_arm_hand_basis=root\n"
-                     "vr_move=on\n", 0, 0, 0, 0, 0, 0, "rollback words");
-    bad += cfg_words("source=xr\n"
-                     "vr_turn_follow_src=hand\n"
-                     "vr_adjust_frame=live\n"
-                     "vr_arm_comp=organic\n"
-                     "vr_turn_follow_aim=on\n"
-                     "vr_arm_hand_basis=world\n", 1, 1, 1, 1, 1, 0, "explicit words");
-    bad += cfg_words("source=xr\n"
-                     "vr_turn_follow_src=bogus\n"
-                     "vr_adjust_frame=bogus\n"
-                     "vr_arm_comp=bogus\n"
-                     "vr_turn_follow_aim=bogus\n"
-                     "vr_arm_hand_basis=bogus\n", 2, 1, 1, 1, 1, 0, "typos");
-    bad += cfg_words("source=xr\nvr_camera_yaw=anchor\n", 2, 1, 1, 1, 1, 1,
-                     "camera anchor opt-in");
-    bad += cfg_words("source=xr\nvr_camera_yaw=bogus\n", 2, 1, 1, 1, 1, 0,
-                     "camera anchor typo");
-    bad += cfg_words("source=xr\nvr_camera_yaw=anchorXYZ\n", 2, 1, 1, 1, 1, 0,
-                     "camera anchor suffix");
-    bad += cfg_words("source=xr\nvr_camera_yaw=anchor\nvr_camera_yaw=off\n",
-                     2, 1, 1, 1, 1, 0, "camera anchor rollback");
-    printf("  %-6s config defaults: a missing or misspelt V5.1 word reads "
-           "back as the proven stand (live frame, organic comp, stick "
-           "facing, follow under aim); legacy/full/head/hold roll back\n",
-           bad ? "FAIL" : "ok");
-    return bad;
-}
-
-/* The theater quad's pose. Three properties are load-bearing, and each is
-   exactly one of the mutations the design forbids:
-     - yaw only: a head-coupled or full-orientation anchor tilts the screen
-       with whatever glance the player entered the cutscene in;
-     - fixed by value: the function is pure in the head pose it was given, so
-       once captured the anchor cannot follow the head - LOCAL-space free
-       look belongs to the compositor;
-     - fail-closed on degenerate input: an impossible head yields the
-       identity heading, never an invented rotation. */
-static int test_screen_pose_is_yaw_anchored(void) {
-    DG_XR_RAW_POSE head, out, out2;
-    double half = 35.0 * DEG2RAD * 0.5;
-    int bad = 0;
-
-    /* A head yawed 35 degrees left, pitched down and rolled - only the yaw
-       may survive into the anchor. */
-    {
-        /* q = yaw(35) * pitch(-40): build via two known quats. */
-        double qy[4] = { 0.0, sin(half), 0.0, cos(half) };
-        double hp = -40.0 * DEG2RAD * 0.5;
-        double qp[4] = { sin(hp), 0.0, 0.0, cos(hp) };
-        /* Hamilton product qy * qp, written out. */
-        head.qx = qy[3]*qp[0] + qy[0]*qp[3] + qy[1]*qp[2] - qy[2]*qp[1];
-        head.qy = qy[3]*qp[1] - qy[0]*qp[2] + qy[1]*qp[3] + qy[2]*qp[0];
-        head.qz = qy[3]*qp[2] + qy[0]*qp[1] - qy[1]*qp[0] + qy[2]*qp[3];
-        head.qw = qy[3]*qp[3] - qy[0]*qp[0] - qy[1]*qp[1] - qy[2]*qp[2];
-    }
-    head.px = 0.30; head.py = 1.65; head.pz = -0.20;
-    dg_xr_screen_pose(&head, 2.0, &out);
-
-    /* Yaw only: no x or z in the anchor's quaternion, and the yaw matches. */
-    if (fabs(out.qx) > 1e-9 || fabs(out.qz) > 1e-9) bad++;
-    if (fabs(out.qy - sin(half)) > 1e-6 || fabs(out.qw - cos(half)) > 1e-6)
-        bad++;
-    /* Centre 2 m ahead ALONG THE YAW, at the head's own eye height: forward
-       for yaw a is (-sin a, 0, -cos a) from -Z. */
-    if (fabs(out.px - (head.px + 2.0 * -sin(35.0 * DEG2RAD))) > 1e-6) bad++;
-    if (fabs(out.py - head.py) > 1e-9) bad++;
-    if (fabs(out.pz - (head.pz + 2.0 * -cos(35.0 * DEG2RAD))) > 1e-6) bad++;
-    /* The distance knob is honoured, direction unchanged. */
-    dg_xr_screen_pose(&head, 3.5, &out2);
-    if (fabs((out2.px - head.px) / (out.px - head.px) - 1.75) > 1e-6) bad++;
-
-    /* Pure in its input: the SAME yaw under a different glance - here a
-       25-degree roll instead of the pitch - gives the SAME anchor. The
-       head-coupled mutant fails here, because its output tracks the glance. */
-    {
-        DG_XR_RAW_POSE head2 = head, outb;
-        double hr = 25.0 * DEG2RAD * 0.5;
-        double qy2[4] = { 0.0, sin(half), 0.0, cos(half) };
-        double qr[4] = { 0.0, 0.0, sin(hr), cos(hr) };
-        head2.qx = qy2[3]*qr[0] + qy2[0]*qr[3] + qy2[1]*qr[2] - qy2[2]*qr[1];
-        head2.qy = qy2[3]*qr[1] - qy2[0]*qr[2] + qy2[1]*qr[3] + qy2[2]*qr[0];
-        head2.qz = qy2[3]*qr[2] + qy2[0]*qr[1] - qy2[1]*qr[0] + qy2[2]*qr[3];
-        head2.qw = qy2[3]*qr[3] - qy2[0]*qr[0] - qy2[1]*qr[1] - qy2[2]*qr[2];
-        dg_xr_screen_pose(&head2, 2.0, &outb);
-        if (fabs(outb.qy - out.qy) > 1e-6 || fabs(outb.qw - out.qw) > 1e-6 ||
-            fabs(outb.px - out.px) > 1e-6 || fabs(outb.pz - out.pz) > 1e-6)
-            bad++;
-    }
-
-    /* Degenerate head (half-turn about a horizontal axis: yaw undefined):
-       identity heading, screen straight down LOCAL -Z. Fail closed. */
-    head.qx = 1.0; head.qy = 0.0; head.qz = 0.0; head.qw = 0.0;
-    head.px = head.py = head.pz = 0.0;
-    dg_xr_screen_pose(&head, 2.0, &out);
-    if (fabs(out.qx) > 1e-9 || fabs(out.qy) > 1e-9 || fabs(out.qz) > 1e-9 ||
-        fabs(out.qw - 1.0) > 1e-9) bad++;
-    if (fabs(out.px) > 1e-9 || fabs(out.pz + 2.0) > 1e-9) bad++;
-
-    /* Menu ownership is exclusive, edge-triggered, and consumes held presses
-       across a theater transition instead of forwarding them to START. */
-    if (dg_xr_menu_route(0,1,1) != 2 ||
-        dg_xr_menu_route(0,1,0) != 1 ||
-        dg_xr_menu_route(1,1,1) || dg_xr_menu_route(1,1,0) ||
-        dg_xr_menu_route(1,0,1) || dg_xr_menu_route(0,0,1)) bad++;
-    printf("  %-6s theater screen pose: yaw-only anchor at eye height, dist "
-           "along the heading, same anchor whatever the entry glance, "
-           "identity on a degenerate head\n", bad ? "FAIL" : "ok");
-    return bad;
-}
-
-static int test_hand_tags(void) {
-    DG_XR_RAW_POSE raw;
-    DG_XR_REL_POSE relative;
-    DG_XR_HAND_POSE left_grip, right_aim;
-    int bad = 0;
-    raw.qx = 0.11; raw.qy = -0.22; raw.qz = 0.33; raw.qw = 0.88;
-    raw.px = 1.25; raw.py = -2.5; raw.pz = 3.75;
-    relative.qx = -0.1; relative.qy = 0.2; relative.qz = -0.3; relative.qw = 0.9;
-    relative.px = -4.0; relative.py = 5.0; relative.pz = -6.0;
-    dg_xr_hand_pose_sample(&left_grip, DG_XR_HAND_LEFT, DG_XR_POSE_GRIP,
-                           &raw, &relative, 1, 1, 1, 1, 1, 41, 123456);
-    dg_xr_hand_pose_sample(&right_aim, DG_XR_HAND_RIGHT, DG_XR_POSE_AIM,
-                           &raw, &relative, 1, 1, 1, 1, 1, 42, 123457);
-    if (left_grip.hand != DG_XR_HAND_LEFT ||
-        left_grip.kind != DG_XR_POSE_GRIP ||
-        right_aim.hand != DG_XR_HAND_RIGHT ||
-        right_aim.kind != DG_XR_POSE_AIM)
-        bad++;
-    printf("  %-6s named hand/pose fields retain left/right and grip/aim tags\n",
-           bad ? "FAIL" : "ok");
-    return bad;
-}
-
-static int test_raw_local_verbatim(void) {
-    DG_XR_RAW_POSE raw, before;
-    DG_XR_REL_POSE relative;
-    DG_XR_HAND_POSE pose;
-    int bad = 0;
-    raw.qx = 0.11; raw.qy = -0.22; raw.qz = 0.33; raw.qw = 0.88;
-    raw.px = 1.25; raw.py = -2.5; raw.pz = 3.75;
-    relative.qx = -0.1; relative.qy = 0.2; relative.qz = -0.3; relative.qw = 0.9;
-    relative.px = -4.0; relative.py = 5.0; relative.pz = -6.0;
-    before = raw;
-    dg_xr_hand_pose_sample(&pose, DG_XR_HAND_LEFT, DG_XR_POSE_GRIP,
-                           &raw, &relative, 1, 1, 1, 1, 1, 43, 123458);
-    if (memcmp(&raw, &before, sizeof(raw)) != 0 ||
-        memcmp(&pose.raw_local, &raw, sizeof(raw)) != 0)
-        bad++;
-    printf("  %-6s raw LOCAL pose is copied verbatim and input is unchanged\n",
-           bad ? "FAIL" : "ok");
-    return bad;
-}
-
-static int test_reference_pose_roundtrip(void) {
-    DG_XR_RAW_POSE reference, pose, roundtrip;
-    DG_XR_REL_POSE relative;
-    double a = 37.0 * DEG2RAD, b = -22.0 * DEG2RAD;
-    double worst = 0.0;
-    const double *want, *got;
-    int i;
-    memset(&reference, 0, sizeof(reference));
-    reference.qy = sin(a * 0.5); reference.qw = cos(a * 0.5);
-    reference.px = 1.2; reference.py = -0.4; reference.pz = 2.1;
-    memset(&pose, 0, sizeof(pose));
-    pose.qx = sin(b * 0.5); pose.qw = cos(b * 0.5);
-    pose.px = -0.8; pose.py = 1.7; pose.pz = -3.2;
-    dg_xr_pose_relative(&reference, &pose, &relative);
-    dg_xr_pose_from_relative(&reference, &relative, &roundtrip);
-    want = (const double *)&pose;
-    got = (const double *)&roundtrip;
-    for (i = 0; i < 7; i++) {
-        double e = fabs(want[i] - got[i]);
-        if (e > worst) worst = e;
-    }
-    printf("  %-6s reference-relative pose round trip, worst %.3e\n",
-           worst <= 1e-12 ? "ok" : "FAIL", worst);
-    return worst <= 1e-12 ? 0 : 1;
-}
-
-static int test_trigger_hysteresis(void) {
-    static const float values[] = {
-        0.00f, 0.52f, 0.55f, 0.54f, 0.56f, 0.20f,
-        0.11f, 0.10f, 0.12f, 0.09f
-    };
-    unsigned int pressed = 0;
-    int presses = 0, releases = 0;
-    size_t i;
-    for (i = 0; i < sizeof(values) / sizeof(values[0]); i++) {
-        unsigned int next = dg_xr_trigger_hysteresis(
-            values[i], 0.10f, 0.55f, pressed);
-        if (!pressed && next) presses++;
-        if (pressed && !next) releases++;
-        pressed = next;
-    }
-    printf("  %-6s trigger hysteresis noisy crossing: %d press, %d release\n",
-           presses == 1 && releases == 1 ? "ok" : "FAIL",
-           presses, releases);
-    return presses == 1 && releases == 1 ? 0 : 1;
-}
-
-static int raw_pose_is_zero(const DG_XR_RAW_POSE *pose) {
-    DG_XR_RAW_POSE zero;
-    memset(&zero, 0, sizeof(zero));
-    return memcmp(pose, &zero, sizeof(zero)) == 0;
-}
-
-static int rel_pose_is_zero(const DG_XR_REL_POSE *pose) {
-    DG_XR_REL_POSE zero;
-    memset(&zero, 0, sizeof(zero));
-    return memcmp(pose, &zero, sizeof(zero)) == 0;
-}
-
-static int test_tracking_loss_clears_pose(void) {
-    DG_XR_RAW_POSE raw;
-    DG_XR_REL_POSE relative;
-    DG_XR_HAND_POSE pose;
-    DG_XR_FRAME frame, readback;
-    int bad = 0;
-    memset(&raw, 0, sizeof(raw));
-    raw.qw = 1.0; raw.px = 2.0;
-    memcpy(&relative, &raw, sizeof(relative));
-    dg_xr_hand_pose_sample(&pose, DG_XR_HAND_LEFT, DG_XR_POSE_AIM,
-                           &raw, &relative, 1, 1, 1, 1, 1, 100, 200);
-    if (!pose.position_valid || !pose.orientation_valid || !pose.tracked)
-        bad++;
-    dg_xr_hand_pose_sample(&pose, DG_XR_HAND_LEFT, DG_XR_POSE_AIM,
-                           &raw, &relative, 1, 1, 0, 0, 1, 101, 201);
-    if (pose.position_valid || pose.orientation_valid || pose.tracked ||
-        !raw_pose_is_zero(&pose.raw_local) ||
-        !rel_pose_is_zero(&pose.reference_relative))
-        bad++;
-    memset(&frame, 0, sizeof(frame));
-    dg_xr_hand_pose_sample(&frame.left_hand.aim, DG_XR_HAND_LEFT,
-                           DG_XR_POSE_AIM, &raw, &relative,
-                           1, 1, 1, 1, 1, 102, 202);
-    dg_xr_test_publish(&frame);
-    Sleep(110);
-    if (!dg_xr_get_stereo(&readback) ||
-        readback.left_hand.aim.position_valid ||
-        readback.left_hand.aim.orientation_valid ||
-        !raw_pose_is_zero(&readback.left_hand.aim.raw_local) ||
-        readback.left_hand.aim.pose_age_ms <= 100)
-        bad++;
-    printf("  %-6s tracking loss and bounded age clear validity and pose payloads\n",
-           bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-static volatile LONG g_seqlock_test_go;
-static volatile LONG g_seqlock_test_done;
-
-static void fill_test_generation(DG_XR_FRAME *frame, uint64_t generation) {
-    memset(frame, 0, sizeof(*frame));
-    frame->head.yaw = (double)generation;
-    frame->left_hand.hand = DG_XR_HAND_LEFT;
-    frame->right_hand.hand = DG_XR_HAND_RIGHT;
-    frame->left_hand.grip.sample_seq = generation;
-    frame->left_hand.aim.sample_seq = generation;
-    frame->right_hand.grip.sample_seq = generation;
-    frame->right_hand.aim.sample_seq = generation;
-    frame->left_hand.trigger_press_seq = generation;
-    frame->left_hand.trigger_release_seq = generation;
-    frame->right_hand.trigger_press_seq = generation;
-    frame->right_hand.trigger_release_seq = generation;
-    frame->left_hand.grip.raw_local.px = (double)generation;
-    frame->left_hand.aim.raw_local.px = (double)generation;
-    frame->right_hand.grip.raw_local.px = (double)generation;
-    frame->right_hand.aim.raw_local.px = (double)generation;
-}
-
-static DWORD WINAPI seqlock_test_writer(LPVOID unused) {
-    uint64_t i;
-    DG_XR_FRAME frame;
-    (void)unused;
-    while (!InterlockedCompareExchange(&g_seqlock_test_go, 0, 0)) Sleep(0);
-    for (i = 1; i <= 50000; i++) {
-        fill_test_generation(&frame, i);
-        dg_xr_test_publish(&frame);
-        if ((i & 255) == 0) Sleep(0);
-    }
-    InterlockedExchange(&g_seqlock_test_done, 1);
-    return 0;
-}
-
-static int frame_is_one_generation(const DG_XR_FRAME *frame) {
-    uint64_t g = (uint64_t)frame->head.yaw;
-    return g != 0 &&
-        frame->left_hand.hand == DG_XR_HAND_LEFT &&
-        frame->right_hand.hand == DG_XR_HAND_RIGHT &&
-        frame->left_hand.grip.sample_seq == g &&
-        frame->left_hand.aim.sample_seq == g &&
-        frame->right_hand.grip.sample_seq == g &&
-        frame->right_hand.aim.sample_seq == g &&
-        frame->left_hand.trigger_press_seq == g &&
-        frame->left_hand.trigger_release_seq == g &&
-        frame->right_hand.trigger_press_seq == g &&
-        frame->right_hand.trigger_release_seq == g &&
-        frame->left_hand.grip.raw_local.px == (double)g &&
-        frame->left_hand.aim.raw_local.px == (double)g &&
-        frame->right_hand.grip.raw_local.px == (double)g &&
-        frame->right_hand.aim.raw_local.px == (double)g;
-}
-
-static int test_hand_seqlock(void) {
-    HANDLE thread;
-    int bad = 0;
-    unsigned int reads = 0;
-    InterlockedExchange(&g_seqlock_test_go, 0);
-    InterlockedExchange(&g_seqlock_test_done, 0);
-    thread = CreateThread(NULL, 0, seqlock_test_writer, NULL, 0, NULL);
-    if (!thread) {
-        printf("  FAIL   seqlock writer thread could not start\n");
-        return 1;
-    }
-    InterlockedExchange(&g_seqlock_test_go, 1);
-    while (!InterlockedCompareExchange(&g_seqlock_test_done, 0, 0) ||
-           reads < 10000) {
-        DG_XR_FRAME frame;
-        if (dg_xr_get_stereo(&frame)) {
-            reads++;
-            if (!frame_is_one_generation(&frame)) {
-                bad++;
-                break;
-            }
-        }
-    }
-    WaitForSingleObject(thread, INFINITE);
-    CloseHandle(thread);
-    printf("  %-6s seqlock %u concurrent snapshots, no mixed generation\n",
-           bad ? "FAIL" : "ok", reads);
-    return bad;
-}
-
-/* The axis map is a few lines of parser and one array, and it is also the
-   entire conversion between OpenXR's frame and the game's. It was found by
-   watching an arm move the wrong way, so it deserves a test that records what
-   was found - otherwise the next person here has no way to tell a measured
-   default from an assumed one. */
-static int test_arm_quat_map(void) {
-    int m[4], bad = 0, i;
-    static const int measured[4] = { -1, 2, -3, 4 };
-    double src[4] = { 0.1, 0.2, 0.3, 0.9 }, q[4];
-
-    for (i = 0; i < 4; i++)
-        if (g_arm_qmap[i] != measured[i]) bad++;
-
-    if (!parse_qmap("x,y,z,w", m)) bad++;
-    if (m[0] != 1 || m[1] != 2 || m[2] != 3 || m[3] != 4) bad++;
-    if (!parse_qmap("-x, y, -z, w", m)) bad++;
-    if (m[0] != -1 || m[1] != 2 || m[2] != -3 || m[3] != 4) bad++;
-    if (!parse_qmap("+w-z+y-x", m)) bad++;
-    if (m[0] != 4 || m[1] != -3 || m[2] != 2 || m[3] != -1) bad++;
-    /* Garbage is refused whole: a half-applied permutation is a pose that is
-       wrong in a way nobody can read off the screen. */
-    if (parse_qmap("x,y,q,w", m)) bad++;
-    if (parse_qmap("x,y", m)) bad++;
-
-    /* And the mapping itself, applied the way the seam applies it. */
-    for (i = 0; i < 4; i++) {
-        int k = measured[i];
-        double v = src[(k < 0 ? -k : k) - 1];
-        q[i] = (k < 0) ? -v : v;
-    }
-    if (q[0] != -0.1 || q[1] != 0.2 || q[2] != -0.3 || q[3] != 0.9) bad++;
-
-    printf("  %-6s arm quaternion map: default is the measured (-x,y,-z,w), "
-           "signs parse, malformed maps are refused whole\n",
-           bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-/* Every field of the arm's configuration changes where a controller position
-   or rotation lands, so every field has to restart the stream - that is what
-   throws away a calibration taken under a mapping that no longer exists.
-   Written as a sweep over the struct rather than as one comparison per field,
-   because the failure mode being guarded against is somebody adding a tenth
-   field and updating only the parser. */
-static int test_arm_cfg_change_restarts_stream(void) {
-    ARM_POS_CFG a, b;
-    int bad = 0, i;
-
-    memset(&a, 0, sizeof a);
-    a.sign[0] = -1.0; a.sign[1] = 1.0; a.sign[2] = 1.0;
-    a.shoulder_mm[0] = 180.0; a.shoulder_mm[1] = 200.0; a.shoulder_mm[2] = 40.0;
-    a.reach_mm = 600.0;
-    a.frame = DG_XR_REL_FRAME_YAW;
-    a.anchor = 1;
-    a.hand_zero = 3;
-
-    b = a;
-    if (!arm_pos_cfg_same(&a, &b)) bad++;
-
-    for (i = 0; i < 3; i++) {
-        b = a; b.sign[i] = -a.sign[i];
-        if (arm_pos_cfg_same(&a, &b)) bad++;
-        b = a; b.shoulder_mm[i] = a.shoulder_mm[i] + 1.0;
-        if (arm_pos_cfg_same(&a, &b)) bad++;
-    }
-    b = a; b.reach_mm += 1.0;
-    if (arm_pos_cfg_same(&a, &b)) bad++;
-    b = a; b.anchor = 0;
-    if (arm_pos_cfg_same(&a, &b)) bad++;
-    b = a; b.frame = DG_XR_REL_FRAME_HEAD;
-    if (arm_pos_cfg_same(&a, &b)) bad++;
-    b = a; b.frame = DG_XR_REL_FRAME_ROOM;
-    if (arm_pos_cfg_same(&a, &b)) bad++;
-    /* The re-zero knob carries no meaning beyond differing, so a change in
-       either direction has to count - including back to a value used before. */
-    b = a; b.hand_zero = 4;
-    if (arm_pos_cfg_same(&a, &b)) bad++;
-    b = a; b.hand_zero = 2;
-    if (arm_pos_cfg_same(&a, &b)) bad++;
-    b=a;b.left_arm=1;
-    if(arm_pos_cfg_same(&a,&b)) bad++;
-    b=a;b.twohand=1;
-    if(arm_pos_cfg_same(&a,&b)) bad++;
-
-    /* The defaults a player who never opens the marker actually runs on.
-       Spelled out rather than compared against the same constants the code
-       uses, because the point is to make a change to any of them a decision
-       somebody had to make twice. */
-    {
-        ARM_POS_CFG d;
-        arm_pos_cfg_defaults(&d);
-        if (d.sign[0] != -1.0 || d.sign[1] != 1.0 || d.sign[2] != 1.0) bad++;
-        if (d.shoulder_mm[0] != 180.0 || d.shoulder_mm[1] != 200.0 ||
-            d.shoulder_mm[2] != 40.0) bad++;
-        if (d.reach_mm != 600.0) bad++;
-        if (d.anchor != 1) bad++;
-        if (d.hand_zero != 0) bad++;
-        if (d.left_arm || d.twohand) bad++;
-        /* Not head, and not yaw either: both let some part of a head turn
-           reach the weapon, which a headset caught as a laser that moved when
-           the player did. */
-        if (d.frame != DG_XR_REL_FRAME_ROOM) bad++;
-    }
-
-    /* The two routes to a re-zero are one number, and each has to move it on
-       its own. This is the whole contract the controller button rests on. */
-    if (arm_hand_zero_total(0, 0) != arm_hand_zero_total(0, 0)) bad++;
-    if (arm_hand_zero_total(2, 5) == arm_hand_zero_total(2, 6)) bad++;
-    if (arm_hand_zero_total(2, 5) == arm_hand_zero_total(3, 5)) bad++;
-    /* A press seen once must keep counting: the total may not fall back when
-       the marker is re-read unchanged, or every poll would restart the
-       stream. */
-    if (arm_hand_zero_total(2, 5) != arm_hand_zero_total(2, 5)) bad++;
-
-    /* The gate on the button: only a rising edge with the trigger held is a
-       re-zero. Every other combination is the resting thumb. */
-    if (dg_xr_secondary_counts(0, 1, 1) != 1) bad++;
-    if (dg_xr_secondary_counts(0, 1, 0) != 0) bad++;   /* walking bump */
-    if (dg_xr_secondary_counts(1, 1, 1) != 0) bad++;   /* held, not an edge */
-    if (dg_xr_secondary_counts(0, 0, 1) != 0) bad++;   /* trigger alone */
-    if (dg_xr_secondary_counts(1, 0, 1) != 0) bad++;   /* release edge */
-
-    /* The button belongs to whichever arm is being driven. */
-    if (arm_tracked_xr_hand(ARM_TRACK_R_GRIP) != DG_XR_HAND_RIGHT) bad++;
-    if (arm_tracked_xr_hand(ARM_TRACK_R_AIM) != DG_XR_HAND_RIGHT) bad++;
-    if (arm_tracked_xr_hand(ARM_TRACK_L_GRIP) != DG_XR_HAND_LEFT) bad++;
-    if (arm_tracked_xr_hand(ARM_TRACK_L_AIM) != DG_XR_HAND_LEFT) bad++;
-
-    /* And the count has to come back from the hand it was pressed on. Both
-       hands are exercised because the two enums involved - the public
-       DG_XR_HAND_* and the runtime's own 0/1 - differ by one, which is the
-       kind of mismatch that reads correctly for one hand and silently zero for
-       the other. */
-    {
-        unsigned long l0 = dg_xr_secondary_presses(DG_XR_HAND_LEFT);
-        unsigned long r0 = dg_xr_secondary_presses(DG_XR_HAND_RIGHT);
-        dg_xr_test_press_secondary(DG_XR_HAND_RIGHT);
-        if (dg_xr_secondary_presses(DG_XR_HAND_RIGHT) != r0 + 1) bad++;
-        if (dg_xr_secondary_presses(DG_XR_HAND_LEFT) != l0) bad++;
-        dg_xr_test_press_secondary(DG_XR_HAND_LEFT);
-        dg_xr_test_press_secondary(DG_XR_HAND_LEFT);
-        if (dg_xr_secondary_presses(DG_XR_HAND_LEFT) != l0 + 2) bad++;
-        if (dg_xr_secondary_presses(DG_XR_HAND_RIGHT) != r0 + 1) bad++;
-        /* A hand value that is neither reads zero rather than indexing off
-           the end of the array. */
-        if (dg_xr_secondary_presses(0) != 0) bad++;
-        if (dg_xr_secondary_presses(99) != 0) bad++;
-    }
-
-    /* And applying a config has to leave the globals the mapping reads. */
-    {
-        double saved_sign[3], saved_shoulder[3], saved_reach = g_arm_reach_mm;
-        for (i = 0; i < 3; i++) {
-            saved_sign[i] = g_arm_pos_sign[i];
-            saved_shoulder[i] = g_arm_shoulder_mm[i];
-        }
-        int saved_frame2 = g_arm_frame;
-        b = a;
-        b.sign[2] = -1.0;
-        b.shoulder_mm[1] = 215.0;
-        b.reach_mm = 640.0;
-        b.frame = DG_XR_REL_FRAME_ROOM;
-        arm_pos_cfg_apply(&b);
-        if (g_arm_frame != DG_XR_REL_FRAME_ROOM) bad++;
-        g_arm_frame = saved_frame2;
-        for (i = 0; i < 3; i++) {
-            if (g_arm_pos_sign[i] != b.sign[i]) bad++;
-            if (g_arm_shoulder_mm[i] != b.shoulder_mm[i]) bad++;
-        }
-        if (g_arm_reach_mm != b.reach_mm) bad++;
-        for (i = 0; i < 3; i++) {
-            g_arm_pos_sign[i] = saved_sign[i];
-            g_arm_shoulder_mm[i] = saved_shoulder[i];
-        }
-        g_arm_reach_mm = saved_reach;
-    }
-
-    printf("  %-6s arm config: every field that moves the hand restarts the "
-           "stream, marker and controller button are one number, and applying "
-           "a config reaches the globals the map reads\n",
-           bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-/* Which part of the head's rotation survives into the arm target. Every claim
-   here is about a hand that does NOT move in the room while the head does,
-   because that is the situation the whole knob exists for: you keep your hand
-   still and look around for the arm. */
-
-/* The freeze must ride the stream id and the stream id must ride a recentre.
-   Both live in arm_pose_target, which needs a published XR frame - which the
-   desk build can supply. Both claims survived a mutation sweep purely because
-   nothing exercised this function, which is exactly the situation this test
-   exists to end. */
-static int test_auto_recenter(void) {
-    DG_AUTO_RECENTER s={0};int i,bad=0;
-    if(auto_recenter_step(&s,0,1,100,0))bad++;
-    if(auto_recenter_step(&s,1,1,100,0))bad++;
-    for(i=0;i<100;i++)if(auto_recenter_step(&s,1,1,100,(DWORD)i))bad++;
-    if(!auto_recenter_step(&s,1,1,100,100))bad++;
-    for(i=0;i<20;i++)if(auto_recenter_step(&s,1,1,100,101+i))bad++;
-    if(auto_recenter_step(&s,0,1,100,200) ||
-       auto_recenter_step(&s,1,1,100,300))bad++; /* tracking loss is not entry */
-    if(auto_recenter_step(&s,2,1,900,400))bad++; /* native third-person leave */
-    if(!auto_recenter_step(&s,2,1,900,500))bad++;
-    if(auto_recenter_step(&s,1,2,100,600))bad++; /* same actor, new entry */
-    if(auto_recenter_step(&s,0,2,100,650))bad++; /* interrupt settling */
-    if(auto_recenter_step(&s,1,2,100,700) || auto_recenter_step(&s,1,2,100,799))bad++;
-    if(!auto_recenter_step(&s,1,2,100,800))bad++;
-    if(auto_recenter_step(&s,1,2,200,900))bad++; /* new level */
-    if(!auto_recenter_step(&s,1,2,200,1000))bad++;
-    memset(&s,0,sizeof s);
-    if(auto_recenter_step(&s,1,1,100,0xfffffff0u))bad++;
-    if(!auto_recenter_step(&s,1,1,100,84))bad++; /* DWORD wrap */
-    printf("  %s auto calibration: settled FPS/third transitions once, tracking interruption, level and clock wrap\n",bad?"FAIL":"ok");
-    return bad;
-}
-
-static int test_arm_frame_freeze_rides_the_stream(void) {
-    DG_XR_FRAME f;
-    DG_BRIDGE_ARM_TARGET t;
-    double saved_q[4];
-    long saved_freezes = g_arm_frame_freezes;
-    int saved_have = g_arm_frame_have;
-    int saved_track = g_arm_track;
-    unsigned long stream_before;
-    long f0;
-    int bad = 0, k;
-
-    for (k = 0; k < 4; k++) saved_q[k] = g_arm_frame_q[k];
-
-    memset(&f, 0, sizeof f);
-    f.head_raw.qy = sin(0.2); f.head_raw.qw = cos(0.2);
-    f.head_raw.px = 0.5; f.head_raw.py = 1.6; f.head_raw.pz = -1.0;
-    f.right_hand.hand = DG_XR_HAND_RIGHT;
-    f.right_hand.grip.hand = DG_XR_HAND_RIGHT;
-    f.right_hand.grip.kind = DG_XR_POSE_GRIP;
-    f.right_hand.grip.active = 1;
-    f.right_hand.grip.tracked = 1;
-    f.right_hand.grip.position_valid = 1;
-    f.right_hand.grip.orientation_valid = 1;
-    f.right_hand.grip.raw_local.qw = 1.0;
-    f.right_hand.grip.raw_local.px = 0.7;
-    f.right_hand.grip.raw_local.py = 1.2;
-    f.right_hand.grip.raw_local.pz = -1.4;
-    dg_xr_test_publish(&f);
-
-    g_arm_track = ARM_TRACK_R_GRIP;
-    g_arm_frame_have = 0;
-
-    /* First frame of a stream freezes. The SAME stream never re-freezes, no
-       matter how many frames pass - that is what makes it a frame and not a
-       smoothed follow. */
-    f0 = g_arm_frame_freezes;
-    if (!arm_pose_target(&t)) bad++;
-    if (g_arm_frame_freezes != f0 + 1) bad++;
-    if (!arm_pose_target(&t) || !arm_pose_target(&t)) bad++;
-    if (g_arm_frame_freezes != f0 + 1) bad++;
-
-    /* A new stream re-freezes: this is every route into a restart - marker
-       edit, B press - seen from here. */
-    g_arm_pose_stream_id++;
-    if (!arm_pose_target(&t)) bad++;
-    if (g_arm_frame_freezes != f0 + 2) bad++;
-
-    /* And a recentre IS a restart: the count moves, the stream follows, the
-       freeze follows the stream. */
-    stream_before = g_arm_pose_stream_id;
-    dg_xr_test_recenter();
-    if (!arm_pose_target(&t)) bad++;
-    if (g_arm_pose_stream_id == stream_before) bad++;
-    if (g_arm_frame_freezes != f0 + 3) bad++;
-
-    g_arm_track = saved_track;
-    dg_pose_init(&g_arm_pose_state, NULL);
-    for (k = 0; k < 4; k++) g_arm_frame_q[k] = saved_q[k];
-    g_arm_frame_have = saved_have;
-    g_arm_frame_freezes = saved_freezes;
-
-    printf("  %-6s arm frame freeze: one freeze per stream, a new stream "
-           "re-freezes, and a recentre starts a new stream\n",
-           bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-/* The flight recorder's acceptance bar, stated as a test: a session captured
-   through the SAME call the camera seam uses, written to a file, read back
-   and fed through arm_pose_target again produces BIT-identical targets. That
-   is what makes a .dgrec file evidence rather than an approximation. It is
-   also the completeness check for the record layout: any input
-   arm_pose_target consumes that the record does not carry - a flag, a seq, a
-   dt, the stream identity - shows up here as a mismatch, not as a desk
-   replay that quietly disagrees with the headset. */
-static int test_flight_recorder_replays_bit_identical(void) {
-    enum { N = 24 };
-    static DG_BRIDGE_ARM_TARGET live[N];
-    static int live_got[N];
-    static DG_REC_RING ring;        /* 7.6 MB - static, like the hook's own */
-    DG_XR_FRAME f;
-    DG_REC_FRAME r;
-    FILE *file = NULL;
-    long count = 0, freezes_live, freezes_replay;
-    long long qpf = 0;
-    int saved_track = g_arm_track;
-    double saved_dt = g_test_dt_override;
-    unsigned long saved_stream = g_arm_pose_stream_id;
-    unsigned long saved_pair = g_arm_pose_pair_id;
-    long saved_freezes = g_arm_frame_freezes;
-    int saved_have = g_arm_frame_have;
-    LONG saved_stereo = InterlockedCompareExchange(&g_stereo, 0, 0);
-    LONG saved_present = InterlockedCompareExchange(&g_present_frame, 0, 0);
-    double saved_q[4];
-    int i, k, bad = 0;
-
-    for (k = 0; k < 4; k++) saved_q[k] = g_arm_frame_q[k];
-
-    g_arm_track = ARM_TRACK_R_GRIP;
-    g_test_dt_override = 1.0 / 90.0;
-    InterlockedExchange(&g_stereo, 0);
-    dg_rec_reset(&ring);
-    dg_pose_init(&g_arm_pose_state, NULL);
-    g_arm_frame_have = 0;
-    g_arm_pose_stream_id = 100;
-    g_arm_pose_pair_id = 0;
-    freezes_live = g_arm_frame_freezes;
-
-    /* Live pass: a head that turns, a hand that moves and rotates, and one
-       "B press" (stream bump) half-way - the restart every replay must land
-       on the same frame. Every frame is distinct, so the dedupe must record
-       all of them. */
-    for (i = 0; i < N; i++) {
-        double a = 0.05 * (double)i;
-        memset(&f, 0, sizeof f);
-        f.head_raw.qy = sin(a * 0.5); f.head_raw.qw = cos(a * 0.5);
-        f.head_raw.px = 0.02 * i; f.head_raw.py = 1.60; f.head_raw.pz = -1.0;
-        f.right_hand.hand = DG_XR_HAND_RIGHT;
-        f.right_hand.grip.hand = DG_XR_HAND_RIGHT;
-        f.right_hand.grip.kind = DG_XR_POSE_GRIP;
-        f.right_hand.grip.active = 1;
-        f.right_hand.grip.tracked = 1;
-        f.right_hand.grip.position_valid = 1;
-        f.right_hand.grip.orientation_valid = 1;
-        f.right_hand.grip.raw_local.qx = sin(a * 0.3);
-        f.right_hand.grip.raw_local.qw = cos(a * 0.3);
-        f.right_hand.grip.raw_local.px = 0.30 + 0.01 * i;
-        f.right_hand.grip.raw_local.py = 1.20 - 0.005 * i;
-        f.right_hand.grip.raw_local.pz = -0.40 - 0.01 * i;
-        f.right_hand.grip.sample_seq = 1000 + (unsigned long long)i;
-        if (i == N / 2) g_arm_pose_stream_id++;
-        dg_xr_test_publish(&f);
-        InterlockedExchange(&g_present_frame, (LONG)i);
-        dg_rec_pack(&f, (long long)i * 111111,
-                    (unsigned int)g_arm_pose_stream_id,
-                    (unsigned int)g_arm_pose_pair_id, (unsigned int)i, 0, &r);
-        if (dg_rec_capture(&ring, &r) != 1) bad++;
-        memset(&live[i], 0, sizeof live[i]);
-        live_got[i] = arm_pose_target(&live[i]);
-    }
-    freezes_live = g_arm_frame_freezes - freezes_live;
-
-    /* The game-side half is INPUT, not identity: a byte-identical
-       controller over a moved animation base must record, because an
-       animation moving beneath a still hand is precisely the evidence
-       this recorder exists to keep. Captured and then rolled back so the
-       replay below still faces exactly N frames. */
-    {
-        DG_REC_FRAME q = r;
-        long appended_was = ring.appended, dup_was = ring.dup;
-        if (dg_rec_capture(&ring, &q) != 0) bad++;      /* pure duplicate */
-        if (ring.dup != dup_was + 1) bad++;
-        q.pair.base_now[0] = 0.5;
-        q.pair.flags = DG_REC_PAIR_F_BASE;
-        if (dg_rec_capture(&ring, &q) != 1) bad++;      /* base moved */
-        if (ring.appended != appended_was + 1) bad++;
-        ring.appended = appended_was;
-        ring.last = r;
-    }
-
-    if (fopen_s(&file, "dg_rec_f3.tmp", "wb") != 0 || !file) bad++;
-    else {
-        if (dg_rec_write(&ring, 9999937, file, NULL) != N) bad++;
-        fclose(file);
-    }
-
-    /* Layout compatibility (DGREC3): a v2 file (pair block without
-       rest_drift_deg) and a v1 file (no pair block) both come back through
-       the same door with the drift at its absence value and every other
-       byte intact, and a current file carries a real drift through
-       untouched. The old-flavour files are fabricated from this run's own
-       records, byte for byte, so the comparison is against ground truth. */
-    {
-        FILE *cf;
-        static DG_REC_FRAME orig[4];
-        DG_REC_FRAME got;
-        long cnt;
-        long long qq;
-        int compat, j, nkeep = 0;
-        if (fopen_s(&cf, "dg_rec_f3.tmp", "rb") == 0 && cf) {
-            if (!dg_rec_read_open(cf, &cnt, &qq, &compat) ||
-                compat != DG_REC_COMPAT_NONE || cnt != N) bad++;
-            while (nkeep < 4 && dg_rec_read_next(cf, compat, &orig[nkeep]))
-                nkeep++;
-            fclose(cf);
-        } else bad++;
-        if (nkeep < 2) bad++;
-        if (fopen_s(&cf, "dg_rec_f3v2.tmp", "wb") == 0 && cf) {
-            fprintf(cf, "%s\nrecord_bytes=%u\nqpf=%lld\ncount_hint=%d\nend\n",
-                    DG_REC_MAGIC_V2, (unsigned int)DG_REC_V2_BYTES,
-                    (long long)9999937, nkeep);
-            for (j = 0; j < nkeep; j++) {
-                fwrite(&orig[j], DG_REC_V1_PREFIX, 1, cf);
-                fwrite(&orig[j].pair, DG_REC_V2_PAIR_BYTES, 1, cf);
-                fwrite(&orig[j].present_frame, 4 * sizeof(unsigned int), 1,
-                       cf);
-            }
-            fclose(cf);
-        } else bad++;
-        if (fopen_s(&cf, "dg_rec_f3v2.tmp", "rb") == 0 && cf) {
-            if (!dg_rec_read_open(cf, &cnt, &qq, &compat) ||
-                compat != DG_REC_COMPAT_V2 || cnt != nkeep) bad++;
-            for (j = 0; j < nkeep; j++) {
-                memset(&got, 0xAA, sizeof got);
-                if (!dg_rec_read_next(cf, compat, &got)) { bad++; break; }
-                if (got.pair.rest_drift_deg != -1.0f ||
-                    got.pair.frame_word != 0) bad++;
-                if (memcmp(&got, &orig[j], DG_REC_V1_PREFIX) ||
-                    memcmp(&got.pair, &orig[j].pair,
-                           DG_REC_V2_PAIR_BYTES) ||
-                    got.present_frame != orig[j].present_frame ||
-                    got.pair_id != orig[j].pair_id) bad++;
-            }
-            fclose(cf);
-        } else bad++;
-        remove("dg_rec_f3v2.tmp");
-        if (fopen_s(&cf, "dg_rec_f3v1.tmp", "wb") == 0 && cf) {
-            fprintf(cf, "%s\nrecord_bytes=%u\nqpf=%lld\ncount_hint=%d\nend\n",
-                    DG_REC_MAGIC_V1, (unsigned int)DG_REC_V1_BYTES,
-                    (long long)9999937, 1);
-            fwrite(&orig[0], DG_REC_V1_PREFIX, 1, cf);
-            fwrite(&orig[0].present_frame, 4 * sizeof(unsigned int), 1, cf);
-            fclose(cf);
-        } else bad++;
-        if (fopen_s(&cf, "dg_rec_f3v1.tmp", "rb") == 0 && cf) {
-            if (!dg_rec_read_open(cf, &cnt, &qq, &compat) ||
-                compat != DG_REC_COMPAT_V1 || cnt != 1) bad++;
-            memset(&got, 0xAA, sizeof got);
-            if (!dg_rec_read_next(cf, compat, &got)) bad++;
-            else {
-                const unsigned char *pb =
-                    (const unsigned char *)&got.pair;
-                int allz = 1;
-                for (j = 0; j < (int)DG_REC_V2_PAIR_BYTES; j++)
-                    if (pb[j]) { allz = 0; break; }
-                if (!allz || got.pair.rest_drift_deg != -1.0f) bad++;
-                if (memcmp(&got, &orig[0], DG_REC_V1_PREFIX)) bad++;
-            }
-            fclose(cf);
-        } else bad++;
-        remove("dg_rec_f3v1.tmp");
-        {
-            DG_REC_FRAME q = r;
-            long appended_was = ring.appended;
-            DG_REC_FRAME keep_last = ring.last;
-            q.pair.rest_drift_deg = 12.5f;
-            if (dg_rec_capture(&ring, &q) != 1) bad++;
-            if (fopen_s(&cf, "dg_rec_f3v3.tmp", "wb") == 0 && cf) {
-                if (dg_rec_write(&ring, 9999937, cf, NULL) < 1) bad++;
-                fclose(cf);
-            } else bad++;
-            if (fopen_s(&cf, "dg_rec_f3v3.tmp", "rb") == 0 && cf) {
-                long c2;
-                int cp2;
-                if (!dg_rec_read_open(cf, &c2, &qq, &cp2) ||
-                    cp2 != DG_REC_COMPAT_NONE) bad++;
-                got.pair.rest_drift_deg = 0.0f;
-                for (j = 0; j < c2; j++)
-                    if (!dg_rec_read_next(cf, cp2, &got)) { bad++; break; }
-                if (got.pair.rest_drift_deg != 12.5f) bad++;
-                fclose(cf);
-            } else bad++;
-            remove("dg_rec_f3v3.tmp");
-            ring.appended = appended_was;
-            ring.last = keep_last;
-        }
-    }
-
-    /* Replay pass: fresh pipeline state, identical config, every input from
-       the FILE. Stream identity comes from the record, which is what makes
-       the mid-session restart land on the same frame it did live. */
-    dg_pose_init(&g_arm_pose_state, NULL);
-    g_arm_frame_have = 0;
-    g_arm_pose_pair_id = 0;
-    freezes_replay = g_arm_frame_freezes;
-
-    file = NULL;
-    if (fopen_s(&file, "dg_rec_f3.tmp", "rb") != 0 || !file) bad++;
-    else {
-        int v1 = 1;
-        if (!dg_rec_read_open(file, &count, &qpf, &v1) || count != N ||
-            qpf != 9999937 || v1 != 0) bad++;
-        for (i = 0; i < N && dg_rec_read_next(file, 0, &r); i++) {
-            DG_XR_FRAME rf;
-            DG_BRIDGE_ARM_TARGET t;
-            int got;
-            dg_rec_unpack(&r, &rf);
-            dg_xr_test_publish(&rf);
-            g_arm_pose_stream_id = r.stream_id;
-            InterlockedExchange(&g_present_frame, (LONG)r.present_frame);
-            memset(&t, 0, sizeof t);
-            got = arm_pose_target(&t);
-            if (got != live_got[i]) bad++;
-            else if (memcmp(&t, &live[i], sizeof t) != 0) bad++;
-        }
-        if (i != N) bad++;
-        fclose(file);
-    }
-    remove("dg_rec_f3.tmp");
-    freezes_replay = g_arm_frame_freezes - freezes_replay;
-    if (freezes_live != 2 || freezes_replay != 2) bad++;
-
-    g_arm_track = saved_track;
-    g_test_dt_override = saved_dt;
-    g_arm_pose_stream_id = saved_stream;
-    g_arm_pose_pair_id = saved_pair;
-    g_arm_frame_freezes = saved_freezes;
-    g_arm_frame_have = saved_have;
-    for (k = 0; k < 4; k++) g_arm_frame_q[k] = saved_q[k];
-    InterlockedExchange(&g_stereo, saved_stereo);
-    InterlockedExchange(&g_present_frame, saved_present);
-    dg_pose_init(&g_arm_pose_state, NULL);
-
-    printf("  %-6s flight recorder: %d distinct frames captured at the seam's "
-           "own call, dumped, reloaded, and replayed through arm_pose_target "
-           "bit-identically, restart and all\n", bad ? "FAIL" : "ok", N);
-    return bad ? 1 : 0;
-}
-
-/* The live snapshot's two halves, held at the desk. The cadence gate: a
-   snapshot only when the recorder is on, the ring moved, and a minute
-   passed - and only a taken snapshot advances the baseline. The atomic
-   writer: success replaces the previous file whole, failure leaves it
-   byte-for-byte alone - the property that lets a killed game process cost
-   at most the last minute of input rather than the recording. */
-static int test_rec_live_snapshot_machinery(void)
-{
-    static const char *live = "dg_rec_snaptest.dgrec";
-    static const char *tmpdir = "dg_rec_snaptest.dgrec.tmp";
-    DG_REC_FRAME fr;
-    long snap_app = 0;
-    int snap_el = 0;
-    long count = 0;
-    long long qpf = 0;
-    FILE *f = NULL;
-    int i, bad = 0;
-
-    /* A previous run - typically a mutation sweep's - may have left either
-       scratch name behind in either form; the test owns these names, so it
-       clears them before measuring anything. */
-    remove(live);
-    RemoveDirectoryA(live);
-    remove(tmpdir);
-    RemoveDirectoryA(tmpdir);
-
-    /* The gate's truth table. */
-    if (rec_snapshot_due(1, 10, 60, &snap_app, &snap_el) != 1) bad++;
-    if (snap_app != 10 || snap_el != 60) bad++;
-    if (rec_snapshot_due(1, 20, 61, &snap_app, &snap_el) != 0) bad++;
-    if (rec_snapshot_due(0, 30, 200, &snap_app, &snap_el) != 0) bad++;
-    if (rec_snapshot_due(1, 20, 200, &snap_app, &snap_el) != 1) bad++;
-    if (rec_snapshot_due(1, 20, 400, &snap_app, &snap_el) != 0) bad++;
-    if (snap_app != 20 || snap_el != 200) bad++;
-
-    /* Two successive snapshots each replace the file whole; the .tmp never
-       survives a success. */
-    dg_rec_reset(&g_rec);
-    for (i = 0; i < 3; i++) {
-        memset(&fr, 0, sizeof fr);
-        fr.head[0] = 0.25 * (double)(i + 1);
-        fr.pair_id = (unsigned int)i;
-        if (dg_rec_capture(&g_rec, &fr) != 1) bad++;
-    }
-    if (rec_write_atomic(live, NULL) != 3) bad++;
-    memset(&fr, 0, sizeof fr);
-    fr.head[0] = 9.0;
-    if (dg_rec_capture(&g_rec, &fr) != 1) bad++;
-    if (rec_write_atomic(live, NULL) != 4) bad++;
-    if (fopen_s(&f, tmpdir, "rb") == 0) { fclose(f); bad++; }
-    if (fopen_s(&f, live, "rb") != 0 || !f) {
-        bad++;
-    } else {
-        if (!dg_rec_read_open(f, &count, &qpf, NULL) || count != 4) bad++;
-        fclose(f);
-    }
-
-    /* Failure leaves the previous file alone. The .tmp path is made
-       impossible (a directory bearing that name), so the write cannot even
-       start - and the file from the previous snapshot must still read back
-       exactly as it was. */
-    if (!CreateDirectoryA(tmpdir, NULL)) bad++;
-    memset(&fr, 0, sizeof fr);
-    fr.head[0] = 17.0;
-    if (dg_rec_capture(&g_rec, &fr) != 1) bad++;
-    if (rec_write_atomic(live, NULL) != -1) bad++;
-    if (fopen_s(&f, live, "rb") != 0 || !f) {
-        bad++;
-    } else {
-        if (!dg_rec_read_open(f, &count, &qpf, NULL) || count != 4) bad++;
-        fclose(f);
-    }
-    RemoveDirectoryA(tmpdir);
-    remove(live);
-    dg_rec_reset(&g_rec);
-
-    printf("  %-6s rec live snapshot: the gate fires once a minute only on a"
-           " moving ring, a snapshot atomically replaces the previous file,"
-           " and a failed one leaves it byte-for-byte alone\n",
-           bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-static int test_arm_frame_modes(void) {
-    DG_XR_RAW_POSE head, pitched, yawed, rolled, hand;
-    DG_XR_REL_POSE rel;
-    DG_XR_CONFIG cfg;
-    double base[3], moved[3];
-    double saved_q[4];
-    int saved_have, k;
-    long saved_freezes;
-    int bad = 0, saved_frame = g_arm_frame;
-
-    for (k = 0; k < 4; k++) saved_q[k] = g_arm_frame_q[k];
-    saved_have = g_arm_frame_have;
-    saved_freezes = g_arm_frame_freezes;
-
-    memset(&cfg, 0, sizeof cfg);
-    cfg.scale = 1000.0;
-    cfg.x_sign = cfg.y_sign = cfg.z_sign = 1.0;
-    cfg.yaw_sign = cfg.pitch_sign = cfg.roll_sign = 1.0;
-
-    /* One head position, four orientations, and a hand nailed to a fixed point
-       in the room the whole time. */
-    memset(&head, 0, sizeof head);
-    head.qw = 1.0;
-    head.px = 0.4; head.py = 1.55; head.pz = -1.2;
-    pitched = yawed = rolled = head;
-    pitched.qx = sin(0.35); pitched.qw = cos(0.35);   /* 40 deg up   */
-    yawed.qy   = sin(0.30); yawed.qw   = cos(0.30);   /* 34 deg left */
-    rolled.qz  = sin(0.20); rolled.qw  = cos(0.20);
-    memset(&hand, 0, sizeof hand);
-    hand.qw = 1.0;
-    hand.px = 0.58; hand.py = 1.25; hand.pz = -1.55;
-
-    /* ROOM before anything has been frozen is deliberately not an
-       unreferenced frame: it behaves as YAW, so a head yaw still carries the
-       arm. Asserted before the first freeze, because "falls back" is a claim
-       and not a comment. */
-    g_arm_frame = DG_XR_REL_FRAME_ROOM;
-    g_arm_frame_have = 0;
-    arm_hand_to_view(&head, &hand, &cfg, &rel, base);
-    arm_hand_to_view(&yawed, &hand, &cfg, &rel, moved);
-    {
-        double d = 0.0;
-        for (k = 0; k < 3; k++) d += (moved[k] - base[k]) * (moved[k] - base[k]);
-        if (sqrt(d) < 100.0) bad++;
-    }
-
-    /* ROOM with a frozen heading: no part of the head's rotation reaches the
-       arm, yaw included. That is the whole point of the mode. The freeze is
-       taken from a PITCHED-AND-YAWED head on purpose: only its heading may
-       survive into the frame, or looking down while pressing B would bake the
-       downward look into every arm target of the stream. */
-    {
-        DG_XR_RAW_POSE fh;
-        memset(&fh, 0, sizeof fh);
-        /* yaw 0.30 composed with pitch 0.50 - built by hand so the only thing
-           this head is clean about is nothing at all. */
-        fh.qx = cos(0.15) * sin(0.25);
-        fh.qy = sin(0.15) * cos(0.25);
-        fh.qz = -sin(0.15) * sin(0.25);
-        fh.qw = cos(0.15) * cos(0.25);
-        fh.px = 9.0; fh.py = 1.2; fh.pz = -3.3;
-        arm_frame_freeze(&fh);
-        if (!g_arm_frame_have) bad++;
-        if (fabs(g_arm_frame_q[0]) > 1e-12 ||
-            fabs(g_arm_frame_q[2]) > 1e-12) bad++;
-    }
-    arm_hand_to_view(&head, &hand, &cfg, &rel, base);
-    {
-        const DG_XR_RAW_POSE *turned[3];
-        int t;
-        turned[0] = &pitched; turned[1] = &yawed; turned[2] = &rolled;
-        for (t = 0; t < 3; t++) {
-            arm_hand_to_view(turned[t], &hand, &cfg, &rel, moved);
-            for (k = 0; k < 3; k++)
-                if (fabs(moved[k] - base[k]) > 1e-9) bad++;
-        }
-    }
-    /* And the frozen heading is what it uses, not the identity: freezing a
-       different forward puts the same hand somewhere else in the character's
-       body. This is the property that makes B-while-facing-forward the fix for
-       an arm that came up rotated. */
-    {
-        DG_XR_RAW_POSE fh2;
-        double other[3];
-        double d = 0.0;
-        double q_keep[4];
-        int j;
-        for (j = 0; j < 4; j++) q_keep[j] = g_arm_frame_q[j];
-        memset(&fh2, 0, sizeof fh2);
-        fh2.qy = sin(-0.225); fh2.qw = cos(-0.225);   /* yaw -0.45 rad */
-        arm_frame_freeze(&fh2);
-        arm_hand_to_view(&head, &hand, &cfg, &rel, other);
-        for (k = 0; k < 3; k++) d += (other[k] - base[k]) * (other[k] - base[k]);
-        if (sqrt(d) < 100.0) bad++;
-        for (j = 0; j < 4; j++) g_arm_frame_q[j] = q_keep[j];
-    }
-
-    /* And a hand that DOES move still moves the target, or the mode would be
-       passing by ignoring its input. */
-    {
-        DG_XR_RAW_POSE shifted = hand;
-        shifted.px += 0.12;
-        arm_hand_to_view(&head, &shifted, &cfg, &rel, moved);
-        if (fabs(moved[0] - base[0]) < 100.0) bad++;
-    }
-
-    /* YAW: pitch and roll are gone, yaw is not. */
-    g_arm_frame = DG_XR_REL_FRAME_YAW;
-    arm_hand_to_view(&head, &hand, &cfg, &rel, base);
-    arm_hand_to_view(&pitched, &hand, &cfg, &rel, moved);
-    for (k = 0; k < 3; k++)
-        if (fabs(moved[k] - base[k]) > 1e-9) bad++;
-    arm_hand_to_view(&rolled, &hand, &cfg, &rel, moved);
-    for (k = 0; k < 3; k++)
-        if (fabs(moved[k] - base[k]) > 1e-9) bad++;
-    arm_hand_to_view(&yawed, &hand, &cfg, &rel, moved);
-    {
-        double d = 0.0;
-        for (k = 0; k < 3; k++) d += (moved[k] - base[k]) * (moved[k] - base[k]);
-        if (sqrt(d) < 100.0) bad++;             /* tens of millimetres is not it */
-    }
-
-    /* HEAD: every part of it reaches the arm, which is the defect this knob
-       was added to name. The hand has not moved in any of these. */
-    g_arm_frame = DG_XR_REL_FRAME_HEAD;
-    arm_hand_to_view(&head, &hand, &cfg, &rel, base);
-    {
-        const DG_XR_RAW_POSE *turned[3];
-        int t;
-        turned[0] = &pitched; turned[1] = &yawed; turned[2] = &rolled;
-        for (t = 0; t < 3; t++) {
-            double d = 0.0;
-            arm_hand_to_view(turned[t], &hand, &cfg, &rel, moved);
-            for (k = 0; k < 3; k++)
-                d += (moved[k] - base[k]) * (moved[k] - base[k]);
-            if (sqrt(d) < 100.0) bad++;
-        }
-    }
-
-    /* All three keep the head's TRANSLATION out, in every mode: a lean that
-       carries head and hand together may never look like an arm movement. */
-    {
-        int m;
-        for (m = 0; m < 3; m++) {
-            DG_XR_RAW_POSE lh = head, lhand = hand;
-            g_arm_frame = m;
-            arm_hand_to_view(&head, &hand, &cfg, &rel, base);
-            lh.px += 0.3; lh.py -= 0.15; lh.pz += 0.45;
-            lhand.px += 0.3; lhand.py -= 0.15; lhand.pz += 0.45;
-            arm_hand_to_view(&lh, &lhand, &cfg, &rel, moved);
-            for (k = 0; k < 3; k++)
-                if (fabs(moved[k] - base[k]) > 1e-9) bad++;
-        }
-    }
-
-    /* The yaw extraction itself. A pure yaw survives whole, a pure pitch or
-       roll leaves nothing, and an undefined twist is the identity rather than
-       an invented rotation. */
-    {
-        double q[4], y[4];
-        q[0] = 0.0; q[1] = sin(0.3); q[2] = 0.0; q[3] = cos(0.3);
-        dg_xr_quat_yaw_only(q, y);
-        for (k = 0; k < 4; k++) if (fabs(y[k] - q[k]) > 1e-12) bad++;
-
-        q[0] = sin(0.3); q[1] = 0.0; q[2] = 0.0; q[3] = cos(0.3);
-        dg_xr_quat_yaw_only(q, y);
-        if (fabs(y[0]) > 1e-12 || fabs(y[1]) > 1e-12 ||
-            fabs(y[2]) > 1e-12 || fabs(y[3] - 1.0) > 1e-12) bad++;
-
-        q[0] = 0.0; q[1] = 0.0; q[2] = sin(0.3); q[3] = cos(0.3);
-        dg_xr_quat_yaw_only(q, y);
-        if (fabs(y[3] - 1.0) > 1e-12) bad++;
-
-        /* Half a turn about X: the twist about Y has no value at all. */
-        q[0] = 1.0; q[1] = 0.0; q[2] = 0.0; q[3] = 0.0;
-        dg_xr_quat_yaw_only(q, y);
-        if (fabs(y[0]) > 1e-12 || fabs(y[1]) > 1e-12 ||
-            fabs(y[2]) > 1e-12 || fabs(y[3] - 1.0) > 1e-12) bad++;
-
-        /* Whatever comes out is a unit quaternion about +Y and nothing else. */
-        q[0] = 0.11; q[1] = 0.42; q[2] = -0.23; q[3] = 0.87;
-        dg_xr_quat_yaw_only(q, y);
-        if (fabs(y[0]) > 1e-12 || fabs(y[2]) > 1e-12) bad++;
-        if (fabs(y[1]*y[1] + y[3]*y[3] - 1.0) > 1e-12) bad++;
-    }
-
-    g_arm_frame = saved_frame;
-    for (k = 0; k < 4; k++) g_arm_frame_q[k] = saved_q[k];
-    g_arm_frame_have = saved_have;
-    g_arm_frame_freezes = saved_freezes;
-    printf("  %-6s arm frame: a hand held still while the head turns moves the "
-           "target in head mode, only on yaw in yaw mode, and never in room "
-           "mode; a lean moves it in none of them; the freeze keeps only the "
-           "heading\n", bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-static int test_arm_position_view_map(void) {
-    DG_XR_RAW_POSE head, hand, moved_head, moved_hand, turned_head, turned_hand;
-    DG_XR_REL_POSE wanted, recovered, moved_relative;
-    DG_XR_CONFIG cfg;
-    double out[3], moved[3];
-    double saved_sign[3], saved_shoulder[3];
-    int saved_frame = g_arm_frame;
-    int bad = 0, i;
-
-    /* Everything below is a claim about the HEAD frame - it is where the
-       correction, the signs and the shoulder constant were all worked out, and
-       "invariant under a common room rotation" is only true there. The default
-       is no longer head, so the mode is stated rather than inherited. */
-    g_arm_frame = DG_XR_REL_FRAME_HEAD;
-
-    /* The arm's own signs are a global that the marker steers, so this test
-       states the ones it is asserting against instead of inheriting today's
-       measured default. Restored at the end: a desk test that leaves a global
-       changed is a bug in whichever test happens to run next. */
-    for (i = 0; i < 3; i++) {
-        saved_sign[i] = g_arm_pos_sign[i];
-        saved_shoulder[i] = g_arm_shoulder_mm[i];
-        g_arm_pos_sign[i] = 1.0;
-    }
-
-    memset(&head, 0, sizeof head);
-    memset(&hand, 0, sizeof hand);
-    memset(&wanted, 0, sizeof wanted);
-    memset(&cfg, 0, sizeof cfg);
-    head.qy = sin(0.25); head.qw = cos(0.25);
-    head.px = 1.0; head.py = 1.6; head.pz = -2.0;
-    wanted.qy = sin(0.15); wanted.qw = cos(0.15);
-    wanted.px = 0.1; wanted.py = -0.2; wanted.pz = 0.3;
-    dg_xr_pose_from_relative(&head, &wanted, &hand);
-    cfg.scale = 1000.0;
-    cfg.x_sign = -1.0; cfg.y_sign = 1.0; cfg.z_sign = -1.0;
-    /* Explicit now that they are read: everything below this point is the
-       no-correction case, and it has to stay bit-identical to what it was
-       before the correction existed. */
-    cfg.yaw_sign = cfg.pitch_sign = cfg.roll_sign = 1.0;
-    arm_hand_to_view(&head, &hand, &cfg, &recovered, out);
-    if (fabs(out[0] + 100.0) > 1e-9 ||
-        fabs(out[1] + 200.0) > 1e-9 ||
-        fabs(out[2] - 300.0) > 1e-9) bad++;
-
-    /* A room-space translation common to head and hand must disappear. This
-       is the regression the recenter-relative path could not satisfy. */
-    moved_head = head;
-    moved_hand = hand;
-    moved_head.px += 7.0; moved_head.py -= 3.0; moved_head.pz += 11.0;
-    moved_hand.px += 7.0; moved_hand.py -= 3.0; moved_hand.pz += 11.0;
-    arm_hand_to_view(&moved_head, &moved_hand, &cfg, &moved_relative, moved);
-    for (i = 0; i < 3; i++)
-        if (fabs(moved[i] - out[i]) > 1e-9) bad++;
-    if (fabs(moved_relative.qy - recovered.qy) > 1e-12 ||
-        fabs(moved_relative.qw - recovered.qw) > 1e-12) bad++;
-
-    /* A different common head orientation is removed too: position and hand
-       orientation arrive from the same live-head-relative record. */
-    memset(&turned_head, 0, sizeof turned_head);
-    turned_head.qx = sin(-0.35); turned_head.qw = cos(-0.35);
-    turned_head.px = -4.0; turned_head.py = 2.1; turned_head.pz = 8.0;
-    dg_xr_pose_from_relative(&turned_head, &wanted, &turned_hand);
-    arm_hand_to_view(&turned_head, &turned_hand, &cfg, &moved_relative, moved);
-    for (i = 0; i < 3; i++)
-        if (fabs(moved[i] - out[i]) > 1e-9) bad++;
-    if (fabs(moved_relative.qy - wanted.qy) > 1e-12 ||
-        fabs(moved_relative.qw - wanted.qw) > 1e-12) bad++;
-
-    /* And the frame correction, which exists because the marker's rotation
-       signs are applied to the camera and to nothing else. Without it a
-       controller vector is expressed in the head's frame while the arm that
-       consumes it hangs off the camera's, and with xr_pitch_sign=-1 those two
-       are twice the pitch angle apart - which is a hand behind the head that
-       cannot be found by looking for it. */
-    {
-        DG_XR_CONFIG flipped;
-        DG_XR_RAW_POSE ph, phh;
-        DG_XR_REL_POSE rel;
-        DG_XR_POSE plain_pose;
-        double plain_out[3], flip_out[3], want[3];
-        double ang = 28.0 * DEG2RAD, p2;
-        double rx[3][3];
-        int k;
-
-        flipped = cfg;
-        flipped.pitch_sign = -1.0;
-
-        /* A level head first: with no pitch there is nothing to disagree
-           about, so the correction must come out as the identity. It is
-           computed rather than special-cased, so this is a rounding tolerance
-           and not bit-equality - a micron on a vector of hundreds of
-           millimetres. The bit-identical claim belongs to the no-negative-sign
-           path, which returns before computing anything at all, and which the
-           checks above this block exercise. */
-        arm_hand_to_view(&head, &hand, &cfg, &rel, plain_out);
-        arm_hand_to_view(&head, &hand, &flipped, &rel, flip_out);
-        for (k = 0; k < 3; k++)
-            if (fabs(plain_out[k] - flip_out[k]) > 1e-9) bad++;
-
-        /* Now pitch the head, with the hand carried rigidly with it so the
-           head-frame offset is unchanged. The correction must move the result
-           by exactly twice the pitch the camera was given, about X - that is
-           the whole claim, stated as an angle rather than as a formula. */
-        memset(&ph, 0, sizeof ph);
-        ph.qx = sin(ang * 0.5); ph.qw = cos(ang * 0.5);
-        ph.px = 0.3; ph.py = 1.7; ph.pz = -1.1;
-        dg_xr_pose_from_relative(&ph, &wanted, &phh);
-
-        arm_hand_to_view(&ph, &phh, &cfg, &rel, plain_out);
-        arm_hand_to_view(&ph, &phh, &flipped, &rel, flip_out);
-
-        /* The pitch the conversion actually reports, so this checks the
-           correction and not the extraction. */
-        {
-            DG_XR_CONFIG probe = cfg;
-            probe.positional = 0;
-            dg_xr_head_to_pose(ph.qx, ph.qy, ph.qz, ph.qw, 0.0, 0.0, 0.0,
-                               &probe, &plain_pose);
-            p2 = -2.0 * plain_pose.pitch;
-        }
-        /* Undo the per-axis signs, rotate, put them back: the correction lives
-           in the mirrored frame, ahead of the signs. */
-        ypr_to_rows(rx, 0.0, p2, 0.0);
-        {
-            double v[3];
-            v[0] = plain_out[0] / cfg.x_sign;
-            v[1] = plain_out[1] / cfg.y_sign;
-            v[2] = plain_out[2] / cfg.z_sign;
-            for (k = 0; k < 3; k++)
-                want[k] = v[0] * rx[0][k] + v[1] * rx[1][k] + v[2] * rx[2][k];
-            want[0] *= cfg.x_sign; want[1] *= cfg.y_sign; want[2] *= cfg.z_sign;
-        }
-        for (k = 0; k < 3; k++)
-            if (fabs(flip_out[k] - want[k]) > 1e-9) bad++;
-
-        /* And it is a rotation, so it cannot change how far away the hand is. */
-        {
-            double a = 0.0, b = 0.0;
-            for (k = 0; k < 3; k++) {
-                a += plain_out[k] * plain_out[k];
-                b += flip_out[k] * flip_out[k];
-            }
-            if (fabs(sqrt(a) - sqrt(b)) > 1e-9) bad++;
-        }
-    }
-
-    /* The arm's own axis signs. They exist because the arm-root basis is not
-       the camera's view basis, so they have to compose with the camera's
-       rather than replace them, and they have to touch nothing else. */
-    {
-        double signed_out[3];
-        int axis, k;
-
-        /* One axis at a time, all three of them. Flipping only the axis this
-           file happens to have measured would let a permutation - Y's sign
-           applied to Z - pass unnoticed, which is exactly the mutation that
-           survived the first sweep of this code. */
-        for (axis = 0; axis < 3; axis++) {
-            for (k = 0; k < 3; k++) g_arm_pos_sign[k] = 1.0;
-            arm_hand_to_view(&head, &hand, &cfg, &recovered, out);
-            g_arm_pos_sign[axis] = -1.0;
-            arm_hand_to_view(&head, &hand, &cfg, &recovered, signed_out);
-            for (k = 0; k < 3; k++) {
-                double want_k = (k == axis) ? -out[k] : out[k];
-                if (fabs(signed_out[k] - want_k) > 1e-12) bad++;
-            }
-        }
-        for (k = 0; k < 3; k++) g_arm_pos_sign[k] = 1.0;
-    }
-
-    /* The player's shoulder is a constant hung off the player's HEADING,
-       and the only thing that matters about it is that it travels the
-       SAME map as the controller. Asserted by construction rather than
-       by repeating the arithmetic: a controller physically held exactly
-       where the shoulder is - the head-relative offset placed off the
-       head's yaw-only heading, because a shoulder does not tilt when the
-       player looks down - must map to exactly the shoulder vector,
-       whatever the signs and whatever else the head is doing. */
-    {
-        DG_XR_RAW_POSE sh_head, sh_head_yaw, sh_hand;
-        DG_XR_REL_POSE sh_rel, sh_want;
-        double shoulder[3], via_hand[3];
-        double hq[4], yq[4];
-        int k;
-
-        g_arm_shoulder_mm[0] = 175.0;
-        g_arm_shoulder_mm[1] = 210.0;
-        g_arm_shoulder_mm[2] = 35.0;
-        g_arm_pos_sign[0] = -1.0;
-
-        memset(&sh_head, 0, sizeof sh_head);
-        sh_head.qx = sin(-0.21); sh_head.qw = cos(-0.21);
-        sh_head.px = 2.5; sh_head.py = 1.4; sh_head.pz = -6.0;
-
-        hq[0] = sh_head.qx; hq[1] = sh_head.qy;
-        hq[2] = sh_head.qz; hq[3] = sh_head.qw;
-        dg_xr_quat_yaw_only(hq, yq);
-        sh_head_yaw = sh_head;
-        sh_head_yaw.qx = yq[0]; sh_head_yaw.qy = yq[1];
-        sh_head_yaw.qz = yq[2]; sh_head_yaw.qw = yq[3];
-
-        memset(&sh_want, 0, sizeof sh_want);
-        sh_want.qw = 1.0;
-        sh_want.px =  0.175;
-        sh_want.py = -0.210;
-        sh_want.pz = -0.035;              /* OpenXR forward is -Z */
-        dg_xr_pose_from_relative(&sh_head_yaw, &sh_want, &sh_hand);
-
-        arm_player_shoulder_view(&sh_head, &cfg, 1.0, shoulder);
-        arm_hand_to_view(&sh_head, &sh_hand, &cfg, &sh_rel, via_hand);
-        for (k = 0; k < 3; k++)
-            if (fabs(shoulder[k] - via_hand[k]) > 1e-9) bad++;
-
-        /* A left arm mirrors the outboard component and nothing else, so the
-           two shoulders differ only where the map sends OpenXR X. */
-        {
-            double left[3], mirror[3];
-            DG_XR_REL_POSE m_rel;
-            DG_XR_RAW_POSE m_hand;
-            sh_want.px = -0.175;
-            dg_xr_pose_from_relative(&sh_head_yaw, &sh_want, &m_hand);
-            arm_player_shoulder_view(&sh_head, &cfg, -1.0, left);
-            arm_hand_to_view(&sh_head, &m_hand, &cfg, &m_rel, mirror);
-            for (k = 0; k < 3; k++)
-                if (fabs(left[k] - mirror[k]) > 1e-9) bad++;
-        }
-    }
-
-    for (i = 0; i < 3; i++) {
-        g_arm_pos_sign[i] = saved_sign[i];
-        g_arm_shoulder_mm[i] = saved_shoulder[i];
-    }
-    g_arm_frame = saved_frame;
-
-    printf("  %-6s controller pose: LOCAL hand relative to the live head is "
-           "invariant under common room translation/rotation, mapped once, and "
-           "re-expressed in the frame the camera actually uses - untouched "
-           "while no rotation sign is negative, exactly twice the pitch when "
-           "one is; the arm's own signs compose on top and the player's "
-           "shoulder travels the identical map\n",
-           bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-/* ------------------------------------------------------- desk replay ----
-   dg_hook_test.exe replay <file.dgrec> <marker> [--raw]
-
-   Plays a recording through the REAL pipeline - the same arm_pose_target,
-   dg_pose, dg_arm_map and dg_ik this binary was built from - configured by
-   the same marker file the session ran with, and prints every intermediate
-   quantity per frame as CSV on stdout. --raw instead exports the raw record
-   fields (the CSV face of the binary format).
-
-   What replays exactly: everything arm_pose_target computes - the raw
-   controller offset, the frame heading and freezes, the mapped view vector,
-   the pose blend with the session's own dt (from the recorded QPC deltas),
-   pair/stream identity, the hand quaternion. The F3 category above proves
-   this half is bit-identical to live.
-
-   What is standardized instead, because the desk has no game: the skeleton.
-   The character's shoulder, native wrist and bone lengths are the values
-   MEASURED in session logs (bones 295 / 233.45 mm, shoulder [-139 377 171],
-   wrist [-287.9 -71.8 158.7] view mm), and the IK parameters mirror
-   dg_bridge's literals (reach 0.99, elbow 15..175, down-and-outboard pole).
-   NOT replayable at all: the live skeleton's per-tick pose, the bridge's
-   adjust-space conversion and ArmCamRotateShift precompensation, and the
-   game's own hierarchy pass - those stay headset-only, and the residual
-   heartbeat line is their instrument. */
-static void replay_apply_marker(const char *marker, ARM_POS_CFG *ap_out,
-                                DG_BRIDGE_CONFIG *bc_out)
-{
-    POSE p;
-    DG_XR_CONFIG xc;
-    DG_BRIDGE_CONFIG bc;
-    double seconds;
-    int source, track, qmap[4], hand;
-
-    memset(bc_out, 0, sizeof *bc_out);
-    if (!read_config(marker, &p, &seconds, &source, &xc, &bc,
-                     &track, qmap, &hand, ap_out)) {
-        fprintf(stderr, "replay: cannot read marker %s - using defaults\n",
-                marker);
-        arm_pos_cfg_defaults(ap_out);
-        return;
-    }
-    *bc_out = bc;
-    arm_pos_cfg_apply(ap_out);
-    memcpy(g_arm_qmap, qmap, sizeof qmap);
-    InterlockedExchange(&g_arm_hand, hand);
-    g_arm_track = track;
-    g_xrcfg = xc;
-    InterlockedExchange(&g_stereo, xc.stereo != 0);
-    if (track == ARM_TRACK_OFF)
-        fprintf(stderr, "replay: marker has vr_arm=off - arm_pose_target "
-                        "will refuse every frame\n");
-}
-
-/* Rotate a view-space vector by a quaternion - the operation the bridge's
-   F10 block performs with its own static helper, rebuilt here on the
-   solver's product so the replay depends on nothing bridge-internal. */
-static void replay_quat_rotate(const double q[4], const double v[3],
-                               double out[3])
-{
-    double vq[4], t1[4], qc[4];
-    vq[0] = v[0]; vq[1] = v[1]; vq[2] = v[2]; vq[3] = 0.0;
-    dg_ik_quat_conj(q, qc);
-    dg_ik_quat_mul(q, vq, t1);
-    dg_ik_quat_mul(t1, qc, vq);
-    out[0] = vq[0]; out[1] = vq[1]; out[2] = vq[2];
-}
-
-/* The bridge's F10 yaw twist, faithfully: the compensation quaternion it
-   would apply to the incoming view vectors for this root pair, and the
-   drift it would publish. Returns 0 when either root is absent (all-zero
-   in the record). */
-static int replay_comp_from_roots(const double root_now[4],
-                                  const double root0[4],
-                                  double comp[4], double *drift_deg)
-{
-    double inv[4], rel[4], norm, drift;
-    if (root0[0] == 0.0 && root0[1] == 0.0 &&
-        root0[2] == 0.0 && root0[3] == 0.0) return 0;
-    if (root_now[0] == 0.0 && root_now[1] == 0.0 &&
-        root_now[2] == 0.0 && root_now[3] == 0.0) return 0;
-    dg_ik_quat_conj(root_now, inv);
-    dg_ik_quat_mul(inv, root0, rel);
-    norm = sqrt(rel[1] * rel[1] + rel[3] * rel[3]);
-    comp[0] = 0.0; comp[2] = 0.0;
-    if (norm <= 1.0e-6) {
-        comp[1] = 0.0; comp[3] = 1.0;
-        *drift_deg = 0.0;
-        return 1;
-    }
-    comp[1] = rel[1] / norm;
-    comp[3] = rel[3] / norm;
-    drift = -2.0 * atan2(comp[1], comp[3]) / DEG2RAD;
-    if (drift > 180.0) drift -= 360.0;
-    if (drift < -180.0) drift += 360.0;
-    *drift_deg = drift;
-    return 1;
-}
-
-/* A game-space yaw quaternion about +Y. The sign convention is deliberately
-   NOT assumed: the caller exports both signs and the analysis keeps the one
-   whose synthetic drift matches the live log's. */
-static void replay_yaw_quat(double deg, double q[4])
-{
-    double a = deg * DEG2RAD * 0.5;
-    q[0] = 0.0; q[1] = sin(a); q[2] = 0.0; q[3] = cos(a);
-}
-
-/* One composition variant: the F10 comp rotation applied to the same map
-   inputs the plain replay used, through this variant's own persistent map
-   state, exactly as the bridge rotates ctrl_view_c/player_shoulder_c before
-   its map. Returns 1 with the map's target when the map produced one. */
-static int replay_variant_map(DG_ARM_MAP_STATE *st,
-                              const DG_BRIDGE_ARM_TARGET *t,
-                              const double comp[4], const ARM_POS_CFG *ap,
-                              const double sk_shoulder[3],
-                              const double sk_wrist[3],
-                              double upper, double fore, double target[3])
-{
-    DG_ARM_MAP_IN mi;
-    DG_ARM_MAP_OUT mo;
-    double wrist_c[3], shoulder_c[3];
-    int mk;
-
-    replay_quat_rotate(comp, t->wrist_view, wrist_c);
-    replay_quat_rotate(comp, t->player_shoulder_view, shoulder_c);
-    memset(&mi, 0, sizeof mi);
-    for (mk = 0; mk < 3; mk++) {
-        mi.controller_view[mk] = wrist_c[mk];
-        mi.shoulder_view[mk] = sk_shoulder[mk];
-        mi.native_wrist_view[mk] = sk_wrist[mk];
-        mi.player_shoulder[mk] = shoulder_c[mk];
-    }
-    mi.player_reach = t->player_reach_view;
-    mi.upper = upper;
-    mi.fore = fore;
-    mi.anchor_shoulder = ap->anchor;
-    if (!dg_arm_map_step(st, &mi, &mo)) return 0;
-    for (mk = 0; mk < 3; mk++) target[mk] = mo.target_view[mk];
-    return 1;
-}
-
-static int replay_absolute(FILE *file, int compat, long count)
-{
-    DG_AIM_REPLAY_STATE state;
-    DG_REC_FRAME record;
-    long rows=0, checked=0, written=0, failed=0, missing=0;
-    long start=ftell(file);
-    if (compat != DG_REC_COMPAT_NONE) {
-        fprintf(stderr,"absolute replay: this older recording has no exact camera/AIM input; refused\n");
-        return 2;
-    }
-    memset(&state,0,sizeof state);
-    printf("i,frame,eye,stream,source_valid,input_valid,write,weight,flags,sample_seq,sample_time,qx,qy,qz,qw,state_match,output_match\n");
-    while (dg_rec_read_next(file,compat,&record)) {
-        const DG_REC_AIM_REPLAY *a=&record.absolute;
-        DG_AIM_REPLAY_OUT result;
-        int state_match, output_match;
-        rows++;
-        if (!a->present) { missing++; continue; }
-        /* Only the first checkpoint seeds replay. All later checkpoints are
-           assertions against sequentially recomputed state. */
-        if (!checked) state=a->before;
-        state_match=memcmp(&state,&a->before,sizeof state)==0;
-        absolute_aim_step(&state,&a->input,&result);
-        output_match=memcmp(&result,&a->observed,sizeof result)==0;
-        if (!state_match || !output_match) {
-            if(failed<8) fprintf(stderr,"absolute replay: mismatch at row %ld (state=%d output=%d)\n",
-                                 rows-1,state_match,output_match);
-            failed++;
-        }
-        checked++; written+=result.write!=0;
-        printf("%ld,%u,%u,%u,%u,%u,%u,%.17g,%u,%llu,%lld,%.17g,%.17g,%.17g,%.17g,%d,%d\n",
-               rows-1,a->input.frame,a->input.eye,a->input.stream,a->input.source_valid,
-               result.input_valid,result.write,result.pose.weight,result.pose.flags,
-               result.sample_seq,result.sample_time,result.pose.quat[0],result.pose.quat[1],
-               result.pose.quat[2],result.pose.quat[3],state_match,output_match);
-    }
-    if (ferror(file) || (ftell(file)-start)%(long)sizeof record) failed++;
-    fprintf(stderr,"absolute replay: %ld records/%ld hinted, %ld checked, %ld writes, %ld without absolute input, %ld mismatches\n",
-            rows,count,checked,written,missing,failed);
-    return (!checked || failed || rows!=count) ? 1 : 0;
-}
-
-static int replay_main(int nargs, char **args)
-{
-    FILE *in = NULL;
-    ARM_POS_CFG ap;
-    DG_BRIDGE_CONFIG bc;
-    DG_ARM_MAP_STATE map_state;
-    /* One persistent map state per composition variant: A = comp against
-       the RECORDED root, P/N = comp against a synthetic root that follows
-       the software turn at each sign. A shared state would let one
-       variant's calibration bleed into another's. */
-    DG_ARM_MAP_STATE vstate[3];
-    double turn_off_rad = 0.0;
-    DG_REC_FRAME r;
-    long count = 0, i, writes = 0, freezes0;
-    long long qpf = 0, qpc0 = 0, qpc_prev = 0;
-    unsigned int stream_prev = 0;
-    int raw = (nargs >= 3 && _stricmp(args[2], "--raw") == 0);
-    int v1 = 0;
-    int have_rest = 0;
-    double rest[4] = { 0, 0, 0, 1 };
-    /* The standardized skeleton, measured not invented - see the header. */
-    static const double sk_shoulder[3] = { -139.0, 377.0, 171.0 };
-    static const double sk_wrist[3] = { -287.9, -71.8, 158.7 };
-    static const double sk_upper = 295.0, sk_fore = 233.45;
-
-    if (nargs < 2) {
-        fprintf(stderr, "usage: dg_hook_test.exe replay <file.dgrec> "
-                        "<marker> [--raw]\n");
-        return 2;
-    }
-    if (fopen_s(&in, args[0], "rb") != 0 || !in) {
-        fprintf(stderr, "replay: cannot open %s\n", args[0]);
-        return 2;
-    }
-    if (!dg_rec_read_open(in, &count, &qpf, &v1)) {
-        fprintf(stderr, "replay: %s is not a DGREC file with a record layout "
-                        "this build knows (current %u bytes, v4 %u, v3 %u, "
-                        "v2 %u, v1 %u) - "
-                        "refusing to misread it\n",
-                args[0], (unsigned int)sizeof(DG_REC_FRAME),
-                (unsigned int)DG_REC_V4_BYTES,
-                (unsigned int)DG_REC_V3_BYTES,
-                (unsigned int)DG_REC_V2_BYTES,
-                (unsigned int)DG_REC_V1_BYTES);
-        fclose(in);
-        return 2;
-    }
-    if (nargs >= 3 && _stricmp(args[2], "--absolute") == 0) {
-        int rc = replay_absolute(in,v1,count);
-        fclose(in);
-        return rc;
-    }
-    if (v1 == DG_REC_COMPAT_V1)
-        fprintf(stderr, "replay: v1 recording - no game-side pair state, so "
-                        "the hand columns replay against an empty base\n");
-    else if (v1 == DG_REC_COMPAT_V2)
-        fprintf(stderr, "replay: v2 recording - pair state present, "
-                        "rest_drift replays as -1 (not recorded)\n");
-    else if (v1 == DG_REC_COMPAT_V4)
-        fprintf(stderr, "replay: v4 recording - camera telemetry absent; "
-                        "normal CSV camera columns replay as zeros "
-                        "(CAMERA clear)\n");
-
-    if (raw) {
-        /* The CSV exporter: the binary format, spelled out. Raw CSV remains
-           the XR input surface; camera telemetry belongs only to normal CSV. */
-        printf("i,qpc,stream,pair,present,eye,"
-               "head_qx,head_qy,head_qz,head_qw,head_px,head_py,head_pz");
-        {
-            const char *hn[2] = { "l", "r" };
-            const char *pn[2] = { "grip", "aim" };
-            int h, k;
-            for (h = 0; h < 2; h++) {
-                for (k = 0; k < 2; k++)
-                    printf(",%s_%s_qx,%s_%s_qy,%s_%s_qz,%s_%s_qw"
-                           ",%s_%s_px,%s_%s_py,%s_%s_pz"
-                           ",%s_%s_flags,%s_%s_age,%s_%s_seq,%s_%s_time",
-                           hn[h], pn[k], hn[h], pn[k], hn[h], pn[k],
-                           hn[h], pn[k], hn[h], pn[k], hn[h], pn[k],
-                           hn[h], pn[k], hn[h], pn[k], hn[h], pn[k],
-                           hn[h], pn[k], hn[h], pn[k]);
-                printf(",%s_trigger,%s_squeeze,%s_stick_x,%s_stick_y"
-                       ",%s_buttons,%s_press_seq,%s_release_seq",
-                       hn[h], hn[h], hn[h], hn[h], hn[h], hn[h], hn[h]);
-            }
-        }
-        printf("\n");
-        for (i = 0; dg_rec_read_next(in, v1, &r); i++) {
-            int h, k;
-            printf("%ld,%lld,%u,%u,%u,%u", i, r.qpc, r.stream_id, r.pair_id,
-                   r.present_frame, r.eye);
-            for (k = 0; k < 7; k++) printf(",%.17g", r.head[k]);
-            for (h = 0; h < 2; h++) {
-                const DG_REC_HAND *hd = &r.hand[h];
-                const DG_REC_POSE *ps[2];
-                ps[0] = &hd->grip; ps[1] = &hd->aim;
-                for (k = 0; k < 2; k++)
-                    printf(",%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g"
-                           ",%u,%u,%llu,%lld",
-                           ps[k]->q[0], ps[k]->q[1], ps[k]->q[2], ps[k]->q[3],
-                           ps[k]->p[0], ps[k]->p[1], ps[k]->p[2],
-                           ps[k]->flags, ps[k]->pose_age_ms,
-                           ps[k]->sample_seq, ps[k]->xr_time);
-                printf(",%.9g,%.9g,%.9g,%.9g,%u,%llu,%llu",
-                       hd->trigger_value, hd->squeeze_value,
-                       hd->thumbstick_x, hd->thumbstick_y, hd->buttons,
-                       hd->trigger_press_seq, hd->trigger_release_seq);
-            }
-            printf("\n");
-        }
-        fclose(in);
-        fprintf(stderr, "replay: exported %ld raw records (header said "
-                        "%ld)\n", i, count);
-        return 0;
-    }
-
-    replay_apply_marker(args[1], &ap, &bc);
-    dg_pose_init(&g_arm_pose_state, NULL);
-    g_arm_frame_have = 0;
-    g_arm_pose_pair_id = 0;
-    dg_arm_map_reset(&map_state);
-    dg_arm_map_reset(&vstate[0]);
-    dg_arm_map_reset(&vstate[1]);
-    dg_arm_map_reset(&vstate[2]);
-    dg_xr_test_set_turn_offset(0.0);
-    freezes0 = g_arm_frame_freezes;
-
-    printf("i,t_s,dt_ms,stream,pair,eye,write,weight,pose_flags,"
-           "rel_x,rel_y,rel_z,view_x,view_y,view_z,heading_deg,freezes,"
-           "shoulder_x,shoulder_y,shoulder_z,reach,"
-           "map_flags,target_x,target_y,target_z,"
-           "ik_clamped,elbow_deg,wrist_x,wrist_y,wrist_z,"
-           "hand_qx,hand_qy,hand_qz,hand_qw,delta_deg,"
-           "pflags,wtype,"
-           "base_x,base_y,base_z,base_w,"
-           "live_x,live_y,live_z,live_w,"
-           "root_x,root_y,root_z,root_w,"
-           "root0_x,root0_y,root0_z,root0_w,"
-           "rest_x,rest_y,rest_z,rest_w,"
-           "ctrlrest_x,ctrlrest_y,ctrlrest_z,ctrlrest_w,"
-           "demand_x,demand_y,demand_z,demand_w,"
-           "desired_x,desired_y,desired_z,desired_w,"
-           "rest_drift,frame_word,"
-           "turn_deg,"
-           "driftA_deg,tA_x,tA_y,tA_z,"
-           "driftP_deg,tP_x,tP_y,tP_z,"
-           "driftN_deg,tN_x,tN_y,tN_z,"
-           "j3_x,j3_y,j3_z,j4_x,j4_y,j4_z,j5_x,j5_y,j5_z,j6_x,j6_y,j6_z,"
-           "ike_x,ike_y,ike_z,ikw_x,ikw_y,ikw_z,ikt_x,ikt_y,ikt_z,"
-           "q4w_x,q4w_y,q4w_z,q4w_w,q5w_x,q5w_y,q5w_z,q5w_w,"
-           "fore_x,fore_y,fore_z,raw_twist_deg,raw_swing_deg,fit_frac,"
-           "head_yaw_deg,stick_yaw_deg,aim_yaw_deg,"
-           "cam_r0x,cam_r0y,cam_r0z,cam_r1x,cam_r1y,cam_r1z,"
-           "cam_r2x,cam_r2y,cam_r2z,cam_proj_x,cam_proj_y,cam_proj_w\n");
-
-    for (i = 0; dg_rec_read_next(in, v1, &r); i++) {
-        DG_XR_FRAME rf;
-        DG_BRIDGE_ARM_TARGET t;
-        int got;
-        double t_s, dt;
-
-        if (i == 0) { qpc0 = r.qpc; qpc_prev = r.qpc; }
-        t_s = (qpf > 0) ? (double)(r.qpc - qpc0) / (double)qpf : 0.0;
-        dt = (qpf > 0 && r.qpc > qpc_prev)
-                 ? (double)(r.qpc - qpc_prev) / (double)qpf : 1.0 / 90.0;
-        qpc_prev = r.qpc;
-        g_test_dt_override = dt;
-
-        /* A stream change in the record IS the session's restart - B press,
-           recentre, marker edit - landing on the frame it landed on live.
-           The map recalibrates there for the same reason the bridge does. */
-        if (i == 0 || r.stream_id != stream_prev) {
-            dg_arm_map_reset(&map_state);
-            dg_arm_map_reset(&vstate[0]);
-            dg_arm_map_reset(&vstate[1]);
-            dg_arm_map_reset(&vstate[2]);
-            /* Live, the restart's recentre zeroed the turn offset. */
-            turn_off_rad = 0.0;
-            have_rest = 0;
-        }
-        stream_prev = r.stream_id;
-        /* The session's software turn, re-derived from the recorded right
-           stick through the exact live shaping (move_command) and clamped
-           integration (apply_turn), published through the same float path
-           the runtime uses, BEFORE the target is computed - the live
-           worker samples in that order too. */
-        {
-            const DG_REC_HAND *rh = &r.hand[1];
-            double x = ((rh->grip.flags & 4u) && rh->grip.pose_age_ms <= 100)
-                           ? (double)rh->thumbstick_x : 0.0;
-            double dz = (double)bc.move_deadzone_mils / 1000.0;
-            double gain = (double)bc.turn_gain_mils / 1000.0;
-            double m = x < 0.0 ? -x : x;
-            double dtt = dt > 0.25 ? 0.25 : dt;
-            if (bc.turn_mode && m > dz && dz < 1.0)
-                turn_off_rad += (x > 0.0 ? 1.0 : -1.0) * (m - dz) /
-                                (1.0 - dz) * DG_TURN_RATE_DEG_S * gain *
-                                dtt * DEG2RAD;
-            dg_xr_test_set_turn_offset(turn_off_rad);
-        }
-        g_arm_pose_stream_id = r.stream_id;
-        InterlockedExchange(&g_present_frame, (LONG)r.present_frame);
-        InterlockedExchange(&g_current_eye, (LONG)r.eye);
-
-        dg_rec_unpack(&r, &rf);
-        dg_xr_test_publish(&rf);
-        memset(&t, 0, sizeof t);
-        got = arm_pose_target(&t);
-
-        printf("%ld,%.4f,%.2f,%u,%lu,%u,%d,%.3f,%u",
-               i, t_s, dt * 1000.0, r.stream_id, t.pair_id, r.eye,
-               got ? t.write : 0, got ? t.weight : 0.0,
-               got ? t.pose_flags : 0u);
-        printf(",%.4f,%.4f,%.4f", g_arm_raw_rel[0], g_arm_raw_rel[1],
-               g_arm_raw_rel[2]);
-        printf(",%.2f,%.2f,%.2f",
-               t.wrist_view[0], t.wrist_view[1], t.wrist_view[2]);
-        printf(",%.2f,%ld",
-               atan2(g_arm_frame_q[1], g_arm_frame_q[3]) * 2.0 / DEG2RAD,
-               g_arm_frame_freezes - freezes0);
-        printf(",%.1f,%.1f,%.1f,%.1f",
-               t.player_shoulder_view[0], t.player_shoulder_view[1],
-               t.player_shoulder_view[2], t.player_reach_view);
-
-        if (got && t.write) {
-            DG_ARM_MAP_IN mi;
-            DG_ARM_MAP_OUT mo;
-            int mk, ok;
-            writes++;
-            memset(&mi, 0, sizeof mi);
-            for (mk = 0; mk < 3; mk++) {
-                mi.controller_view[mk] = t.wrist_view[mk];
-                mi.shoulder_view[mk] = sk_shoulder[mk];
-                mi.native_wrist_view[mk] = sk_wrist[mk];
-                mi.player_shoulder[mk] = t.player_shoulder_view[mk];
-            }
-            mi.player_reach = t.player_reach_view;
-            mi.upper = sk_upper;
-            mi.fore = sk_fore;
-            mi.anchor_shoulder = ap.anchor;
-            ok = dg_arm_map_step(&map_state, &mi, &mo);
-            printf(",%u", mo.flags);
-            if (ok) {
-                DG_IK_IN ii;
-                DG_IK_OUT io;
-                double span = sk_upper + sk_fore, out_x, out_z, n;
-                printf(",%.1f,%.1f,%.1f", mo.target_view[0],
-                       mo.target_view[1], mo.target_view[2]);
-                memset(&ii, 0, sizeof ii);
-                for (mk = 0; mk < 3; mk++) {
-                    ii.shoulder[mk] = sk_shoulder[mk];
-                    ii.target[mk] = mo.target_view[mk];
-                }
-                /* Down and outboard, dg_bridge's own pole shape on the
-                   standardized skeleton. */
-                out_x = sk_wrist[0] - sk_shoulder[0];
-                out_z = sk_wrist[2] - sk_shoulder[2];
-                n = sqrt(out_x * out_x + out_z * out_z);
-                if (n > 1e-9) { out_x /= n; out_z /= n; }
-                ii.pole[0] = sk_shoulder[0] + span * out_x;
-                ii.pole[1] = sk_shoulder[1] - span;
-                ii.pole[2] = sk_shoulder[2] + span * out_z;
-                ii.upper = sk_upper;
-                ii.fore = sk_fore;
-                ii.max_reach_frac = 0.99;
-                ii.min_elbow_deg = 15.0;
-                ii.max_elbow_deg = 175.0;
-                if (dg_ik_solve(&ii, &io))
-                    printf(",%u,%.1f,%.1f,%.1f,%.1f", io.clamped,
-                           io.elbow_deg, io.wrist[0], io.wrist[1],
-                           io.wrist[2]);
-                else
-                    printf(",%u,,,,", io.clamped);
-            } else {
-                printf(",,,,,,,,");
-            }
-        } else {
-            printf(",,,,,,,,,");
-        }
-
-        /* The hand chain the way the bridge sees it: the first written pair
-           of a stream is the grip rest, and every later frame is an angle
-           from it. Convention-free (dg_ik_quat_angle), so it reads the same
-           whatever the map signs did. */
-        if (got && t.write) {
-            if (!have_rest) {
-                int mk;
-                for (mk = 0; mk < 4; mk++) rest[mk] = t.hand_quat[mk];
-                have_rest = 1;
-            }
-            printf(",%.4f,%.4f,%.4f,%.4f,%.2f",
-                   t.hand_quat[0], t.hand_quat[1], t.hand_quat[2],
-                   t.hand_quat[3],
-                   dg_ik_quat_angle(t.hand_quat, rest) / DEG2RAD);
-        } else {
-            printf(",,,,,");
-        }
-
-        {
-            const double *pq[8];
-            int pk, pj;
-            pq[0] = r.pair.base_now;   pq[1] = r.pair.live_hand;
-            pq[2] = r.pair.root_q;     pq[3] = r.pair.root_q0;
-            pq[4] = r.pair.rest_view;  pq[5] = r.pair.ctrl_rest;
-            pq[6] = r.pair.demand;     pq[7] = r.pair.desired;
-            printf(",%u,%u", r.pair.flags, r.pair.wtype);
-            for (pj = 0; pj < 8; pj++)
-                for (pk = 0; pk < 4; pk++) printf(",%.17g", pq[pj][pk]);
-            printf(",%.9g", (double)r.pair.rest_drift_deg);
-            printf(",%u", r.pair.frame_word);
-        }
-        /* The composition variants the bridge would have produced: the F10
-           comp against the RECORDED root (A - what the session actually
-           composed) and against a synthetic root that follows the software
-           turn at each yaw sign (P/N - the body-follow-converged case the
-           17:35 session failed in). Targets are the map output the IK
-           would chase; the analysis composes each with its root to read
-           the world-space aim. */
-        {
-            double turn_deg = turn_off_rad / DEG2RAD;
-            int vi;
-            printf(",%.2f", turn_deg);
-            for (vi = 0; vi < 3; vi++) {
-                double root_used[4], comp[4], drift = 0.0, tgt[3];
-                int vk, okc, okm = 0;
-                if (vi == 0) {
-                    for (vk = 0; vk < 4; vk++)
-                        root_used[vk] = r.pair.root_q[vk];
-                } else {
-                    double yq[4];
-                    replay_yaw_quat(vi == 1 ? turn_deg : -turn_deg, yq);
-                    dg_ik_quat_mul(yq, r.pair.root_q0, root_used);
-                }
-                okc = replay_comp_from_roots(root_used, r.pair.root_q0,
-                                             comp, &drift);
-                if (okc && got && t.write)
-                    okm = replay_variant_map(&vstate[vi], &t, comp, &ap,
-                                             sk_shoulder, sk_wrist,
-                                             sk_upper, sk_fore, tgt);
-                if (okc && okm)
-                    printf(",%.2f,%.1f,%.1f,%.1f", drift,
-                           tgt[0], tgt[1], tgt[2]);
-                else if (okc)
-                    printf(",%.2f,,,", drift);
-                else
-                    printf(",,,,");
-            }
-        }
-
-        {
-            const DG_REC_PAIRSTATE *pp = &r.pair;
-            int pk, pj;
-            for (pj = 0; pj < 4; pj++)
-                for (pk = 0; pk < 3; pk++)
-                    printf(",%.3f", (double)pp->joint_world[pj][pk]);
-            for (pk = 0; pk < 3; pk++) printf(",%.3f", (double)pp->ik_elbow[pk]);
-            for (pk = 0; pk < 3; pk++) printf(",%.3f", (double)pp->ik_wrist[pk]);
-            for (pk = 0; pk < 3; pk++) printf(",%.3f", (double)pp->ik_target[pk]);
-            for (pk = 0; pk < 4; pk++) printf(",%.7g", (double)pp->q4_world[pk]);
-            for (pk = 0; pk < 4; pk++) printf(",%.7g", (double)pp->q5_world[pk]);
-            for (pk = 0; pk < 3; pk++) printf(",%.6f", (double)pp->fore_axis[pk]);
-            printf(",%.3f,%.3f,%.4f,%.3f,%.3f,%.3f",
-                   (double)pp->raw_twist_deg, (double)pp->raw_swing_deg,
-                   (double)pp->fit_frac, (double)pp->head_yaw_deg,
-                   (double)pp->stick_yaw_deg, (double)pp->aim_yaw_deg);
-            /* DGREC5 camera telemetry: raw row-vector camera->world basis and
-               projection m00,m11,m23 from the preceding successful camera
-               pass. Older files leave the tail zeroed and CAMERA clear. */
-            for (pj = 0; pj < 3; pj++)
-                for (pk = 0; pk < 3; pk++)
-                    printf(",%.9g", (double)pp->camera_world[pj][pk]);
-            for (pk = 0; pk < 3; pk++)
-                printf(",%.9g", (double)pp->camera_proj[pk]);
-        }
-        printf("\n");
-    }
-    fclose(in);
-    fprintf(stderr,
-            "replay: %ld frames (header said %ld), %ld written pairs, "
-            "%ld freezes, dt from recorded QPC (qpf %lld)\n",
-            i, count, writes, g_arm_frame_freezes - freezes0, qpf);
-    return 0;
-}
-
-static int test_script_source_parser(void)
-{
-    static const struct { const char *text; int valid, source; } cases[] = {
-        { "seconds=1\n", 1, SRC_SYNTHETIC },
-        { "source=synthetic\n", 1, SRC_SYNTHETIC },
-        { "source=xr\n", 1, SRC_XR },
-        { "source=script\n", 1, SRC_SCRIPT },
-        { "source=SCRIPT\n", 1, SRC_SCRIPT },
-        { "source=script_suffix\n", 0, 0 },
-        { "source=xr_suffix\n", 0, 0 },
-        { "source=\n", 0, 0 },
-    };
-    char dir[MAX_PATH], path[MAX_PATH];
-    unsigned int i;
-    int bad = 0;
-    if (!GetTempPathA(sizeof dir, dir) ||
-        !GetTempFileNameA(dir, "dgs", 0, path)) return 1;
-    for (i = 0; i < sizeof cases / sizeof cases[0]; i++) {
-        FILE *file = NULL;
-        POSE pose;
-        double seconds = 1;
-        int source, track, qmap[4], hand, valid;
-        DG_XR_CONFIG cfg;
-        DG_BRIDGE_CONFIG bridge;
-        ARM_POS_CFG arm;
-        if (fopen_s(&file, path, "wb") || !file) { bad++; break; }
-        fputs(cases[i].text, file);
-        fclose(file);
-        valid = read_config(path, &pose, &seconds, &source, &cfg, &bridge,
-                            &track, qmap, &hand, &arm);
-        if (valid != cases[i].valid || (valid && source != cases[i].source)) bad++;
-    }
-    DeleteFileA(path);
-    printf("  %-6s script selection: absent stays native, exact source tokens "
-           "accepted, suffix/empty values refused\n", bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-static int script_snapshot_test_write(const char *path, const void *data, size_t n)
-{
-    FILE *f = NULL;
-    int ok;
-    if (fopen_s(&f, path, "wb") || !f) return 0;
-    ok = fwrite(data, 1, n, f) == n;
-    return fclose(f) == 0 && ok;
-}
-
-#include "dg_menu_producer_test.inl"
-static int test_script_menu_session(void)
-{
-    static const struct { const char *text; int valid, enabled; } cases[] = {
-        { "source=script\n", 1, 0 },
-        { "source=script\nvr_script_menu=on\n", 1, 1 },
-        { "source=script\nvr_script_menu=off\n", 1, 0 },
-        { "source=script\nvr_script_menu=on\nvr_script_menu=off\n", 0, 0 },
-        { "source=script\nvr_script_menu=onward\n", 0, 0 },
-        { "source=script\nvr_script_menu=\n", 0, 0 },
-        { "source=script\nvr_script_menu on\n", 0, 0 },
-        { "source=xr\nvr_script_menu=on\n", 0, 0 }
-    };
-    int i, bad = 0, saved_cfg = g_script_menu_cfg;
-    LONG saved_active = g_script_menu_active, saved_seen = g_script_menu_context_lost;
-    LONG saved_traps = g_traps, saved_armed = g_armed, saved_source = g_source;
-    LONG saved_silent = g_flat_silent;
-    LONG saved_freeze = g_arm_freeze_cfg;
-    char saved_policy[MAX_PATH];
-    LONG applied = g_applied, fresh = g_fresh, reapplied = g_reapplied;
-    LONG menu_steps = g_menu_steps, menu_confirms = g_menu_confirms;
-    uint64_t start_seen = g_start_seen, primary_seen = g_script_primary_seen;
-    POSE pose, zero_pose;
-    DG_BRIDGE_CONFIG bc, expected;
-    DG_XR_CONFIG xc;
-    ARM_POS_CFG ap;
-    int track, hand, source, qmap[4];
-    double seconds = 10;
-    EXCEPTION_RECORD er;
-    CONTEXT context;
-    EXCEPTION_POINTERS ep;
-#define MENU_CHECK(x) do { if (!(x)) { bad++; printf("  FAIL   script menu at dg_hook.c:%d\n", __LINE__); } } while (0)
-    memcpy(saved_policy, g_policy_path, sizeof saved_policy);
-    for (i = 0; i < (int)(sizeof cases / sizeof cases[0]); i++) {
-        char text[192];
-        int ok;
-        strcpy_s(text, sizeof text, cases[i].text);
-        ok = parse_config(text, &pose, &seconds, &source, &xc, &bc,
-                          &track, qmap, &hand, &ap);
-        MENU_CHECK(ok == cases[i].valid);
-        if (ok) MENU_CHECK(g_script_menu_cfg == cases[i].enabled);
-    }
-    memset(&bc, 0x5a, sizeof bc);
-    memset(&pose, 0x5a, sizeof pose);
-    memset(&expected, 0, sizeof expected);
-    memset(&zero_pose, 0, sizeof zero_pose);
-    expected.menu_mode = bc.menu_mode = DG_MENU_MODE_WRITE;
-    expected.script_menu_only = 1;
-    track = hand = 9;
-    script_menu_sanitize(&pose, &bc, &track, &hand);
-    MENU_CHECK(!memcmp(&bc, &expected, sizeof bc));
-    MENU_CHECK(!memcmp(&pose, &zero_pose, sizeof pose) && track == ARM_TRACK_OFF && hand == 0);
-    g_source = SRC_SCRIPT;
-    g_armed = 1;
-    g_script_menu_active = 1;
-    g_script_menu_context_lost = 0;
-    {
-        DG_MENU_IN in;
-        DG_MENU_OUT out;
-        memset(&in, 0, sizeof in); memset(&out, 0, sizeof out);
-        in.have_sample = in.input_ok = 1;
-        MENU_CHECK(script_menu_preserve_neutral(1, &in, &out));
-        MENU_CHECK(!script_menu_preserve_neutral(0, &in, &out));
-        in.have_sample = 0;
-        MENU_CHECK(!script_menu_preserve_neutral(1, &in, &out));
-        in.have_sample = 1; in.input_ok = 0;
-        MENU_CHECK(!script_menu_preserve_neutral(1, &in, &out));
-        in.input_ok = 1; out.flags = DG_MENU_F_BAD_INPUT;
-        MENU_CHECK(!script_menu_preserve_neutral(1, &in, &out));
-        out.flags = DG_MENU_F_BAD_CONFIG;
-        MENU_CHECK(!script_menu_preserve_neutral(1, &in, &out));
-        out.flags = DG_MENU_F_YIELDED;
-        MENU_CHECK(!script_menu_preserve_neutral(1, &in, &out));
-    }
-    MENU_CHECK(!dg_bridge_menu_context_ready()); /* desk bridge has no live context */
-    MENU_CHECK(!script_menu_blocked());
-    script_primary_command(); /* disabled even before the camera latch */
-    MENU_CHECK(g_script_primary_seen == primary_seen);
-    memset(&er, 0, sizeof er);
-    memset(&context, 0, sizeof context);
-    er.ExceptionCode = EXCEPTION_SINGLE_STEP;
-    context.Dr6 = 1;
-    ep.ExceptionRecord = &er;
-    ep.ContextRecord = &context;
-    MENU_CHECK(veh(&ep) == EXCEPTION_CONTINUE_EXECUTION);
-    MENU_CHECK(context.Dr6 == 0 && (context.EFlags & 0x10000));
-    MENU_CHECK(script_menu_blocked() && g_traps == saved_traps + 1);
-    MENU_CHECK(g_applied == applied && g_fresh == fresh && g_reapplied == reapplied);
-    g_flat_silent = DG_FLAT_SILENT_FRAMES * 4;
-    start_command();
-    script_primary_command();
-    menu_seam(1);
-    MENU_CHECK(script_menu_blocked()); /* silence cannot reopen the session */
-    MENU_CHECK(g_start_seen == start_seen && g_script_primary_seen == primary_seen);
-    MENU_CHECK(g_menu_steps == menu_steps && g_menu_confirms == menu_confirms);
-    g_script_menu_cfg = saved_cfg;
-    g_script_menu_active = saved_active;
-    g_script_menu_context_lost = saved_seen;
-    g_traps = saved_traps; g_armed = saved_armed; g_source = saved_source;
-    g_flat_silent = saved_silent;
-    g_arm_freeze_cfg = saved_freeze;
-    memcpy(g_policy_path, saved_policy, sizeof saved_policy);
-    g_applied = applied; g_fresh = fresh; g_reapplied = reapplied;
-    g_menu_steps = menu_steps; g_menu_confirms = menu_confirms;
-    g_start_seen = start_seen; g_script_primary_seen = primary_seen;
-    printf("  %-6s script menu: exact opt-in, full sanitizer, detector-only VEH and permanent latch\n", bad ? "FAIL" : "ok");
-#undef MENU_CHECK
-    return bad ? 1 : 0;
-}
-
-static int test_script_snapshot_dispatch(void)
-{
-    static const char first[] = "source=script\nvr_script_start=1\nvr_fire=off\n";
-    static const char edited[] = "source=script\nvr_script_start=1\nvr_fire=on\n";
-    static const char next[] = "source=script\nvr_script_start=2\nvr_fire=on\n";
-    static const char other[] = "source=xr\nvr_script_start=1\n";
-    char dir[MAX_PATH], path[MAX_PATH], oversized[1100];
-    SCRIPT_MARKER_SNAPSHOT a, b;
-    DG_SCRIPT_GATE saved_gate = g_script_gate;
-    int saved_boot = g_script_boot, saved_token = g_script_token_active;
-    LONG saved_source = g_source, saved_armed = g_armed;
-    int bad = 0;
-    HANDLE writer;
-#define SNAP_CHECK(x) do { if (!(x)) { bad++; printf("  FAIL   script snapshot at dg_hook.c:%d\n", __LINE__); } } while (0)
-    if (!GetTempPathA(sizeof dir, dir) ||
-        !GetTempFileNameA(dir, "dgg", 0, path)) return 1;
-    SNAP_CHECK(script_snapshot_test_write(path, first, sizeof first - 1));
-    SNAP_CHECK(read_script_snapshot(path, &a));
-    SNAP_CHECK(read_script_snapshot(path, &b) && script_snapshot_equal(&a, &b));
-    dg_script_gate_init(&g_script_gate, 0);
-    SNAP_CHECK(dg_script_gate_poll(&g_script_gate, 1, &a.info) == 1);
-    SNAP_CHECK(script_request_current(path, &a));
-    SNAP_CHECK(script_snapshot_test_write(path, edited, sizeof edited - 1));
-    SNAP_CHECK(!script_request_current(path, &a));
-    SNAP_CHECK(script_request_current(path, NULL)); /* Live settings remain supported after go. */
-    SNAP_CHECK(script_snapshot_test_write(path, next, sizeof next - 1));
-    SNAP_CHECK(!script_request_current(path, &a) && g_script_gate.high_water == 2);
-    dg_script_gate_finish(&g_script_gate);
-    SNAP_CHECK(read_script_snapshot(path, &b));
-    SNAP_CHECK(dg_script_gate_poll(&g_script_gate, 1, &b.info) == 0);
-
-    g_script_boot = 1;
-    g_script_token_active = 1;
-    dg_script_gate_init(&g_script_gate, 0);
-    SNAP_CHECK(dg_script_gate_poll(&g_script_gate, 1, &a.info) == 1);
-    SNAP_CHECK(script_snapshot_test_write(path, other, sizeof other - 1));
-    SNAP_CHECK(!strcmp(run_once(path), "script request changed before config"));
-    SNAP_CHECK(g_source == saved_source && g_armed == saved_armed);
-    g_script_boot = 0;
-    SNAP_CHECK(script_snapshot_test_write(path, first, sizeof first - 1));
-    SNAP_CHECK(!strcmp(run_once(path), "source=script requires process restart"));
-    SNAP_CHECK(g_source == saved_source && g_armed == saved_armed);
-
-    writer = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, NULL,
-                         OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-    SNAP_CHECK(writer != INVALID_HANDLE_VALUE);
-    if (writer != INVALID_HANDLE_VALUE) {
-        SNAP_CHECK(!read_script_snapshot(path, &b));
-        CloseHandle(writer);
-    }
-    memset(oversized, '#', sizeof oversized);
-    memcpy(oversized, first, sizeof first - 1);
-    SNAP_CHECK(script_snapshot_test_write(path, oversized, sizeof oversized));
-    SNAP_CHECK(!read_script_snapshot(path, &b));
-    SNAP_CHECK(script_snapshot_test_write(path, first, sizeof first)); /* NUL is not marker text. */
-    SNAP_CHECK(!read_script_snapshot(path, &b));
-    DeleteFileA(path);
-    SNAP_CHECK(!read_script_snapshot(path, &b));
-    g_script_gate = saved_gate;
-    g_script_boot = saved_boot;
-    g_script_token_active = saved_token;
-    g_source = saved_source;
-    g_armed = saved_armed;
-    printf("  %-6s script snapshot/dispatch: stable complete read, config freshness, "
-           "source-race and late-source refusal\n", bad ? "FAIL" : "ok");
-#undef SNAP_CHECK
-    return bad;
-}
-
-static int script_route_failure(int line) {
-    printf("  FAIL   script route assertion at dg_hook.c:%d\n", line);
-    return 1;
-}
-
-static int test_script_input_routes(void)
-{
-    static const char script[] =
-        "DGXR_SCRIPT 1 10\n"
-        "pose left grip 1 -0.2 -0.3 -0.4 0 0 0 1\n"
-        "pose right grip 1 0.2 -0.3 -0.4 0 0 0 1\n"
-        "pose right aim 1 0.25 -0.3 -0.45 0 0 0 1\n"
-        "input left 0 0 0.25 -0.5 0\n"
-        "input right 1 0 0.5 0 0x0c\n"
-        "hold 2\n"
-        "input right 0 0 0 0 0\n"
-        "hold 1\n";
-    DG_XR_SCRIPT_PROGRAM program;
-    DG_XR_CONFIG cfg, saved_cfg = g_xrcfg;
-    DG_XR_FRAME frame, native, readback, released;
-    DG_BRIDGE_FIRE fire;
-    DG_BRIDGE_MOVE move;
-    DG_REC_FRAME record;
-    char error[160];
-    LONG saved_source = g_source, saved_fire = g_fire_mode;
-    LONG saved_move = g_move_mode, saved_turn = g_turn_mode;
-    LONG saved_gain = g_turn_gain_mils_live, saved_dz = g_turn_deadzone_mils_live;
-    int saved_track = g_arm_track, bad = 0;
-    uint64_t press = 0;
-    unsigned long secondary;
-    double old_real_turn = dg_xr_turn_offset_rad();
-
-    memset(&cfg, 0, sizeof cfg);
-    cfg.yaw_sign = cfg.pitch_sign = cfg.roll_sign = 1;
-    cfg.x_sign = cfg.y_sign = cfg.z_sign = 1;
-    cfg.scale = 1000;
-    cfg.trigger_deadzone = 0.1;
-    cfg.trigger_fire = 0.55;
-    memset(&native, 0, sizeof native);
-    native.head_raw.qw = 1;
-    native.right_hand.trigger_value = 0.125f;
-    native.left_hand.thumbstick_x = -0.75f;
-    dg_xr_test_publish(&native);
-    if (!dg_xr_script_program_parse_text(&program, script, sizeof script - 1,
-                                        error, sizeof error)) return 1;
-    if (!dg_xr_script_test_begin(&program, &cfg)) {
-        dg_xr_script_program_free(&program);
-        return 1;
-    }
-    g_source = SRC_SCRIPT;
-    g_xrcfg = cfg;
-    g_arm_track = ARM_TRACK_OFF; /* vanilla arm still uses RIGHT trigger */
-    g_fire_mode = g_move_mode = g_turn_mode = 1;
-    g_turn_gain_mils_live = 1000;
-    g_turn_deadzone_mils_live = 200;
-    secondary = input_secondary_presses(DG_XR_HAND_RIGHT);
-    if (!dg_xr_script_test_step(&frame) || !(input_get_frame(&readback) & 1)) bad += script_route_failure(__LINE__);
-    if (readback.right_hand.grip.raw_local.px != 0.2 ||
-        readback.right_hand.aim.raw_local.pz != -0.45) bad += script_route_failure(__LINE__);
-    if (!fire_command(&fire) || !fire.valid || fire.value != 1.0 ||
-        !fire.press_seq) bad += script_route_failure(__LINE__);
-    press = fire.press_seq;
-    if (!move_command(&move) || !move.valid || move.x != 0.25 || move.y != -0.5) bad += script_route_failure(__LINE__);
-    if (input_secondary_presses(DG_XR_HAND_RIGHT) != secondary + 1) bad += script_route_failure(__LINE__);
-    dg_rec_pack(&readback, 1, 1, 1, 1, 0, &record);
-    dg_rec_unpack(&record, &released);
-    if (released.right_hand.trigger_value != 1.0f ||
-        released.right_hand.grip.raw_local.px != 0.2) bad += script_route_failure(__LINE__);
-    if (!dg_xr_script_test_step(&frame) || !fire_command(&fire) ||
-        fire.press_seq != press || input_turn_offset_rad() <= 0.0) bad += script_route_failure(__LINE__);
-    if (dg_xr_turn_offset_rad() != old_real_turn) bad += script_route_failure(__LINE__); /* no XR writer leak */
-    if (!dg_xr_script_test_step(&frame) || !fire_command(&fire) ||
-        fire.value != 0.0 || fire.release_seq <= press) bad += script_route_failure(__LINE__);
-    if (!dg_xr_script_test_abort(&released)) bad += script_route_failure(__LINE__);
-    if (input_get_frame(&readback) || fire_command(&fire) || move_command(&move)) bad += script_route_failure(__LINE__);
-    /* A fresh real-XR sentinel is deliberately waiting after script EOF. */
-    dg_xr_test_publish(&native);
-    if (input_get_frame(&readback)) bad += script_route_failure(__LINE__);
-    g_source = SRC_XR;
-    if (!(input_get_frame(&readback) & 1) ||
-        readback.right_hand.trigger_value != 0.125f) bad += script_route_failure(__LINE__);
-    dg_xr_script_program_free(&program);
-    g_source = saved_source; g_xrcfg = saved_cfg; g_arm_track = saved_track;
-    g_fire_mode = saved_fire; g_move_mode = saved_move; g_turn_mode = saved_turn;
-    g_turn_gain_mils_live = saved_gain; g_turn_deadzone_mils_live = saved_dz;
-    printf("  %-6s script routes: selected snapshot, right fire, left move, "
-           "turn provider, secondary mailbox, recorder, release and no XR fallback\n",
-           bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-#include "dg_controls_producer_test.inl"
-#include "dg_m9_input_test.inl"
-#include "dg_blade_input_test.inl"
-#include "dg_reload_config_test.inl"
-#include "dg_position_turn_test.h"
-#include "dg_controller_buttons_test.h"
-int dg_bridge_test_position_turn(
-    void (*make_target)(double software_rad, DG_BRIDGE_ARM_TARGET *out));
-
-#include "dg_scene_blur_test.inl"
-
-#ifdef DG_RELEASE_PROFILE_TEST
-#include "dg_release_profile_test.inl"
-#endif
-int main(int argc, char **argv) {
-#ifdef DG_RELEASE_PROFILE_TEST
-    return test_release_profile();
-#endif
-    static const double cases[][6] = {
-        {   0,   0,   0,     0,    0,    0 },
-        {  30,   0,   0,     0,    0,    0 },
-        {   0,  25,   0,     0,    0,    0 },
-        {   0,   0, -15,     0,    0,    0 },
-        {  40, -20,  10,     0,    0,    0 },
-        {   0,   0,   0,   65,  -32,  120 },
-        {  40, -20,  10,   65,  -32,  120 },
-        { 179,  89, -179, -900, 1775, -450 },
-    };
-    int n = (int)(sizeof(cases) / sizeof(cases[0])), i, r, c, bad = 0;
-    int f3_bad = 0;
-
-    /* Preserve the last completed category if a native self-test crashes. */
-    setvbuf(stdout, NULL, _IONBF, 0);
-    if (argc == 2 && _stricmp(argv[1], "controls-self-test") == 0)
-        return test_controls_producer();
-    if (argc == 2 && _stricmp(argv[1], "script-self-test") == 0)
-        return test_script_input_routes();
-
-    /* Not a test run: play a flight recording through the pipeline this
-       binary was built from. Everything else in main stays the default so
-       `test.bat` remains exactly what it was. */
-    if (argc >= 2 && _stricmp(argv[1], "replay") == 0)
-        return replay_main(argc - 2, argv + 2);
-
-    printf("D * D^-1 = I\n");
-    for (i = 0; i < n; i++) {
-        POSE p;
-        MAT d, di, prod;
-        double worst = 0.0;
-        memset(&p, 0, sizeof(p));
-        p.yaw = cases[i][0] * DEG2RAD; p.pitch = cases[i][1] * DEG2RAD;
-        p.roll = cases[i][2] * DEG2RAD;
-        p.tx = cases[i][3]; p.ty = cases[i][4]; p.tz = cases[i][5];
-
-        build_delta(&d, &di, &p);
-        mat_mul(&prod, &d, &di);
-        for (r = 0; r < 4; r++) for (c = 0; c < 4; c++) {
-            double want = (r == c) ? 1.0 : 0.0;
-            double e = fabs((double)prod.m[r][c] - want);
-            if (e > worst) worst = e;
-        }
-        /* Tolerance is scaled by the translation because the inverse's
-           translation row is a product of millimetre-scale terms in float32. */
-        {
-            double scale = 1.0 + fabs(p.tx) + fabs(p.ty) + fabs(p.tz);
-            double tol = 1e-4 * scale;
-            int ok = worst <= tol;
-            if (!ok) bad++;
-            printf("  %-28s worst |D*D^-1 - I| = %.3e  %s\n",
-                   ok ? "ok" : "FAIL", worst, ok ? "" : "<-- inverse is wrong");
-        }
-    }
-    printf("  -> inverse: %s, %d/%d cases\n\n", bad ? "FAILED" : "passed", n - bad, n);
-
-    printf("YXZ decomposition (must invert build_delta's composition)\n");
-    bad += test_ypr_roundtrip();
-    printf("\nOpenXR -> MGS2 axis mapping (leakage must be zero)\n");
-    bad += test_axis_purity();
-    printf("\nrotation + translation composition\n");
-    bad += test_translation_composition();
-    printf("\nreference capture gate\n");
-    bad += test_capture_gate();
-    printf("\nframe-sequential stereo eye\n");
-    bad += test_stereo_alternation();
-    bad += test_stereo_projection_mirror();
-    bad += test_scene_blur();
-    bad += test_render_link_config();
-    bad += test_radar_config();
-    bad += test_stereo_eye_shift();
-    bad += test_eye_truth();
-
-    printf("\nF3 OpenXR motion publication\n");
-    bad += dg_script_gate_self_test();
-    bad += test_script_snapshot_dispatch();
-    bad += test_script_menu_session();
-    bad += test_menu_gameover_producer();
-    f3_bad += test_hand_seqlock();
-    f3_bad += test_hand_tags();
-    f3_bad += test_raw_local_verbatim();
-    f3_bad += test_reference_pose_roundtrip();
-    f3_bad += test_trigger_hysteresis();
-    f3_bad += test_tracking_loss_clears_pose();
-    f3_bad += test_arm_quat_map();
-    f3_bad += test_arm_position_view_map();
-    f3_bad += test_arm_cfg_change_restarts_stream();
-    f3_bad += test_arm_frame_modes();
-    f3_bad += test_arm_frame_freeze_rides_the_stream();
-    f3_bad += test_auto_recenter();
-    f3_bad += test_flight_recorder_replays_bit_identical();
-    f3_bad += test_rec_live_snapshot_machinery();
-    f3_bad += test_camera_telemetry_transform();
-    f3_bad += test_camera_yaw_anchor();
-    f3_bad += test_hanging_camera();
-    f3_bad += test_camera_step_height();
-    f3_bad += test_camera_yaw_apply_integration();
-    f3_bad += test_screen_pose_is_yaw_anchored();
-    f3_bad += test_stick_turn_is_a_room_turn();
-    f3_bad += test_config_defaults_are_the_proven_stand();
-    f3_bad += test_aim_probe_config();
-    bad += test_absolute_aim_transport();
-    bad += test_absolute_record_replay();
-    bad += test_position_turn_covariance();
-    bad += test_controller_button_context();
-    bad += dg_bridge_test_position_turn(position_turn_make_bridge_target);
-    printf("  -> F3 desk tests: %s, %d/20 categories\n",
-           f3_bad ? "FAILED" : "passed", 20 - f3_bad);
-    bad += f3_bad;
-
-    printf("\nU2 menu navigation (pure decision module)\n");
-    bad += dg_menu_self_test();
-
-    printf("\nU2 GV_PadPress anchor (shared resolver, synthetic image)\n");
-    {
-        /* The same finder the bridge and the offline scanner call, run against
-           a hand-built image whose decoys are the two GV_PadMask words that sit
-           four and eight bytes from the press read in the real function. One
-           category, because it is one claim: this resolves GV_PadPress or it
-           resolves nothing. */
-        int anchor_bad = dg_anchors_pad_press_self_test() ? 0 : 1;
-        printf("  %-6s anchor: two 0x20-guarded reads name GV_PadPress, the "
-               "masks beside it do not fool the finder, and every mutation "
-               "fails closed\n", anchor_bad ? "FAIL" : "PASS");
-        printf("  -> U2 anchor desk tests: %s, %d/1 categories\n",
-               anchor_bad ? "FAILED" : "passed", 1 - anchor_bad);
-        bad += anchor_bad;
-    }
-
-    printf("\nF2 game-thread bridge (state machine, detour, anchor gate)\n");
-    {
-        int f2_bad = dg_bridge_self_test();
-        printf("  -> F2 desk tests: %s, %d/55 categories\n",
-               f2_bad ? "FAILED" : "passed", 55 - f2_bad);
-        bad += f2_bad;
-    }
-
-    printf("\npolicy hot reload (dispatcher, staged loader, swap gate)\n");
-    {
-        /* The loader tests need the two DLLs test.bat builds next to this
-           binary - the good one and the wrong-ABI-version one. Derived from
-           the binary's own path so the test runs from any cwd. */
-        char exe_dir[MAX_PATH];
-        char *slash;
-        int pol_bad;
-        GetModuleFileNameA(NULL, exe_dir, sizeof(exe_dir));
-        slash = strrchr(exe_dir, '\\');
-        if (slash) *slash = 0;
-        pol_bad = dg_policy_self_test(exe_dir);
-        printf("  -> policy desk tests: %s, %d/9 categories\n",
-               pol_bad ? "FAILED" : "passed", 9 - pol_bad);
-        bad += pol_bad;
-    }
-
-    printf("\nscript input integration\n");
-    bad += test_script_source_parser();
-    bad += test_controls_producer();
-    bad += test_m9_input();
-    bad += test_blade_input();
-    bad += test_reload_config();
-    bad += test_script_input_routes();
-    printf("\n%s\n", bad ? "FAILED" : "PASSED");
-    return bad ? 1 : 0;
-}
-#endif
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved) {
     if (reason == DLL_PROCESS_ATTACH) {

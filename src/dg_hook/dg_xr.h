@@ -39,14 +39,14 @@ int dg_xr_controller_toggle_take(void);
 typedef void (*DG_XR_CAPTURE_OBSERVER)(int eye, uint64_t capture_id);
 void dg_xr_set_capture_observer(DG_XR_CAPTURE_OBSERVER observer);
 
-#ifdef DG_HOOK_TEST
-unsigned dg_xr_test_controller_buttons(int active, unsigned a, unsigned y, uint32_t now_ms);
-/* Runtime action-valid mask: bit 0 primary, bit 1 recenter action. */
-unsigned dg_xr_test_controller_actions(unsigned valid, unsigned a, unsigned y, uint32_t now_ms);
-void dg_xr_test_controller_context(int gameplay, uint32_t now_ms);
-int dg_xr_test_controller_toggle_take(uint32_t now_ms);
-int dg_xr_test_controller_recenter_current(uint32_t now_ms);
-#endif
+
+
+
+
+
+
+
+
 
 /* Shared with dg_hook.c so there is exactly one definition of a matrix. */
 typedef struct { float m[4][4]; } MAT;
@@ -257,6 +257,7 @@ typedef struct {
     unsigned present_id;
     int valid;
 } DG_NEAR_META;
+#include "dg_stereo_measure.h"
 void dg_xr_capture_measured(void *sc, int eye, const DG_XR_RAW_POSE *raw,
                            const DG_PROJ_FOV *fov, const DG_NEAR_META *meta);
 int  dg_xr_submitting(void);        /* 1 once real layers are going out */
@@ -438,10 +439,10 @@ void dg_xr_hand_pose_sample(DG_XR_HAND_POSE *out, unsigned int hand,
                             unsigned int active, uint64_t sample_seq,
                             int64_t xr_time);
 
-#ifdef DG_HOOK_TEST
-void dg_xr_test_publish(const DG_XR_FRAME *frame);
-void dg_xr_test_press_secondary(unsigned int hand);
-void dg_xr_test_recenter(void);
-#endif
+
+
+
+
+
 
 #endif

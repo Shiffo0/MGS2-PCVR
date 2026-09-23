@@ -638,64 +638,64 @@ static void player_neutral(DG_XR_SCRIPT_PLAYER *player,
     player->previous = *frame;
 }
 
-#ifdef DG_HOOK_TEST
-static DG_XR_SCRIPT_PLAYER g_test_player;
-static const DG_XR_SCRIPT_PROGRAM *g_test_program;
-static DG_XR_CONFIG g_test_cfg;
-static int g_test_active;
 
-int dg_xr_script_test_begin(const DG_XR_SCRIPT_PROGRAM *program,
-                            const DG_XR_CONFIG *cfg)
-{
-    if (!program || !program->steps || !program->step_count || !cfg ||
-        InterlockedCompareExchange(&g_started, 0, 0))
-        return 0;
-    g_test_cfg = *cfg;
-    if (!(g_test_cfg.trigger_deadzone >= 0.0 &&
-          g_test_cfg.trigger_deadzone < 1.0 &&
-          g_test_cfg.trigger_fire > g_test_cfg.trigger_deadzone &&
-          g_test_cfg.trigger_fire <= 1.0)) {
-        g_test_cfg.trigger_deadzone = 0.10;
-        g_test_cfg.trigger_fire = 0.55;
-    }
-    dg_xr_script_turn_rate(0.0);
-    InterlockedExchange(&g_recenter_req, 0);
-    player_init(&g_test_player);
-    g_test_program = program;
-    g_test_active = 1;
-    return 1;
-}
 
-int dg_xr_script_test_step(DG_XR_FRAME *frame)
-{
-    DG_XR_FRAME empty;
-    if (!g_test_active || !frame) return 0;
-    if (!player_step(&g_test_player, g_test_program, &g_test_cfg, frame)) {
-        dg_xr_script_turn_rate(0.0);
-        player_neutral(&g_test_player, &g_test_cfg, frame);
-        g_test_active = 0;
-        frame_identity(&empty);
-        publish_frame(&empty, 0);
-        return 0;
-    }
-    publish_frame(frame, 1);
-    return 1;
-}
 
-int dg_xr_script_test_abort(DG_XR_FRAME *neutral_frame)
-{
-    DG_XR_FRAME empty;
-    if (!g_test_active || !neutral_frame) return 0;
-    dg_xr_script_turn_rate(0.0);
-    player_neutral(&g_test_player, &g_test_cfg, neutral_frame);
-    /* Return the release frame for assertions, then model the worker's final
-       state without sleeps: provider invalid and no physical fallback. */
-    frame_identity(&empty);
-    publish_frame(&empty, 0);
-    g_test_active = 0;
-    return 1;
-}
-#endif
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 static DWORD WINAPI script_thread(LPVOID unused)
 {

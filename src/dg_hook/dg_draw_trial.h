@@ -8,6 +8,7 @@ void dg_draw_trial_attach(ID3D11Device *device,void (*log)(const char*,...));
 void dg_draw_trial_poll(const char *session_marker);
 void dg_draw_trial_present(void);
 void dg_draw_trial_stop(void);
+void dg_blit_boundary_control(const char *dir,int active,unsigned mark,unsigned present,int eye);
 /* Constant-buffer capture (dg_cb_probe.inl): the camera seam publishes the
    matrices it just wrote so the desk analysis can look for them in the
    vertex-shader constant buffers. VEH-safe: interlocked + memcpy only. */
@@ -20,8 +21,11 @@ void dg_ui2d_configure(int on,int scale_mils,int conv_e5,int sign,
 void dg_ui2d_backbuffer(unsigned width,unsigned height);
 /* Sprites in a frame without camera uploads: 0 leave, 1 as the last voted frame, 2 as its opposite eye. */
 void dg_ui2d_hold(int mode);
+/* Camera/Present publish raw stereo-gameplay eligibility; silence closes it. */
+void dg_ui2d_gameplay(int allowed);
 void dg_ui2d_feedback(int on);
 void dg_ui2d_feedback_stats(long*skipped,long*checked);
+void *dg_ui2d_measure_source(void);
 void dg_ui2d_trace(int frames,void*a,void*b);
 void dg_ui2d_backbuffer_ptr(void*resource);
 long dg_ui2d_last_frame_bb(long*indexed,void**srv);

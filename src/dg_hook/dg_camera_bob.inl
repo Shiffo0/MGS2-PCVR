@@ -28,7 +28,26 @@ static int camera_standing_height_read(ULONGLONG base, ULONGLONG player,
         memcmp((const void *)(ULONG_PTR)(base+0x72A88),floors,sizeof floors))
         return 0;
     action = *(const ULONGLONG *)(ULONG_PTR)(player+0xC60);
-    if (action != base+0x51A790 && action != base+0x53D620) return 0;
+    if (action != base+0x51A790 && action != base+0x53D620) {
+        /* JetSpray/SetMic retain standing stance but own another action.
+           Match both action and weapon; demo mic and stance transitions
+           must retain their native camera collision/height behavior. */
+        LONG weapon;
+        static const unsigned char spray[] = {0x4c,0x8b,0xdc,0x57,0x41,0x54,0x41,0x55,
+            0x48,0x81,0xec,0x90,0,0,0};
+        static const unsigned char mic[] = {0x48,0x89,0x5c,0x24,0x10,0x48,0x89,0x6c,
+            0x24,0x18,0x48,0x89,0x74,0x24,0x20,0x57,0x48,0x83,0xec,0x60};
+        if(region_end(player)<player+0x13D2 ||
+           *(const short *)(ULONG_PTR)(player+0x13D0)!=0)return 0;
+        weapon=RD32(player+0xB90);
+        if(action==base+0x51F880 && weapon==14) {
+            if(region_end(action)<action+sizeof spray ||
+               memcmp((const void *)(ULONG_PTR)action,spray,sizeof spray))return 0;
+        } else if(action==base+0x51FD40 && weapon==12) {
+            if(region_end(action)<action+sizeof mic ||
+               memcmp((const void *)(ULONG_PTR)action,mic,sizeof mic))return 0;
+        } else return 0;
+    }
     if (*(const unsigned char *)(ULONG_PTR)(player+0x11A) != 1) return 0;
     floor = *(const float *)(ULONG_PTR)(player+0x110);
     ceiling = *(const float *)(ULONG_PTR)(player+0x114);
@@ -50,7 +69,7 @@ int dg_bridge_camera_standing_height_now(float *height)
         !g_b.a.pl_subject_move ||
         region_end(g_b.a.pl_subject_move) < g_b.a.pl_subject_move+4 ||
         !RD32(g_b.a.pl_subject_move) ||
-        resolve_player(&arm,&player,&weapon) != DG_RESOLVE_OK ||
+        resolve_motion_player(&arm,&player,&weapon) != DG_RESOLVE_OK ||
         arm != gate.arm_body) return 0;
     return camera_standing_height_read((ULONGLONG)(ULONG_PTR)GetModuleHandleW(NULL),
                                        player,height);

@@ -1226,9 +1226,9 @@ void dg_bridge_move_now(const DG_BRIDGE_MOVE *cmd);
 #include "dg_blade.h"
 int dg_bridge_blade_enabled(void);
 int dg_bridge_stinger_enabled(void);
-#ifdef DG_HOOK_TEST
-void dg_bridge_test_stinger_available(int available);
-#endif
+
+
+
 typedef struct {
     DG_M9_SAMPLE m9;
     DG_BLADE_SAMPLE blade;
@@ -1357,15 +1357,15 @@ int dg_bridge_camera_standing_height_now(float *height);
 
 void dg_bridge_screen_seam_now(void);
 
-#ifdef DG_HOOK_TEST
-int dg_bridge_self_test(void);
-/* Runs the real tick-seam entry (the detour target) exactly once, on the
-   caller's thread, with the bridge unarmed - so its body writes nothing.
-   Exists for the policy hot-reload desk test that must prove the SEAM is
-   the adopter: an offered table becomes active across this call and no
-   other. */
-void dg_bridge_test_tick(void);
-#endif
+
+
+
+
+
+
+
+
+
 
 /* Hide original LIFE/radar frame only while the VR FPS bridge is active. */
 void dg_bridge_native_hud_configure(int enabled);

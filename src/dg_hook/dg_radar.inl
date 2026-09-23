@@ -59,13 +59,13 @@ volatile LONG radarWhy[radarWhyCount] = {};
 LONG radarFrameHits = 0;                                     // draw thread only
 UINT radarLastVp[4] = {}, radarLastTex[3] = {};              // x, y, w, h / w, h, format of the last hit
 
-#ifdef DG_DRAW_TRIAL_TEST
-int (*radarTestSink)(ID3D11Texture2D *) = nullptr;           // stands in for the XR side at the desk
-int radarDeliver(ID3D11Texture2D *t) { return radarTestSink ? radarTestSink(t) : -1; }
-#else
+
+
+
+
 extern "C" int dg_xr_radar_capture(void *d3d11_texture2d);
 int radarDeliver(ID3D11Texture2D *t) { return dg_xr_radar_capture(t); }
-#endif
+
 
 // Reads the pipeline under MultiLock and lets go of it before returning.
 int radarInspect(ID3D11DeviceContext *c, UINT vertexCount, ID3D11Texture2D **out) {

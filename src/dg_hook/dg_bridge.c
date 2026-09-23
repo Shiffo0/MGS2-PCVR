@@ -2116,6 +2116,7 @@ static DG_BRIDGE_CONTROLS_FRAME g_controls_frame;
 static uint64_t g_controls_lease;
 static int g_controls_allowed, g_controls_radial_allowed, g_controls_active, g_controls_ladder, g_controls_special;
 static volatile LONG g_controls_fire_retired;
+static unsigned g_controls_epoch;
 #include "dg_radial_game.inl"
 #include "dg_health_bridge.inl"
 #include "dg_action_bridge.inl"
@@ -2132,9 +2133,13 @@ static void blade_stop(void);
 static void blade_tick(int safe);
 static int blade_claim(void);
 #include "dg_native_hud.inl"
+static void mobile_resolve(const LiveImage *im);
+static void mobile_install(void);
+static void mobile_stop(void);
 static void coolant_resolve(const LiveImage *im);
 static void coolant_install(void);
 static void coolant_stop(void);
+#include "dg_shared_motion.inl"
 #include "dg_pistol_reload.inl"
 #include "dg_mod_menu_bridge.inl"
 static void controls_clear_legacy(void) {
@@ -2151,6 +2156,7 @@ void dg_bridge_controls_register(DG_BRIDGE_CONTROLS_PROVIDER provider,
     if (provider) InterlockedExchange(&g_controls_fire_retired,0);
     else if (g_controls_provider) InterlockedExchange(&g_controls_fire_retired,1);
     g_controls_provider=provider; g_controls_stop=stop; g_controls_user=user;
+    g_controls_epoch++;
     g_controls_allowed=g_controls_radial_allowed=0; g_controls_lease=0; g_controls_active=0;
     g_controls_ladder=0;
     g_controls_special=0;
@@ -2261,9 +2267,9 @@ static void bridge_tick(void)
     dg_policy_pass_end(pol_pass);
 }
 
-#ifdef DG_HOOK_TEST
-void dg_bridge_test_tick(void) { bridge_tick(); }
-#endif
+
+
+
 
 /* UI-U1's HUD hide, on the tick seam because that is the game thread and the
    one seam allowed to write game state. The write is the game's own command
@@ -2811,6 +2817,7 @@ int dg_bridge_start(void (*log)(const char *fmt, ...),
     unarmed_prone_resolve(&image);
     native_hud_resolve(&image);
     coolant_resolve(&image);
+    mobile_resolve(&image);
     reload_resolve(&image);
     /* The anchor addresses are image-relative; the copy is about to go away. */
     free_live_image(&image);
@@ -2856,6 +2863,7 @@ int dg_bridge_start(void (*log)(const char *fmt, ...),
 
     native_hud_install();
     coolant_install();
+    mobile_install();
     m9_install(1);
     stinger_install();
     unarmed_prone_install(cfg && cfg->unarmed_prone_enabled);
@@ -3145,25 +3153,25 @@ void dg_bridge_configure(const DG_BRIDGE_CONFIG *cfg)
 
 void dg_bridge_rec_pair(struct DG_REC_PAIRSTATE *out)
 {
-#if DG_ENABLE_DIAGNOSTICS
 
-    if (!out) return;
-    *out = g_b.rec_pair;
 
-#else
 
-#endif
+
+
+
+
+
 }
 
 void dg_bridge_rec_camera(const MAT *eye, const MAT *pers)
 {
-#if DG_ENABLE_DIAGNOSTICS
 
-    dg_rec_pair_camera(&g_b.rec_pair, eye, pers);
 
-#else
 
-#endif
+
+
+
+
 }
 
 void dg_bridge_request_toggle(void)
@@ -3311,6 +3319,7 @@ void dg_bridge_stop(void)
     stinger_stop();
     unarmed_prone_stop();
     native_hud_stop();
+    mobile_stop();
     coolant_stop();
     m9_stop();
     blade_stop();
@@ -5508,76 +5517,76 @@ static void move_tick(int safe_gameplay)
 
 void dg_bridge_move_probe_now(ULONGLONG image_base)
 {
-#if DG_ENABLE_DIAGNOSTICS
 
-    ULONGLONG pad = g_b.a.player_pad;
-    LONG wt = InterlockedCompareExchange(&g_b.mp_w_tick, 0, 0);
-    LONG now = InterlockedCompareExchange(&g_b.c_ticks, 0, 0);
-    uint64_t id = 0; int weapon = -1;
-    if (!wt || wt != now || !pad) return;
-    if (InterlockedCompareExchange(&g_b.mp_c_tick, 0, 0) == now) return;
-    InterlockedExchange(&g_b.mp_c_tick, now);
-    InterlockedExchange(&g_b.mp_c_dir,
-        (LONG)*(volatile short *)(ULONG_PTR)(pad + DG_PAD_DIR_OFFSET));
-    InterlockedExchange(&g_b.mp_c_status, (LONG)RD32(pad + DG_PAD_STATUS_OFFSET));
-    InterlockedExchange(&g_b.mp_c_analog,
-        (LONG)(unsigned short)*(volatile short *)(ULONG_PTR)(pad + DG_PAD_ANALOG_OFFSET));
-    InterlockedExchange(&g_b.mp_c_bytes,
-        ((LONG)*(volatile unsigned char *)(ULONG_PTR)(pad + DG_PAD_LEFT_DX_OFFSET) << 8) |
-         (LONG)*(volatile unsigned char *)(ULONG_PTR)(pad + DG_PAD_LEFT_DY_OFFSET));
-    if (interact_player_now(&id, &weapon) && plausible_ptr(id) &&
-        region_end(id) && id + 0xD28 <= region_end(id)) {
-        InterlockedExchange64(&g_b.mp_c_act,
-            (LONGLONG)*(volatile ULONGLONG *)(ULONG_PTR)(id + 0xC60));
-        InterlockedExchange64(&g_b.mp_c_act2,
-            (LONGLONG)*(volatile ULONGLONG *)(ULONG_PTR)(id + 0xC78));
 
-        {
-            ULONGLONG wp = *(volatile ULONGLONG *)(ULONG_PTR)(id + 0xD00);
-            InterlockedExchange64(&g_b.mp_c_work_pad, (LONGLONG)wp);
-            if (plausible_ptr(wp) && region_end(wp) && wp + 0x28 <= region_end(wp)) {
-                InterlockedExchange(&g_b.mp_c_wp_status, (LONG)RD32(wp + DG_PAD_STATUS_OFFSET));
-                InterlockedExchange(&g_b.mp_c_wp_dir,
-                    (LONG)*(volatile short *)(ULONG_PTR)(wp + DG_PAD_DIR_OFFSET));
-                InterlockedExchange(&g_b.mp_c_wp_bytes,
-                    ((LONG)*(volatile unsigned char *)(ULONG_PTR)(wp + DG_PAD_LEFT_DX_OFFSET) << 8) |
-                     (LONG)*(volatile unsigned char *)(ULONG_PTR)(wp + DG_PAD_LEFT_DY_OFFSET));
-            } else {
-                InterlockedExchange(&g_b.mp_c_wp_status, 0);
-                InterlockedExchange(&g_b.mp_c_wp_dir, -3);
-                InterlockedExchange(&g_b.mp_c_wp_bytes, 0);
-            }
-        }
-        InterlockedExchange(&g_b.mp_c_rot,
-            (LONG)*(volatile short *)(ULONG_PTR)(id + 0x82));
-        InterlockedExchange(&g_b.mp_c_turn,
-            (LONG)*(volatile short *)(ULONG_PTR)(id + 0x8A));
-    } else {
-        InterlockedExchange64(&g_b.mp_c_act, 0);
-    }
-    if (g_b.a.gv_pad_data)
-        InterlockedExchange(&g_b.mp_c_gv_flag,
-            (LONG)RD32(g_b.a.gv_pad_data + DG_GV_PAD_FLAG_OFFSET));
 
-    if (image_base) {
-        ULONGLONG wl = *(volatile ULONGLONG *)(ULONG_PTR)(image_base + 0x17DF780ULL);
-        InterlockedExchange64(&g_b.mp_c_workl, (LONGLONG)wl);
-        if (plausible_ptr(wl) && region_end(wl) && wl + 0x520 <= region_end(wl)) {
-            InterlockedExchange(&g_b.mp_c_padto, (LONG)RD32(wl + 0x510));
-            InterlockedExchange(&g_b.mp_c_wallto, (LONG)RD32(wl + 0x4F8));
-            InterlockedExchange(&g_b.mp_c_liable, (LONG)RD32(wl + 0x50C));
-            InterlockedExchange(&g_b.mp_c_padforce, (LONG)RD32(wl + 0x514));
-        }
-    }
-    if (id && plausible_ptr(id) && region_end(id) && id + 0xCA8 <= region_end(id)) {
-        InterlockedExchange(&g_b.mp_c_data, (LONG)RD32(id + 0xCA0));
-        InterlockedExchange(&g_b.mp_c_data2, (LONG)RD32(id + 0xCA4));
-    }
-    InterlockedIncrement(&g_b.mp_c_seen);
 
-#else
 
-#endif
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 }
 
 /* One tick of the trigger contract. In DRY nothing is written anywhere: the
@@ -5587,6 +5596,7 @@ void dg_bridge_move_probe_now(ULONGLONG image_base)
    run that finally writes has already had its edges checked against a real
    player rather than against a test harness. */
 #include "dg_coolant_trace.inl"
+#include "dg_mobile_tools.inl"
 static void fire_tick(int safe_gameplay)
 {
     DG_BRIDGE_FIRE cmd;
@@ -5599,6 +5609,7 @@ static void fire_tick(int safe_gameplay)
     static unsigned long last_stream;
     int mode = (int)InterlockedCompareExchange(&g_b.fire_mode, 0, 0);
 
+    coolant_lease.ready=0;
     if (blade_claim() || mode == DG_FIRE_MODE_OFF) {
         dg_fire_reset(&g_b.fire);
         dg_recoil_reset(&g_b.recoil);
@@ -5742,6 +5753,16 @@ static void fire_tick(int safe_gameplay)
         else fire_write(&out, wmask, pidx);
     }
     coolant_trace_tick(safe_gameplay,mode,&in,&out,0); /* actual post-write pad */
+    if(weapon==14 && mode==DG_FIRE_MODE_ON && in.can_write && in.input_ok &&
+       !in.physical_down && !reload_block && !m9_block && !g_mod_capture &&
+       out.status && wmask && pidx>=0 && pidx<DG_PAD_PRESSURE_COUNT) {
+        coolant_lease.player=pwork;coolant_lease.pad=g_b.a.player_pad;
+        coolant_lease.tick=(unsigned)g_b.c_ticks;coolant_lease.stream=cmd.stream_id;
+        coolant_lease.press=cmd.press_seq;coolant_lease.mask=(unsigned)wmask;
+        coolant_lease.pressure=out.pressure;coolant_lease.ready=1;
+        coolant_command=cmd;coolant_command_tick=(unsigned)g_b.c_ticks;
+        coolant_epoch=g_controls_epoch;
+    }
 
     /* The kick. A shot is one impulse; the spring is stepped every tick
        whether or not one arrived, and deliberately including the ticks where
@@ -7602,8 +7623,10 @@ int dg_bridge_menu_gameover_now(void)
        !g_b.a.gm_menu_status || !g_b.a.gm_menu_status_scn)return 0;
     game=(unsigned)RD32(g_b.a.gm_game_status)|(unsigned)RD32(g_b.a.gm_game_status_scn);
     menu=(unsigned)RD32(g_b.a.gm_menu_status)|(unsigned)RD32(g_b.a.gm_menu_status_scn);
-    return (game&0x80004000u)!=0 && !(game&(DG_GAME_UNSAFE_MASK&~0x80004000u)) &&
-           !(menu&DG_MENU_UNSAFE_MASK);
+    /* The displayed failure menu is authoritative even when the preceding
+       scripted sequence leaves demo/cut-in flags set. GAMEOVER alone also
+       covers the death sequence, before there is a menu to control. */
+    return (game&0x00004000u)!=0 && !(menu&DG_MENU_UNSAFE_MASK);
 }
 static int xr_menu_context_now(void)
 {
@@ -8328,6 +8351,7 @@ int dg_bridge_turn_probe_take(DG_TURN_PROBE_SAMPLE *out)
 void dg_bridge_stats(DG_BRIDGE_STATS *out)
 {
     coolant_trace_flush();
+    if(g_b.log && g_mobile_tools.live)g_b.log("  mobile tools: turn_calls=%ld step_calls=%ld pose_changes=%ld anchor_changes=%ld (consumer counts, not movement acceptance)\r\n",g_mobile_tools.turns,g_mobile_tools.steps,g_mobile_tools.poses,g_mobile_tools.anchors);
     memset(out, 0, sizeof(*out));
     out->ticks = g_b.c_ticks;
     out->fps_requested = g_b.c_requested;
@@ -8850,9204 +8874,9208 @@ void dg_bridge_stats(DG_BRIDGE_STATS *out)
 
 /* ====================================================== desk tests ======= */
 
-#ifdef DG_HOOK_TEST
-
-static int t_camera_pair_telemetry(void)
-{
-    DG_REC_PAIRSTATE saved_pair = g_b.rec_pair, expect;
-    MAT eye, pers;
-    LONG saved_armed = InterlockedCompareExchange(&g_b.armed, 0, 0);
-    int i, j, bad = 0;
-
-    memset(&eye, 0, sizeof eye);
-    eye.m[0][0] = eye.m[1][1] = eye.m[2][2] = eye.m[3][3] = 1.0f;
-    memset(&pers, 0, sizeof pers);
-    pers.m[0][0] = 1.7f;
-    pers.m[1][1] = 2.3f;
-    pers.m[2][3] = 1.0f;
-
-    /* A valid camera is accepted only on a pair that really read its frames. */
-    memset(&g_b.rec_pair, 0, sizeof g_b.rec_pair);
-    g_b.rec_pair.flags = DG_REC_PAIR_F_FRAMES;
-    dg_bridge_rec_camera(&eye, &pers);
-    if (!(g_b.rec_pair.flags & DG_REC_PAIR_F_CAMERA)) bad++;
-    for (i = 0; i < 3; i++) for (j = 0; j < 3; j++)
-        if (g_b.rec_pair.camera_world[i][j] != eye.m[i][j]) bad++;
-    if (g_b.rec_pair.camera_proj[0] != pers.m[0][0] ||
-        g_b.rec_pair.camera_proj[1] != pers.m[1][1] ||
-        g_b.rec_pair.camera_proj[2] != pers.m[2][3]) bad++;
-
-    /* The helper must fail closed when the pair has no FRAMES publication. */
-    memset(&g_b.rec_pair, 0, sizeof g_b.rec_pair);
-    dg_bridge_rec_camera(&eye, &pers);
-    if (g_b.rec_pair.flags & DG_REC_PAIR_F_CAMERA) bad++;
-    for (i = 0; i < 3; i++) for (j = 0; j < 3; j++)
-        if (g_b.rec_pair.camera_world[i][j] != 0.0f) bad++;
-    for (i = 0; i < 3; i++)
-        if (g_b.rec_pair.camera_proj[i] != 0.0f) bad++;
-
-    /* The arm seam is also the lifecycle boundary: a disarmed early return
-       clears every stale field, retaining only the explicit -1 absence value. */
-    memset(&g_b.rec_pair, 0xA5, sizeof g_b.rec_pair);
-    g_b.rec_pair.flags = DG_REC_PAIR_F_FRAMES | DG_REC_PAIR_F_CAMERA;
-    g_b.rec_pair.camera_world[0][0] = 9.0f;
-    InterlockedExchange(&g_b.armed, 0);
-    dg_bridge_arm_seam_now(NULL);
-    memset(&expect, 0, sizeof expect);
-    expect.rest_drift_deg = -1.0f;
-    if (memcmp(&g_b.rec_pair, &expect, sizeof expect) != 0) bad++;
-
-    g_b.rec_pair = saved_pair;
-    InterlockedExchange(&g_b.armed, saved_armed);
-    printf("  %-6s camera pair: FRAMES-gated attach, absent camera fails closed, "
-           "and disarmed arm seam clears stale pair\n", bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-static void t_input(DG_FPS_INPUT *in, int mode)
-{
-    memset(in, 0, sizeof(*in));
-    in->mode = mode;
-    in->native_override = 1;
-    in->native_toggle = 1;
-    in->pad_subject_mask = 0x0040;          /* a plausible PL_PAD_SUBJECT */
-    in->pad_stop_aim_mask = 0x0008;         /* a plausible PL_PAD_STOP_AIM */
-    in->safe_gameplay = 1;
-}
-
-static int t_off_never_writes(void)
-{
-    DG_FPS_STATE s;
-    DG_FPS_INPUT in;
-    DG_FPS_STEP out;
-    int i;
-    int writes = 0;
-    dg_fps_init(&s);
-    for (i = 0; i < 200; i++) {
-        t_input(&in, DG_FPS_MODE_OFF);
-        in.native_override = i & 1;
-        in.native_toggle = (i >> 1) & 1;
-        in.native_active = (i >> 2) & 1;
-        in.subject_move = i % 4;
-        in.pad_subject_mask = (i & 4) ? 0 : 0x40;
-        in.safe_gameplay = (i & 8) == 0;
-        in.toggle_request = (i & 16) != 0;
-        in.level_load = (i & 32) != 0;
-        dg_fps_step(&s, &in, &out);
-        if (out.write != DG_FPS_WRITE_NONE) writes++;
-    }
-    printf("  %-6s off produces no write in 200 varied ticks (%d)\n",
-           writes ? "FAIL" : "ok", writes);
-    return writes ? 1 : 0;
-}
-
-/* Drives the machine the way the game would: an injected edge is confirmed by
-   the native state flipping one tick later, exactly as CheckWatch would. */
-static int t_toggle_ten_cycles(void)
-{
-    DG_FPS_STATE s;
-    DG_FPS_INPUT in;
-    DG_FPS_STEP out;
-    int native = 0;
-    int cycle;
-    int edges = 0;
-    int enters = 0;
-    int leaves = 0;
-    int bad = 0;
-    int tick;
-
-    dg_fps_init(&s);
-    for (cycle = 0; cycle < 10; cycle++) {
-        int phase;
-        for (phase = 0; phase < 2; phase++) {
-            int want = phase == 0 ? 1 : 0;
-            int pending = 0;
-            for (tick = 0; tick < 20; tick++) {
-                t_input(&in, DG_FPS_MODE_TOGGLE);
-                in.native_active = native;
-                in.toggle_request = (tick == 0);
-                dg_fps_step(&s, &in, &out);
-                if (out.write == DG_FPS_WRITE_SUBJECT_EDGE) {
-                    edges++;
-                    pending = 1;
-                } else if (out.write != DG_FPS_WRITE_NONE) {
-                    bad++;               /* Override/Toggle already correct */
-                } else if (pending) {
-                    native = !native;    /* CheckWatch consumed the edge */
-                    pending = 0;
-                }
-                if (native == want && s.state == DG_FPS_ACTIVE) enters++;
-                if (native == want && want == 0 && s.state == DG_FPS_OFF)
-                    leaves++;
-                if (native == want && (s.state == DG_FPS_ACTIVE ||
-                                       s.state == DG_FPS_OFF))
-                    break;
-            }
-            if (native != want) bad++;
-        }
-    }
-    if (edges != 20) bad++;
-    if (s.state != DG_FPS_OFF) bad++;
-    printf("  %-6s toggle: 10 enter/leave cycles, %d edges, %d enters, "
-           "%d leaves, end %s\n",
-           bad ? "FAIL" : "ok", edges, enters, leaves,
-           dg_fps_state_name(s.state));
-    return bad ? 1 : 0;
-}
-
-static int t_move_is_borrowed_only_on_request(void)
-{
-    DG_FPS_STATE s;
-    DG_FPS_INPUT in;
-    DG_FPS_STEP out;
-    int tick, moves, edge_at, move_at, bad = 0;
-    int native_move;
-
-    /* NATIVE: a full enter, hold and leave, with Move never touched. */
-    dg_fps_init(&s);
-    moves = 0;
-    native_move = 1;
-    for (tick = 0; tick < 30; tick++) {
-        t_input(&in, DG_FPS_MODE_TOGGLE);
-        in.move_mode = DG_FPS_MOVE_NATIVE;
-        in.native_move = native_move;
-        in.saved_move = 1;
-        in.native_active = (tick >= 3 && tick < 20);
-        in.toggle_request = (tick == 0 || tick == 18);
-        dg_fps_step(&s, &in, &out);
-        if (out.write == DG_FPS_WRITE_MOVE) moves++;
-    }
-    if (moves != 0) bad++;
-
-    /* OFF: Move must go down before the edge, and come back afterwards. */
-    dg_fps_init(&s);
-    edge_at = move_at = -1;
-    native_move = 1;
-    for (tick = 0; tick < 40; tick++) {
-        t_input(&in, DG_FPS_MODE_TOGGLE);
-        in.move_mode = DG_FPS_MOVE_OFF;
-        in.native_move = native_move;
-        in.saved_move = 1;
-        in.native_active = (tick >= 8 && tick < 20);
-        in.toggle_request = (tick == 0 || tick == 18);
-        dg_fps_step(&s, &in, &out);
-        if (out.write == DG_FPS_WRITE_MOVE) {
-            native_move = out.write_value;
-            if (move_at < 0 && out.write_value == 0) move_at = tick;
-        }
-        if (out.write == DG_FPS_WRITE_SUBJECT_EDGE && edge_at < 0)
-            edge_at = tick;
-    }
-    if (move_at < 0) bad++;                       /* it was never lowered */
-    if (edge_at < 0 || move_at >= edge_at) bad++; /* or lowered too late  */
-    if (native_move != 1) bad++;                  /* or never handed back */
-
-    dg_fps_init(&s);
-    edge_at = move_at = -1;
-    native_move = 0;
-    for (tick = 0; tick < 40; tick++) {
-        t_input(&in, DG_FPS_MODE_TOGGLE);
-        in.move_mode = DG_FPS_MOVE_ON;
-        in.native_move = native_move;
-        in.saved_move = 0;
-        in.native_active = (tick >= 8 && tick < 20);
-        in.toggle_request = (tick == 0 || tick == 18);
-        dg_fps_step(&s, &in, &out);
-        if (out.write == DG_FPS_WRITE_MOVE) {
-            native_move = out.write_value;
-            if (move_at < 0 && out.write_value == 1) move_at = tick;
-        }
-        if (out.write == DG_FPS_WRITE_SUBJECT_EDGE && edge_at < 0)
-            edge_at = tick;
-    }
-    if (move_at < 0) bad++;                       /* it was never raised  */
-    if (edge_at < 0 || move_at >= edge_at) bad++; /* or raised too late   */
-    if (native_move != 0) bad++;                  /* or never handed back */
-
-    printf("  %-6s Move is left alone by default, driven to 0 or 1 before the "
-           "edge on request and handed back after\n", bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-/* The engine drops out of first person on its own while the bridge holds a
-   toggle. That happens in ordinary play - the first run with a weapon equipped
-   did it six times - and the bridge used to answer every one of them with a
-   fresh synthetic press of the game's own first person button. Two requests
-   produced eight edges and seven entries, delivered while the player was
-   aiming.
-   In TOGGLE the press meant "toggle now", so the engine leaving IS the answer.
-   In ALWAYS holding it through is the entire contract, so there the re-entry
-   has to survive. One test, both modes, because the bug was treating them
-   alike. */
-static int t_engine_leaving_is_not_a_fight(void)
-{
-    DG_FPS_STATE s;
-    DG_FPS_INPUT in;
-    DG_FPS_STEP out;
-    int tick, edges, bad = 0;
-
-    /* TOGGLE: one request in, first person reached, then the engine lets go. */
-    {
-        DG_FPS_RIG rig={0};
-        if(fps_rig_changed(&rig,100,1,1))bad++;
-        if(fps_rig_changed(&rig,0,1,1))bad++; /* loading: unknown */
-        if(!fps_rig_changed(&rig,200,1,1))bad++; /* new rig, Active retained */
-        if(!fps_rig_changed(&rig,200,1,1))bad++; /* stays pending */
-        if(fps_rig_changed(&rig,0,1,0))bad++; /* native leave acknowledged */
-        if(fps_rig_changed(&rig,200,1,1))bad++;
-        if(fps_rig_changed(&rig,300,0,1))bad++; /* explicit OFF */
-        dg_fps_init(&s);t_input(&in,DG_FPS_MODE_TOGGLE);
-        in.native_active=1;s.state=DG_FPS_ACTIVE;rig.arm=300;rig.pending=0;
-        if(!fps_calibration_ready(&s,&in,&rig))bad++;
-        /* Reproduce a new arm while native Active remains set. No recenter
-           during the recovery delay or either injected FPS edge. */
-        fps_rig_changed(&rig,400,1,1);
-        if(fps_calibration_ready(&s,&in,&rig))bad++;
-        rig.pending=0;
-        s.state=DG_FPS_REQUEST_LEAVE;if(fps_calibration_ready(&s,&in,&rig))bad++;
-        s.state=DG_FPS_OFF;if(fps_calibration_ready(&s,&in,&rig))bad++;
-        s.state=DG_FPS_REQUEST_ENTER;if(fps_calibration_ready(&s,&in,&rig))bad++;
-        s.state=DG_FPS_ACTIVE;if(!fps_calibration_ready(&s,&in,&rig))bad++;
-        in.level_load=1;if(fps_calibration_ready(&s,&in,&rig))bad++;
-        in.level_load=0;in.native_camera_missing=1;if(fps_calibration_ready(&s,&in,&rig))bad++;
-        in.native_camera_missing=0;in.safe_gameplay=0;if(fps_calibration_ready(&s,&in,&rig))bad++;
-        in.safe_gameplay=1;in.native_active=0;if(fps_calibration_ready(&s,&in,&rig))bad++;
-        in.native_active=1;s.camera_missing_ticks=1;if(fps_calibration_ready(&s,&in,&rig))bad++;
-    }
-    dg_fps_init(&s);
-    edges = 0;
-    for (tick = 0; tick < 40; tick++) {
-        t_input(&in, DG_FPS_MODE_TOGGLE);
-        /* Active for the middle stretch only: the engine takes it away at 20
-           without anyone asking, exactly as aiming appears to. */
-        in.native_active = (tick >= 5 && tick < 20);
-        in.toggle_request = (tick == 0);
-        dg_fps_step(&s, &in, &out);
-        if (out.write == DG_FPS_WRITE_SUBJECT_EDGE) edges++;
-    }
-    /* One edge, for the press the player actually made. */
-    if (edges != 1) bad++;
-    if (s.state != DG_FPS_SUSPENDED || !s.desired) bad++;
-    /* After the native exit settles, restore once. Explicit A cancels even
-       during recovery; an unsafe interval never emits a subject edge. */
-    for (tick=0; tick<DG_FPS_RETRY_TICKS+1; tick++) {
-        t_input(&in,DG_FPS_MODE_TOGGLE);
-        dg_fps_step(&s,&in,&out);
-        if(out.write==DG_FPS_WRITE_SUBJECT_EDGE) edges++;
-    }
-    if(edges!=2) bad++;
-    in.native_active=1;dg_fps_step(&s,&in,&out);
-    in.native_active=0;dg_fps_step(&s,&in,&out);
-    in.toggle_request=1;dg_fps_step(&s,&in,&out);
-    if(s.desired || out.write==DG_FPS_WRITE_SUBJECT_EDGE)bad++;
-
-    /* A level retained Active but its readable native camera is OFF. Short
-       gaps/unsafe intervals do not act; sustained loss uses native off/on. */
-    dg_fps_init(&s); s.state=DG_FPS_ACTIVE; s.desired=1; s.owned=1;
-    t_input(&in,DG_FPS_MODE_TOGGLE); in.native_active=1;
-    in.native_camera_missing=1;
-    for(tick=0;tick<DG_FPS_RETRY_TICKS-1;tick++) {
-        dg_fps_step(&s,&in,&out);
-        if(out.write==DG_FPS_WRITE_SUBJECT_EDGE)bad++;
-    }
-    in.safe_gameplay=0;dg_fps_step(&s,&in,&out);
-    if(out.write || s.camera_missing_ticks || !s.desired)bad++;
-    in.safe_gameplay=1;dg_fps_step(&s,&in,&out);
-    for(tick=0;tick<DG_FPS_RETRY_TICKS;tick++) dg_fps_step(&s,&in,&out);
-    if(out.write!=DG_FPS_WRITE_SUBJECT_EDGE ||
-       s.state!=DG_FPS_REQUEST_LEAVE || !s.desired)bad++;
-    in.native_active=0;dg_fps_step(&s,&in,&out);
-    if(s.state!=DG_FPS_OFF || !s.desired)bad++;
-    dg_fps_step(&s,&in,&out);
-    if(out.write!=DG_FPS_WRITE_SUBJECT_EDGE || s.state!=DG_FPS_REQUEST_ENTER)bad++;
-    in.native_active=1;in.native_camera_missing=0;dg_fps_step(&s,&in,&out);
-    if(s.state!=DG_FPS_ACTIVE || !s.desired)bad++;
-    /* A healthy camera and an explicitly OFF preference never recover. */
-    for(tick=0;tick<DG_FPS_RETRY_TICKS+5;tick++) {
-        dg_fps_step(&s,&in,&out);if(out.write)bad++;
-    }
-    s.desired=0;s.owned=0;in.native_camera_missing=1;
-    for(tick=0;tick<DG_FPS_RETRY_TICKS+5;tick++) {
-        dg_fps_step(&s,&in,&out);if(out.write)bad++;
-    }
-
-    /* ALWAYS: the same departure, and here the bridge must take it back. */
-    dg_fps_init(&s);
-    edges = 0;
-    for (tick = 0; tick < 40; tick++) {
-        t_input(&in, DG_FPS_MODE_ALWAYS);
-        in.native_active = (tick >= 5 && tick < 20);
-        dg_fps_step(&s, &in, &out);
-        if (out.write == DG_FPS_WRITE_SUBJECT_EDGE) edges++;
-    }
-    if (edges < 2) bad++;
-
-    printf("  %-6s VR toggle survives native exit, delayed restore and explicit cancellation\n",
-           bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-/* The player uses the game's own first person button while the bridge is armed
-   but has never been asked for anything. This is the F2 live gate: armed, no
-   toggle, play normally. The native control is a hold, so first person comes
-   and goes many times, and every one of those is the player's. The bridge must
-   follow without ever emitting a subject edge - the first live run bounced the
-   player out of first person sixteen times because OFF treated the mismatch as
-   an error and forced a leave. */
-static int t_native_fps_is_left_alone(void)
-{
-    DG_FPS_STATE s;
-    DG_FPS_INPUT in;
-    DG_FPS_STEP out;
-    int hold, tick;
-    int edges = 0;
-    int bad = 0;
-    int saw_active = 0;
-    int saw_off = 0;
-
-    dg_fps_init(&s);
-    for (hold = 0; hold < 16; hold++) {
-        /* Held for a while, then released for a while. */
-        for (tick = 0; tick < 24; tick++) {
-            t_input(&in, DG_FPS_MODE_TOGGLE);
-            /* Idle means the game's own values, not ours: Override and Toggle
-               are back at the arm-time zeros, so the button is still a hold. */
-            in.native_override = 0;
-            in.native_toggle = 0;
-            in.native_active = tick < 12;
-            dg_fps_step(&s, &in, &out);
-            if (out.write != DG_FPS_WRITE_NONE) edges++;
-            if (s.held) bad++;         /* nothing raised, nothing owed back */
-            if (in.native_active && s.state == DG_FPS_ACTIVE) saw_active = 1;
-            if (!in.native_active && s.state == DG_FPS_OFF) saw_off = 1;
-            if (s.desired) bad++;      /* nobody asked for first person */
-            if (s.owned) bad++;        /* and we never entered it */
-        }
-    }
-    if (edges) bad++;
-    if (!saw_active || !saw_off) bad++;
-    if (s.state != DG_FPS_OFF) bad++;
-    printf("  %-6s native first person: 16 holds, %d writes, followed %d/%d, "
-           "end %s\n",
-           bad ? "FAIL" : "ok", edges, saw_active, saw_off,
-           dg_fps_state_name(s.state));
-    return bad ? 1 : 0;
-}
-
-/* Override and Toggle are borrowed, not taken: raised when a request arrives
-   and handed back once the camera is out again. The order is the whole point -
-   handing Toggle back while first person is still up would leave the engine
-   reading a hold it never got. Drives the native side the way CheckWatch does,
-   confirming an injected edge one tick later. */
-static int t_claim_is_released_when_idle(void)
-{
-    DG_FPS_STATE s;
-    DG_FPS_INPUT in;
-    DG_FPS_STEP out;
-    int nover = 0, ntog = 0, nactive = 0, prev_active = 0;
-    int subj_toggle = 0;
-    int pending = 0;
-    int bad = 0;
-    int entered = 0;
-    int left_tick = -1;
-    int released_tick = -1;
-    int tick;
-
-    dg_fps_init(&s);
-    for (tick = 0; tick < 200; tick++) {
-
-        if (nover || nactive) {
-            if (nover) subj_toggle = ntog;
-            if (pending) { nactive = !nactive; pending = 0; }
-        }
-        if (prev_active && !nactive) left_tick = tick;
-        if (nactive) entered = 1;
-        prev_active = nactive;
-
-        t_input(&in, DG_FPS_MODE_TOGGLE);
-        in.native_override = nover;
-        in.native_toggle = ntog;
-        in.native_active = nactive;
-        in.toggle_request = (tick == 10 || tick == 60);   /* on, then off */
-        dg_fps_step(&s, &in, &out);
-
-        if (tick < 10 && (out.write != DG_FPS_WRITE_NONE || s.held))
-            bad++;                          /* idle must cost nothing at all */
-
-        if ((out.write == DG_FPS_WRITE_OVERRIDE ||
-             out.write == DG_FPS_WRITE_TOGGLE) && out.write_value == 0) {
-            if (nactive) bad++;             /* handed back mid first person */
-            if (released_tick < 0) released_tick = tick;
-        }
-
-        switch (out.write) {
-        case DG_FPS_WRITE_OVERRIDE: nover = out.write_value; break;
-        case DG_FPS_WRITE_TOGGLE: ntog = out.write_value; break;
-        case DG_FPS_WRITE_SUBJECT_EDGE: pending = 1; break;
-        default: break;
-        }
-    }
-
-    if (!entered) bad++;
-    if (left_tick < 0 || released_tick < left_tick) bad++;
-    if (nover != 0 || ntog != 0) bad++;     /* back to the arm-time values */
-    /* The shadow has to come back too, and only the engine can put it back:
-       release Override before Toggle and this stays 1 for the rest of the
-       session, with nothing in the values we own to show for it. */
-    if (subj_toggle != 0) bad++;
-    if (s.held || s.owned || s.desired) bad++;
-    if (s.state != DG_FPS_OFF) bad++;
-    printf("  %-6s Override/Toggle raised on request, handed back at tick %d "
-           "after the camera left at %d, PL_SubjectToggle back to %d\n",
-           bad ? "FAIL" : "ok", released_tick, left_tick, subj_toggle);
-    return bad ? 1 : 0;
-}
-
-/* The live gate's step C stopped after exactly one toggle: nine ticks after the
-   camera came back out, the bridge suspended on MGSHDFIX_OWNER and stayed there,
-   because handing Override back looks identical to a second owner clearing it
-   unless the test knows whether we were holding it.
-
-   Both halves matter. Idling must never latch, and a real second owner must
-   still latch - a detector that has stopped detecting is the worse bug of the
-   two, since it ends in two writers of one variable. */
-static int t_idle_is_not_a_second_owner(void)
-{
-    DG_FPS_STATE s;
-    DG_FPS_INPUT in;
-    DG_FPS_STEP out;
-    int nover = 0, ntog = 0, nactive = 0;
-    int pending = 0, fights = 0;
-    int bad = 0;
-    int latched_tick = -1;
-    int contested_tick = -1;
-    int tick;
-
-    /* Half one: the exact shape of the live run - one toggle in, one toggle
-       out, then idle. Memory keeps whatever we write, as the game did. */
-    dg_fps_init(&s);
-    for (tick = 0; tick < 300; tick++) {
-        if (pending) { nactive = !nactive; pending = 0; }
-        if (latched_tick < 0 && fight_step(s.held, nover, &fights))
-            latched_tick = tick;
-
-        t_input(&in, DG_FPS_MODE_TOGGLE);
-        in.native_override = nover;
-        in.native_toggle = ntog;
-        in.native_active = nactive;
-        in.toggle_request = (tick == 10 || tick == 60);
-        dg_fps_step(&s, &in, &out);
-
-        switch (out.write) {
-        case DG_FPS_WRITE_OVERRIDE: nover = out.write_value; break;
-        case DG_FPS_WRITE_TOGGLE: ntog = out.write_value; break;
-        case DG_FPS_WRITE_SUBJECT_EDGE: pending = 1; break;
-        default: break;
-        }
-    }
-    if (latched_tick >= 0) bad++;
-
-    /* Half two: someone else clears Override every frame while we are trying to
-       hold it. That has to latch, and quickly. */
-    dg_fps_init(&s);
-    nover = ntog = nactive = pending = fights = 0;
-    for (tick = 0; tick < 60; tick++) {
-        if (contested_tick < 0 && fight_step(s.held, nover, &fights))
-            contested_tick = tick;
-
-        t_input(&in, DG_FPS_MODE_TOGGLE);
-        in.native_override = nover;
-        in.native_toggle = ntog;
-        in.native_active = nactive;
-        in.toggle_request = (tick == 1);
-        dg_fps_step(&s, &in, &out);
-
-        if (out.write == DG_FPS_WRITE_TOGGLE) ntog = out.write_value;
-        nover = 0;                      /* the other owner wins every frame */
-    }
-    if (contested_tick < 0 || contested_tick > 16) bad++;
-
-    printf("  %-6s idle never reads as a second owner (latched %d), a real one "
-           "still does by tick %d\n",
-           bad ? "FAIL" : "ok", latched_tick, contested_tick);
-    return bad ? 1 : 0;
-}
-
-static int t_player_status_mask(void)
-{
-    static const struct { ULONGLONG bit; const char *name; int unsafe; }
-    cases[] = {
-        { 0x0000000000000080ULL, "PLAYER_LOCKER",    1 },
-        { 0x0000000000000400ULL, "PLAYER_DOWNED",    1 },
-        { 0x0000000000000800ULL, "PLAYER_HOLD",      0 },
-        { 0x0000000000008000ULL, "PLAYER_DEAD",      1 },
-        { 0x0000000008000000ULL, "PLAYER_MENU_OPEN", 1 },
-        { 0x0000000010000000ULL, "PLAYER_STOP",      1 },
-        { 0x0000020000000000ULL, "PLAYER_PAD_OFF",   1 }
-    };
-    int bad = 0;
-    size_t i;
-
-    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
-        int refused = (cases[i].bit & DG_PLAYER_UNSAFE_MASK) != 0;
-        if (refused != cases[i].unsafe) {
-            bad++;
-            printf("  FAIL   %s: refused %d, wanted %d\n",
-                   cases[i].name, refused, cases[i].unsafe);
-        }
-    }
-    printf("  %-6s player-status mask 0x%016llX permits weapon-ready HOLD "
-           "and still refuses takeover, death, menu and pad-off states\n",
-           bad ? "FAIL" : "ok",
-           (unsigned __int64)DG_PLAYER_UNSAFE_MASK);
-    return bad ? 1 : 0;
-}
-
-/* The game-status mask is the whole of the new decision, so it is pinned bit by
-   bit rather than left to whoever next edits the macro. Both directions matter:
-   a bit that should suspend and does not is a camera taken over mid-cutscene,
-   and a bit that suspends when it should not is first person refused during an
-   alert - which is most of the game. */
-static int t_game_status_mask(void)
-{
-    static const struct { unsigned int bit; const char *name; int unsafe; }
-    cases[] = {
-        { 0x00000040u, "STATE_CUT_IN",        1 },
-        { 0x00004000u, "STATE_DISP_GAMEOVER", 1 },
-        { 0x08000000u, "STATE_SCN_DEMO",      1 },
-        { 0x10000000u, "STATE_DEMO",          1 },
-        { 0x20000000u, "STATE_PRG_DEMO",      1 },
-        { 0x40000000u, "STATE_PAD_DEMO",      1 },
-        { 0x80000000u, "STATE_GAMEOVER",      1 },
-        { 0x00000001u, "STATE_DETECT",        0 },
-        { 0x00000002u, "STATE_CLEARING",      0 },
-        { 0x00000010u, "STATE_CHAFF",         0 },
-        { 0x00000020u, "STATE_STUN",          0 },
-        { 0x00000080u, "STATE_RADAR_JAMMING", 0 },
-        { 0x00000200u, "STATE_PAUSE_DISABLE", 0 },
-        { 0x00400000u, "STATE_VR_ONLY",       0 },
-        { 0x00800000u, "STATE_VR_ANOTHER",    0 },
-        { 0x01000000u, "STATE_BOSS_SURVIVAL", 0 }
-    };
-    int bad = 0;
-    size_t i;
-
-    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
-        int refused = (cases[i].bit & DG_GAME_UNSAFE_MASK) != 0;
-        if (refused != cases[i].unsafe) {
-            bad++;
-            printf("  FAIL   %s: refused %d, wanted %d\n",
-                   cases[i].name, refused, cases[i].unsafe);
-        }
-    }
-    /* STATE_PLAY_DEMO is the composite the game itself tests, and it is the
-       mask that made the anchor unique - so the four bits behind it have to be
-       covered, all four, or the anchor and the policy disagree. */
-    if ((0x78000000u & DG_GAME_UNSAFE_MASK) != 0x78000000u) {
-        bad++;
-        printf("  FAIL   STATE_PLAY_DEMO not fully covered\n");
-    }
-    printf("  %-6s game-status mask 0x%08X refuses demos, cut-in and gameover, "
-           "and permits alert states\n",
-           bad ? "FAIL" : "ok", (unsigned int)DG_GAME_UNSAFE_MASK);
-    return bad ? 1 : 0;
-}
-
-/* The menu word, and the one bit in it this phase exists for. */
-static int t_menu_status_mask(void)
-{
-    static const struct { unsigned int bit; const char *name; int unsafe; }
-    cases[] = {
-        { 0x00000400u, "MENU_RADIO_ON",       1 },   /* the codec */
-        { 0x00000100u, "MENU_WEAPON_OPEN",    1 },
-        { 0x00000200u, "MENU_ITEM_OPEN",      1 },
-        { 0x00000004u, "MENU_RADAR_OFF",      0 },
-        { 0x00000010u, "MENU_CAPTION_OFF",    0 },
-        { 0x00000800u, "MENU_RADAR_ON",       0 },
-        { 0x00001000u, "MENU_GAGE_ON",        0 },
-        { 0x00008000u, "MENU_NODE_ON",        0 },
-        { 0x00040000u, "MENU_RADIO_DISABLE",  0 },
-        { 0x00100000u, "MENU_STREAM_CH_0",    0 },
-        { 0x00200000u, "MENU_STREAM_CH_1",    0 }
-    };
-    int bad = 0;
-    size_t i;
-
-    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
-        int refused = (cases[i].bit & DG_MENU_UNSAFE_MASK) != 0;
-        if (refused != cases[i].unsafe) {
-            bad++;
-            printf("  FAIL   %s: refused %d, wanted %d\n",
-                   cases[i].name, refused, cases[i].unsafe);
-        }
-    }
-    /* MENU_RADIO_DISABLE is the trap worth naming: it means the radio cannot be
-       opened, which is the opposite of a call being up. Refusing on it would
-       suspend first person for exactly the stretches the game guarantees are
-       uninterrupted. */
-    if (DG_MENU_UNSAFE_MASK & 0x00040000u) {
-        bad++;
-        printf("  FAIL   MENU_RADIO_DISABLE read as if it were a call\n");
-    }
-    /* 0x700 is the game's own composite, not one we composed. */
-    if ((unsigned int)DG_MENU_UNSAFE_MASK != 0x00000700u) {
-        bad++;
-        printf("  FAIL   menu mask drifted from the game's own 0x700\n");
-    }
-    printf("  %-6s menu-status mask 0x%08X refuses codec and open menus, and "
-           "permits radar, gauge, node and stream bits\n",
-           bad ? "FAIL" : "ok", (unsigned int)DG_MENU_UNSAFE_MASK);
-    return bad ? 1 : 0;
-}
-
-/* Runs one input for n ticks, letting an injected edge confirm one tick later,
-   and reports the state at the end. */
-static void t_run(DG_FPS_STATE *s, DG_FPS_INPUT *in, int *native, int ticks)
-{
-    DG_FPS_STEP out;
-    int pending = 0;
-    int i;
-    for (i = 0; i < ticks; i++) {
-        in->native_active = *native;
-        dg_fps_step(s, in, &out);
-        if (out.write == DG_FPS_WRITE_SUBJECT_EDGE) pending = 1;
-        else if (pending) { *native = !*native; pending = 0; }
-    }
-}
-
-static int t_always_suspend_resume(void)
-{
-    static const struct { const char *name; int reason; } phases[] = {
-        { "menu",     DG_FPS_REASON_UNSAFE },
-        { "codec",    DG_FPS_REASON_UNSAFE },
-        { "cutscene", DG_FPS_REASON_UNSAFE },
-        { "load",     DG_FPS_REASON_LEVEL_LOAD },
-        { "death",    DG_FPS_REASON_UNSAFE },
-        { "mask0",    DG_FPS_REASON_MASK_ZERO }
-    };
-    DG_FPS_STATE s;
-    DG_FPS_INPUT in;
-    int native = 0;
-    int bad = 0;
-    size_t p;
-
-    dg_fps_init(&s);
-    t_input(&in, DG_FPS_MODE_ALWAYS);
-    t_run(&s, &in, &native, 8);
-    if (s.state != DG_FPS_ACTIVE || !native) bad++;
-
-    for (p = 0; p < sizeof(phases) / sizeof(phases[0]); p++) {
-        t_input(&in, DG_FPS_MODE_ALWAYS);
-        switch (phases[p].reason) {
-        case DG_FPS_REASON_LEVEL_LOAD:
-            in.subject_move = 1;
-            in.pad_subject_mask = 0;
-            break;
-        case DG_FPS_REASON_MASK_ZERO:
-            in.pad_subject_mask = 0;
-            break;
-        default:
-            in.safe_gameplay = 0;
-            break;
-        }
-        t_run(&s, &in, &native, 5);
-        if (s.state != DG_FPS_SUSPENDED || s.reason != phases[p].reason) {
-            bad++;
-            printf("  FAIL   always/%s -> %s(%s)\n", phases[p].name,
-                   dg_fps_state_name(s.state), dg_fps_reason_name(s.reason));
-        }
-        /* The engine dropped first person during the interruption. */
-        native = 0;
-        t_input(&in, DG_FPS_MODE_ALWAYS);
-        t_run(&s, &in, &native, 8);
-        if (s.state != DG_FPS_ACTIVE || !native) {
-            bad++;
-            printf("  FAIL   always/%s did not resume (%s)\n", phases[p].name,
-                   dg_fps_state_name(s.state));
-        }
-    }
-
-    /* MGSHDFix owning the values is terminal, and produces no write at all. */
-    {
-        DG_FPS_STEP out;
-        int writes = 0;
-        int i;
-        for (i = 0; i < 50; i++) {
-            t_input(&in, DG_FPS_MODE_ALWAYS);
-            in.mgshdfix_owner = 1;
-            in.native_active = native;
-            dg_fps_step(&s, &in, &out);
-            if (out.write != DG_FPS_WRITE_NONE) writes++;
-        }
-        if (writes || s.state != DG_FPS_SUSPENDED ||
-            s.reason != DG_FPS_REASON_MGSHDFIX_OWNER)
-            bad++;
-    }
-    printf("  %-6s always suspends and resumes across menu/codec/cutscene/"
-           "load/death/mask0 and never fights MGSHDFix\n",
-           bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-static int t_no_edge_without_toggle(void)
-{
-    DG_FPS_STATE s;
-    DG_FPS_INPUT in;
-    DG_FPS_STEP out;
-    int bad = 0;
-    int i;
-    int edges = 0;
-    dg_fps_init(&s);
-    for (i = 0; i < 40; i++) {
-        t_input(&in, DG_FPS_MODE_ALWAYS);
-        in.native_override = 0;
-        in.native_toggle = 0;
-        dg_fps_step(&s, &in, &out);
-        if (out.write == DG_FPS_WRITE_SUBJECT_EDGE) edges++;
-        if (i == 0 && (out.write != DG_FPS_WRITE_OVERRIDE ||
-                       out.write_value != 1))
-            bad++;
-    }
-    if (edges) bad++;
-    printf("  %-6s no subject edge before Override and Toggle are both held\n",
-           bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-/* The restore path is exercised against real memory: the anchors are pointed at
-   locals, so apply_write and bridge_restore_once run exactly as they would in
-   the game, without a game. */
-static int t_restore_once(void)
-{
-    static const int original_override[] = { 0, 0, 0 };
-    static const int original_toggle[] = { 3, 4, 5 };
-    static const int original_move[] = { 1, 2, 3 };
-    static const int borrow_move[] = { 1, 0, 1 };
-    int override_value = original_override[0];
-    int toggle_value = original_toggle[0];
-    int move_value = original_move[0];
-    int i;
-    int bad = 0;
-    DG_ANCHORS saved_anchors = g_b.a;
-    LONG saved_wrote = g_b.wrote_any;
-    LONG saved_wrote_move = g_b.wrote_move;
-    LONG saved_restored = g_b.restored;
-    LONG saved_c_writes = g_b.c_writes;
-    int saved_override = g_b.saved_override;
-    int saved_toggle = g_b.saved_toggle;
-    int saved_move = g_b.saved_move;
-    int saved_active = g_b.saved_active;
-    int saved_owner = g_b.owner;
-
-    memset(&g_b.a, 0, sizeof(g_b.a));
-    g_b.a.gbp_override = (ULONGLONG)(ULONG_PTR)&override_value;
-    g_b.a.gbp_toggle = (ULONGLONG)(ULONG_PTR)&toggle_value;
-    g_b.a.gbp_move = (ULONGLONG)(ULONG_PTR)&move_value;
-    g_b.a.gbp_active = (ULONGLONG)(ULONG_PTR)&override_value;
-
-    for (i = 0; i < 3; i++) {
-        override_value = original_override[i];
-        toggle_value = original_toggle[i];
-        move_value = original_move[i];
-        bridge_capture_ownership_snapshot();
-        if (g_b.owner || g_b.wrote_any || g_b.wrote_move || g_b.restored)
-            bad++;
-        bridge_restore_once();              /* no claim: no write */
-        if (override_value != original_override[i] ||
-            toggle_value != original_toggle[i] ||
-            move_value != original_move[i] || g_b.restored)
-            bad++;
-
-        apply_write(DG_FPS_WRITE_OVERRIDE, 1);
-        apply_write(DG_FPS_WRITE_TOGGLE, 1);
-        if (override_value != 1 || toggle_value != 1) bad++;
-        if (borrow_move[i]) {
-            apply_write(DG_FPS_WRITE_MOVE, 0);
-            if (move_value != 0) bad++;
-        } else {
-            if (move_value != original_move[i]) bad++;
-            /* A value this generation did not borrow may change elsewhere;
-               restoring the capture would overwrite that later owner. */
-            move_value = 77;
-        }
-
-        bridge_restore_once();
-        if (override_value != original_override[i] ||
-            toggle_value != original_toggle[i] ||
-            move_value != (borrow_move[i] ? original_move[i] : 77))
-            bad++;
-        override_value = 99;
-        toggle_value = 98;
-        move_value = 97;
-        bridge_restore_once();              /* restore is once per generation */
-        if (override_value != 99 || toggle_value != 98 || move_value != 97)
-            bad++;
-    }
-
-    /* A non-zero Override observed at capture time is a genuine external
-       owner, and remains untouched even when the old generation had debt. */
-    override_value = 9;
-    toggle_value = 6;
-    move_value = 4;
-    bridge_capture_ownership_snapshot();
-    /* External changes after capture must survive: no claim was made. */
-    override_value = 8;
-    toggle_value = 7;
-    move_value = 6;
-    bridge_restore_once();
-    if (!g_b.owner || override_value != 8 || toggle_value != 7 || move_value != 6)
-        bad++;
-
-    g_b.a = saved_anchors;
-    InterlockedExchange(&g_b.wrote_any, saved_wrote);
-    InterlockedExchange(&g_b.wrote_move, saved_wrote_move);
-    InterlockedExchange(&g_b.restored, saved_restored);
-    InterlockedExchange(&g_b.c_writes, saved_c_writes);
-    g_b.saved_override = saved_override;
-    g_b.saved_toggle = saved_toggle;
-    g_b.saved_move = saved_move;
-    g_b.saved_active = saved_active;
-    g_b.owner = saved_owner;
-    printf("  %-6s three bridge generations restore their own borrowed values once, leave unborrowed Move alone, and preserve an external owner\n",
-           bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-static int t_decoder(void)
-{
-    static const struct {
-        const char *name;
-        unsigned char bytes[16];
-        unsigned length;
-        unsigned expect;         /* 1 = decodable */
-        unsigned rip;
-    } cases[] = {
-        { "push rbx",            { 0x53 }, 1, 1, 0 },
-        { "push rdi (REX)",      { 0x41, 0x57 }, 2, 1, 0 },
-        { "sub rsp,0x28",        { 0x48, 0x83, 0xEC, 0x28 }, 4, 1, 0 },
-        { "sub rsp,0x188",       { 0x48, 0x81, 0xEC, 0x88, 0x01, 0x00, 0x00 },
-                                 7, 1, 0 },
-        { "mov [rsp+8],rbx",     { 0x48, 0x89, 0x5C, 0x24, 0x08 }, 5, 1, 0 },
-        { "mov rax,rcx",         { 0x48, 0x8B, 0xC1 }, 3, 1, 0 },
-        { "lea rcx,[rip+d]",     { 0x48, 0x8D, 0x0D, 0x11, 0x22, 0x33, 0x44 },
-                                 7, 1, 1 },
-        { "mov eax,[rip+d]",     { 0x8B, 0x05, 0x11, 0x22, 0x33, 0x44 },
-                                 6, 1, 1 },
-        { "mov [rip+d],imm32",   { 0xC7, 0x05, 1, 2, 3, 4, 5, 6, 7, 8 },
-                                 10, 1, 1 },
-        { "movaps [rsp+20],xmm0",{ 0x0F, 0x29, 0x44, 0x24, 0x20 }, 5, 1, 0 },
-        { "movss xmm0,[rip+d]",  { 0xF3, 0x0F, 0x10, 0x05, 1, 2, 3, 4 },
-                                 8, 1, 1 },
-        { "movzx eax,byte [rcx]",{ 0x0F, 0xB6, 0x01 }, 3, 1, 0 },
-        { "test eax,eax",        { 0x85, 0xC0 }, 2, 1, 0 },
-        { "cmp dword [rbx+8],0", { 0x83, 0x7B, 0x08, 0x00 }, 4, 1, 0 },
-        { "mov rax,imm64",       { 0x48, 0xB8, 1, 2, 3, 4, 5, 6, 7, 8 },
-                                 10, 1, 0 },
-        { "mov eax,imm32",       { 0xB8, 1, 2, 3, 4 }, 5, 1, 0 },
-        { "call rel32",          { 0xE8, 1, 2, 3, 4 }, 5, 1, 0 },
-        { "jmp rel8",            { 0xEB, 0x10 }, 2, 1, 0 },
-        { "jne rel32",           { 0x0F, 0x85, 1, 2, 3, 4 }, 6, 1, 0 },
-        { "ret",                 { 0xC3 }, 1, 1, 0 },
-        { "imul eax,[rcx],7",    { 0x6B, 0x01, 0x07 }, 3, 1, 0 },
-        { "test dword [rcx],1",  { 0xF7, 0x01, 1, 0, 0, 0 }, 6, 1, 0 },
-        { "not dword [rcx]",     { 0xF7, 0x11 }, 2, 1, 0 },
-        { "sib+disp32",          { 0x48, 0x8B, 0x84, 0x8B, 1, 2, 3, 4 },
-                                 8, 1, 0 },
-        { "addr32 prefix",       { 0x67, 0x8B, 0x01 }, 0, 0, 0 },
-        { "three-byte 0F38",     { 0x66, 0x0F, 0x38, 0x00, 0xC1 }, 0, 0, 0 },
-        { "unknown D6",          { 0xD6 }, 0, 0, 0 }
-    };
-    size_t i;
-    int bad = 0;
-    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
-        DG_INSN insn;
-        int got = dg_x64_decode(cases[i].bytes, 16, &insn);
-        int ok = (got != 0) == (cases[i].expect != 0) &&
-                 (!got || (insn.length == cases[i].length &&
-                           insn.rip_relative == cases[i].rip));
-        if (!ok) {
-            bad++;
-            printf("  FAIL   decode %-22s got %d len %u rip %u\n",
-                   cases[i].name, got, got ? insn.length : 0,
-                   got ? insn.rip_relative : 0);
-        }
-    }
-    printf("  %-6s x64 length decoder, %d encodings, unknown forms refused\n",
-           bad ? "FAIL" : "ok", (int)(sizeof(cases) / sizeof(cases[0])));
-    return bad ? 1 : 0;
-}
-
-/* A relocated RIP-relative instruction must still address the same byte. */
-static int t_relocation(void)
-{
-    unsigned char src[16];
-    unsigned char dst[16];
-    DG_INSN insn;
-    LONG disp = 0x1000;
-    LONG moved;
-    LONGLONG new_disp;
-    const unsigned char *src_end;
-    const unsigned char *dst_end;
-    int bad = 0;
-
-    memset(src, 0x90, sizeof(src));
-    memset(dst, 0x90, sizeof(dst));
-    src[0] = 0x48; src[1] = 0x8D; src[2] = 0x0D;            /* lea rcx,[rip+d] */
-    memcpy(src + 3, &disp, sizeof(disp));
-    if (!dg_x64_decode(src, sizeof(src), &insn) || !insn.rip_relative ||
-        insn.length != 7 || insn.disp_offset != 3)
-        bad++;
-    memcpy(dst, src, insn.length);
-    src_end = src + insn.length;
-    dst_end = dst + insn.length;
-    new_disp = (LONGLONG)(src_end + disp) - (LONGLONG)dst_end;
-    if (new_disp > 0x7FFFFFFFLL || new_disp < -0x80000000LL) bad++;
-    moved = (LONG)new_disp;
-    memcpy(dst + insn.disp_offset, &moved, sizeof(moved));
-    if ((dst + insn.length + moved) != (src + insn.length + disp)) bad++;
-    printf("  %-6s trampoline relocation keeps the RIP-relative target fixed\n",
-           bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-static volatile LONG g_detour_hits;
-static void detour_probe(void) { InterlockedIncrement(&g_detour_hits); }
-
-/* End to end, on a function this test assembles itself. Never on game code:
-   the point is to prove the stub, the trampoline and the E9 all agree, and a
-   hand-written subject is the only one whose bytes are known exactly. */
-static int t_detour_end_to_end(void)
-{
-    static const unsigned char body[] = {
-        0x48, 0x89, 0x5C, 0x24, 0x08,   /* mov [rsp+8], rbx  <- patch site */
-        0x8B, 0xC1,                     /* mov eax, ecx                   */
-        0x83, 0xC0, 0x07,               /* add eax, 7                     */
-        0x48, 0x8B, 0x5C, 0x24, 0x08,   /* mov rbx, [rsp+8]               */
-        0xC3                            /* ret                            */
-    };
-    unsigned char *code;
-    int (*fn)(int);
-    DG_DETOUR d;
-    const char *why = "";
-    int bad = 0;
-    int before;
-    int after;
-
-    code = (unsigned char *)VirtualAlloc(NULL, 0x1000,
-                                         MEM_RESERVE | MEM_COMMIT,
-                                         PAGE_EXECUTE_READWRITE);
-    if (!code) {
-        printf("  FAIL   detour end-to-end: no code page\n");
-        return 1;
-    }
-    memset(code, 0xCC, 0x1000);
-    memcpy(code, body, sizeof(body));
-    FlushInstructionCache(GetCurrentProcess(), code, 0x1000);
-    fn = (int (*)(int))code;
-
-    before = fn(35);
-    InterlockedExchange(&g_detour_hits, 0);
-    if (!dg_detour_install(&d, code, (void *)detour_probe,
-                           code, code + sizeof(body), &why)) {
-        printf("  FAIL   detour end-to-end: install refused (%s)\n", why);
-        VirtualFree(code, 0, MEM_RELEASE);
-        return 1;
-    }
-    after = fn(35);
-    dg_detour_remove(&d);
-
-    if (before != 42 || after != 42) bad++;
-    if (InterlockedCompareExchange(&g_detour_hits, 0, 0) != 1) bad++;
-    if (d.stolen != 5) bad++;
-    if (fn(35) != 42) bad++;
-    if (memcmp(code, body, sizeof(body)) != 0) bad++;
-    VirtualFree(code, 0, MEM_RELEASE);
-
-    printf("  %-6s detour: 5 bytes stolen, callback ran once, result and "
-           "bytes restored\n", bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-static int t_detour_refusals(void)
-{
-    unsigned char buf[64];
-    DG_DETOUR d;
-    const char *why = "";
-    int bad = 0;
-
-    /* A relative call inside the stolen range. */
-    memset(buf, 0x90, sizeof(buf));
-    buf[0] = 0xE8; buf[1] = 0; buf[2] = 0; buf[3] = 0; buf[4] = 0;
-    if (dg_detour_install(&d, buf, (void *)detour_probe, buf, buf + 16, &why)) {
-        bad++;
-        dg_detour_remove(&d);
-    }
-
-    /* An undecodable byte inside the stolen range. */
-    memset(buf, 0x90, sizeof(buf));
-    buf[2] = 0xD6;
-    if (dg_detour_install(&d, buf, (void *)detour_probe, buf, buf + 16, &why)) {
-        bad++;
-        dg_detour_remove(&d);
-    }
-
-    /* A branch elsewhere in the function that lands inside the patch site. */
-    memset(buf, 0x90, sizeof(buf));
-    buf[16] = 0xEB; buf[17] = (unsigned char)(0xFF - 16);  /* jmp back into it */
-    if (dg_detour_install(&d, buf, (void *)detour_probe, buf, buf + 32, &why)) {
-        bad++;
-        dg_detour_remove(&d);
-    }
-
-    printf("  %-6s detour refuses relative branches, unknown bytes and "
-           "branch targets inside the patch site\n", bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-/* The shared resolver must report nothing rather than something partial. */
-static int t_anchor_gate(void)
-{
-    unsigned char bytes[0x2000];
-    unsigned char valid[0x2000];
-    IMAGE_NT_HEADERS64 nt;
-    IMAGE_SECTION_HEADER sections[3];
-    RUNTIME_FUNCTION runtime[2];
-    LiveImage image;
-    DG_ANCHORS anchors;
-    int bad = 0;
-
-    memset(runtime, 0, sizeof(runtime));
-    init_test_image(&image, bytes, valid, sizeof(bytes), &nt, sections,
-                    runtime, 2);
-    runtime[0].BeginAddress = 0x100;
-    runtime[0].EndAddress = 0x200;
-    sync_test_runtime(&image, runtime, 2);
-
-    /* One of the thirteen patterns present is still not thirteen. */
-    emit_rip_mov(&image, 0x110, 0x8B, image.base + 0x1000);
-    if (dg_anchors_resolve(&image, &anchors)) bad++;
-    if (anchors.ok) bad++;
-    if (anchors.merge_seam || anchors.gbp_override) bad++;
-
-    printf("  %-6s shared anchor resolve is all-or-nothing\n",
-           bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-/* The relationship layer, exercised directly.
- *
- * Building a synthetic image that satisfies all thirteen byte patterns would test
- * the scanner, not the reasoning on top of it. What is worth pinning here is
- * the reasoning: a set of targets that is individually plausible but jointly
- * wrong has to be refused. Each case below is a single field changed from an
- * otherwise passing set, so a failure names exactly one broken premise. */
-static void fill_plausible_results(PatternResult r[PATTERN_COUNT])
-{
-    size_t i;
-    ULONGLONG base = 0x140000000ULL;
-    for (i = 0; i < PATTERN_COUNT; i++) {
-        memset(&r[i], 0, sizeof(r[i]));
-        r[i].ok = 1;
-        r[i].count = 1;
-    }
-    r[0].targets[0] = base + 0x10;   /* gBP_Toggle          */
-    r[0].targets[1] = base + 0x40;   /* PL_SubjectToggle    */
-    r[1].targets[0] = base + 0x20;   /* gBP_Override        */
-    r[1].targets[1] = base + 0x30;   /* gBP_Active          */
-    r[2].targets[0] = base + 0x30;   /* Active, second site */
-    r[3].targets[0] = base + 0x18;   /* gBP_Move            */
-    r[3].targets[1] = base + 0x48;   /* PL_SubjectMove      */
-    r[7].targets[0] = base + 0x80;   /* GM_PlayerStatus     */
-    r[8].targets[1] = base + 0x100;  /* GM_GameStatus       */
-    r[8].targets[0] = base + 0x104;  /* GM_GameStatusScn    */
-    r[9].targets[1] = base + 0x108;  /* GM_MenuStatus       */
-    r[9].targets[0] = base + 0x10C;  /* GM_MenuStatusScn    */
-    r[10].targets[0] = base + 0x200; /* GM_PlayerArmBody, read side  */
-    r[11].targets[0] = base + 0x200; /* GM_PlayerArmBody, write side */
-    r[12].targets[1] = base + 0x300; /* ArmCamRotateShift            */
-    r[12].targets[0] = base + 0x302; /* ...and .vy, two bytes into it */
-}
-
-static int t_arm_body_needs_two_agreeing_anchors(void)
-{
-    PatternResult r[PATTERN_COUNT];
-    int bad = 0;
-
-    fill_plausible_results(r);
-    if (!check_relationships(r, 0)) bad++;          /* the baseline must pass */
-
-    /* The whole reason there are two anchors: a read that drifted onto the
-       neighbouring pointer is individually well-formed and jointly wrong. */
-    fill_plausible_results(r);
-    r[11].targets[0] += 8;
-    if (check_relationships(r, 0)) bad++;
-
-    /* Agreeing on the wrong thing is not agreement either - landing on a word
-       we already hold means the displacement resolved into a neighbour. */
-    fill_plausible_results(r);
-    r[10].targets[0] = r[11].targets[0] = r[9].targets[1];
-    if (check_relationships(r, 0)) bad++;
-
-    fill_plausible_results(r);
-    r[10].targets[0] = r[11].targets[0] = r[7].targets[0];
-    if (check_relationships(r, 0)) bad++;
-
-    /* And a missing half is not a pass with a default. */
-    fill_plausible_results(r);
-    r[11].ok = 0;
-    if (check_relationships(r, 0)) bad++;
-
-    /* ArmCamRotateShift is one SVECTOR, not two globals that happen to sit
-       near each other. Anything but exactly two bytes apart means one of the
-       displacements resolved somewhere this anchor cannot vouch for. */
-    fill_plausible_results(r);
-    r[12].targets[0] = r[12].targets[1] + 4;
-    if (check_relationships(r, 0)) bad++;
-
-    fill_plausible_results(r);
-    r[12].targets[0] = r[12].targets[1];
-    if (check_relationships(r, 0)) bad++;
-
-    /* Reading .vy BELOW the address the lea takes is the same error mirrored,
-       and it has to be refused in that direction too. */
-    fill_plausible_results(r);
-    r[12].targets[0] = r[12].targets[1] - 2;
-    if (check_relationships(r, 0)) bad++;
-
-    /* And it must be a struct of its own rather than a word already held. */
-    fill_plausible_results(r);
-    r[12].targets[1] = r[10].targets[0];
-    r[12].targets[0] = r[12].targets[1] + 2;
-    if (check_relationships(r, 0)) bad++;
-
-    fill_plausible_results(r);
-    r[12].ok = 0;
-    if (check_relationships(r, 0)) bad++;
-
-    printf("  %-6s arm body is refused unless a read in routine.c and the "
-           "write in pl_arm.c name the same new global, and ArmCamRotateShift "
-           "unless its address and its .vy are one SVECTOR nothing else "
-           "owns\n", bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-/* F5's first write into a live model, exercised on a model made of locals.
-   The addresses it uses are derived - Work+0x60 for the body, +0x08 for m_ctrl,
-   +0x48 for the adjust array - and a derivation that is one field off writes
-   into whatever is next door. So the gate matters as much as the write: the
-   n_joints check must actually refuse, joint 6 must actually be refused, and
-   release must leave the joint exactly as an untouched joint looks. */
-/* The stride is searched for rather than computed, so the search is the thing
-   that has to be tested: it must find a planted stride, refuse memory that is
-   not a skeleton, and return the LOWEST stride rather than a multiple of it -
-   a multiple validates perfectly well, it just lands on every second joint and
-   would hand the IK a topology that is silently half a rig. */
-
-static int t_cutscene_reaches_the_safety_gate(void)
-{
-    /* Measured 2026-08-17, one session, same anchors. */
-    const unsigned int TICK_GAME = 0x00000000u, TICK_MENU = 0x00005800u;
-    const unsigned int CAM_GAME  = 0x18000240u, CAM_MENU  = 0x00345C0Fu;
-    unsigned int game, menu;
-    ULONGLONG player;
-    int bad = 0;
-
-    /* The tick seam alone calls that session safe. That is the bug. */
-    if ((TICK_GAME & DG_GAME_UNSAFE_MASK) != 0) bad++;
-    if ((TICK_MENU & DG_MENU_UNSAFE_MASK) != 0) bad++;
-    /* The camera seam alone would not have. */
-    if ((CAM_GAME & DG_GAME_UNSAFE_MASK) == 0) bad++;
-    if ((CAM_MENU & DG_MENU_UNSAFE_MASK) == 0) bad++;
-
-    /* Folded, with a fresh latch: the gate now trips on both words. */
-    game = TICK_GAME; menu = TICK_MENU; player = 0;
-    if (!fold_late_status(&game, &menu, &player, CAM_GAME, CAM_MENU, 0, 3960, 1))
-        bad++;
-    if ((game & DG_GAME_UNSAFE_MASK) == 0) bad++;
-    if ((menu & DG_MENU_UNSAFE_MASK) == 0) bad++;
-
-    /* Folding is an OR, so it can only ever make the bridge stand down - it
-       must never clear a bit the tick seam already set. */
-    game = 0xFFFFFFFFu; menu = 0xFFFFFFFFu; player = ~0ULL;
-    fold_late_status(&game, &menu, &player, 0, 0, 0, 1, 0);
-    if (game != 0xFFFFFFFFu || menu != 0xFFFFFFFFu || player != ~0ULL) bad++;
-
-    /* The player word folds too - Snake showed up only at the camera seam. */
-    game = 0; menu = 0; player = 0;
-    fold_late_status(&game, &menu, &player, 0, 0, 0x0310192000002010ULL, 10, 0);
-    if (player != 0x0310192000002010ULL) bad++;
-
-    /* A latch nobody has written is refused, or an unarmed session would
-       inherit whatever zero happens to mean. */
-    game = TICK_GAME; menu = TICK_MENU; player = 0;
-    if (fold_late_status(&game, &menu, &player, CAM_GAME, CAM_MENU, 0, 0, 0))
-        bad++;
-    if (game != TICK_GAME) bad++;
-
-    /* And a stale one is refused, so a camera hook that stops firing cannot
-       pin the bridge into suspend for the rest of the session. */
-    game = TICK_GAME; menu = TICK_MENU; player = 0;
-    if (fold_late_status(&game, &menu, &player, CAM_GAME, CAM_MENU, 0,
-                         3960, DG_LATE_STATUS_TICKS + 1)) bad++;
-    if (game != TICK_GAME) bad++;
-    /* The boundary itself is inside. */
-    game = TICK_GAME; menu = TICK_MENU; player = 0;
-    if (!fold_late_status(&game, &menu, &player, CAM_GAME, CAM_MENU, 0,
-                          3960, DG_LATE_STATUS_TICKS)) bad++;
-    /* A negative age means the counters disagree, which cannot happen and is
-       therefore precisely what not to trust. */
-    game = TICK_GAME; menu = TICK_MENU; player = 0;
-    if (fold_late_status(&game, &menu, &player, CAM_GAME, CAM_MENU, 0, 10, -1))
-        bad++;
-
-    printf("  %-6s cutscene reaches the gate: the measured tick-seam words read"
-           " safe and the camera-seam words do not, folding trips it, and a"
-           " missing or stale latch is refused\n", bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-static int t_skeleton_is_measured_not_assumed(void)
-{
-
-    enum { STRIDE = 0x1A0, JOINTS = 12 };
-    static unsigned char blob[DG_OBJS_ARRAY + JOINTS * STRIDE];
-    static unsigned char obj[0x40], mc[0x70];
-    ULONGLONG arm = (ULONGLONG)(ULONG_PTR)obj;
-    /* A chain that is deliberately NOT the HUMAN21 reading: 6's parent is 5,
-       then 4, then 3, then straight to the root at 0. If the walk ever stops
-       following parent indices and starts assuming 5/4/3, this still passes -
-       so the last hop skips 1 and 2 to make an assumption visible. */
-    static const short parent[JOINTS] = { 0, 0, 1, 0, 3, 4, 5, 6, 7, 0, 9, 10 };
-    int bad = 0, j;
-
-    memset(blob, 0, sizeof(blob));
-    memset(obj, 0, sizeof(obj));
-    memset(mc, 0, sizeof(mc));
-    *(ULONGLONG *)(obj + 0x00) = (ULONGLONG)(ULONG_PTR)blob;
-    *(ULONGLONG *)(obj + 0x08) = (ULONGLONG)(ULONG_PTR)mc;
-    *(ULONGLONG *)(mc + 0x60) = 0x1234ULL;      /* MOTION_CONTROL.trans */
-    *(short *)(blob + DG_OBJS_NMODELS) = (short)JOINTS;
-
-    InterlockedExchange(&g_b.skel_probe, 1);
-    InterlockedExchange(&g_b.skel_base, 3);
-
-    /* Zeroed memory is not a skeleton: m[3][3] is 0, not 1. Nothing found. */
-    InterlockedExchange(&g_b.skel_for_lo, 0);
-    InterlockedExchange(&g_b.skel_for_hi, 0);
-    InterlockedExchange(&g_b.skel_stride, 0);
-    skel_probe_now(arm, 0);
-    if (g_b.skel_stride != 0) bad++;
-    if (g_b.skel_n_models != JOINTS) bad++;     /* but the count was read */
-
-    /* Now plant real joints at STRIDE. */
-    for (j = 0; j < JOINTS; j++) {
-        unsigned char *o = blob + DG_OBJS_ARRAY + j * STRIDE;
-        float *m = (float *)o;
-        m[0] = m[5] = m[10] = m[15] = 1.0f;     /* identity basis */
-        m[12] = (float)(j * 10);                /* translation */
-        m[13] = (float)(j * 20);
-        m[14] = (float)(j * 30);
-        *(short *)(o + DG_OBJ_PARENT) = parent[j];
-    }
-    InterlockedExchange(&g_b.skel_for_lo, 0);
-    InterlockedExchange(&g_b.skel_for_hi, 0);
-    InterlockedExchange(&g_b.skel_stride, 0);
-    skel_probe_now(arm, 0);
-
-    if (g_b.skel_stride != STRIDE) bad++;       /* lowest, not a multiple */
-    if (g_b.skel_stride_score != 6) bad++;
-    if (g_b.skel_parents_read != JOINTS) bad++;
-    if (g_b.skel_mctrl_trans_lo != 0x1234) bad++;
-
-    /* The topology, read off the model rather than off HUMAN21. */
-    if (g_b.skel_chain_len != 5) bad++;
-    else {
-        static const LONG want[5] = { 6, 5, 4, 3, 0 };
-        for (j = 0; j < 5; j++)
-            if (g_b.skel_chain[j] != want[j]) bad++;
-    }
-
-    /* Positions follow the chain, so bone lengths are differences of these. */
-    {
-        float x;
-        memcpy(&x, (const void *)&g_b.skel_chain_pos[0], sizeof x);
-        if (x != 60.0f) bad++;                  /* joint 6 */
-        memcpy(&x, (const void *)&g_b.skel_chain_pos[1 * 3 + 1], sizeof x);
-        if (x != 100.0f) bad++;                 /* joint 5, y */
-        memcpy(&x, (const void *)&g_b.skel_window_pos[0 * 3 + 2], sizeof x);
-        if (x != 90.0f) bad++;                  /* window base 3, z */
-    }
-
-    /* A second call must not re-measure - it is cached per object - but the
-       live pose must still refresh, because that is what the probe is for. */
-    {
-        float *m = (float *)(blob + DG_OBJS_ARRAY + 6 * STRIDE);
-        float x;
-        m[12] = 777.0f;
-        InterlockedExchange(&g_b.skel_stride_tried, -1);
-        skel_probe_now(arm, 0);
-        if (g_b.skel_stride_tried != -1) bad++;         /* no re-scan */
-        memcpy(&x, (const void *)&g_b.skel_chain_pos[0], sizeof x);
-        if (x != 777.0f) bad++;                         /* but pose moved */
-    }
-
-    /* Off means off. */
-    InterlockedExchange(&g_b.skel_probe, 0);
-    InterlockedExchange(&g_b.skel_stride, 0);
-    InterlockedExchange(&g_b.skel_for_lo, 0);
-    InterlockedExchange(&g_b.skel_for_hi, 0);
-    skel_probe_now(arm, 0);
-    if (g_b.skel_stride != 0) bad++;
-
-    /* Tracking needs the same bounded skeleton measurement even when the
-       optional logging probe is off. `required_for_ik` bypasses only the
-       switch, never the region, matrix, count or topology checks. */
-    skel_probe_now(arm, 1);
-    if (g_b.skel_stride != STRIDE) bad++;
-
-    InterlockedExchange(&g_b.skel_for_lo, 0);
-    InterlockedExchange(&g_b.skel_for_hi, 0);
-    InterlockedExchange(&g_b.skel_stride, 0);
-    InterlockedExchange(&g_b.skel_base, 0);
-
-    printf("  %-6s skeleton: stride is found not assumed (lowest, not a "
-           "multiple), zeroed memory yields none, the chain is walked from "
-           "joint 6, pose refreshes without re-scanning, and IK can require "
-           "the same bounded read while the logging probe is off\n",
-           bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-/* The camera seam may run several times in one tick. The diagnostic rate must
-   therefore divide by ticks that actually reached the active seam, not by all
-   session ticks (including third person), or it understates the cadence that
-   determines the adjust hold interval. */
-static int t_active_seam_rate_uses_active_ticks(void)
-{
-    enum { TICKS = 12, SEAMS_PER_TICK = 5 };
-    int t, s;
-    int bad = 0;
-
-    InterlockedExchange(&g_b.c_seam_active, 0);
-    InterlockedExchange(&g_b.c_seam_active_ticks, 0);
-    InterlockedExchange(&g_b.seam_active_last_tick, -1);
-    for (t = 0; t < TICKS; t++) {
-        InterlockedExchange(&g_b.c_ticks, 100 + t);
-        for (s = 0; s < SEAMS_PER_TICK; s++) count_active_seam();
-    }
-    if (g_b.c_seam_active != TICKS * SEAMS_PER_TICK) bad++;
-    if (g_b.c_seam_active_ticks != TICKS) bad++;
-    printf("  %-6s active seam rate: %ld seams / %ld active ticks = %.2f\n",
-           bad ? "FAIL" : "ok", g_b.c_seam_active,
-           g_b.c_seam_active_ticks,
-           g_b.c_seam_active_ticks
-               ? (double)g_b.c_seam_active / (double)g_b.c_seam_active_ticks
-               : 0.0);
-    return bad ? 1 : 0;
-}
-
-/* The run of 2026-08-18 came back with all adjust cases holding byte-identical
-   matrices. The cause was cadence, not conventions: the camera seam fires 5.32
-   times per tick in first person while the hierarchy pass runs once, so a probe
-   that turned its case over per seam call read a pose its own write had never
-   reached. This drives the probe through exactly that cadence against a fake
-   pass that consumes adjust[] once per tick, and requires the two cases to come
-   back DIFFERENT - which is precisely what the live run could not produce. */
-static int t_adjust_probe_holds_a_case_for_a_whole_pass(void)
-{
-    enum { STRIDE = 0x1A0, JOINTS = 12, SEAMS_PER_TICK = 5, TICKS = 80 };
-    static unsigned char blob[DG_OBJS_ARRAY + JOINTS * STRIDE];
-    static unsigned char obj[0x40], mc[0x70];
-    static float adjust[24 * 4];
-    static const short parent[JOINTS] = { 0, 0, 1, 0, 3, 4, 5, 6, 7, 0, 9, 10 };
-    ULONGLONG arm = (ULONGLONG)(ULONG_PTR)obj;
-    int bad = 0, j, t, s;
-    float c0j, c1j, c0c, c1c;
-
-    memset(blob, 0, sizeof blob);
-    memset(obj, 0, sizeof obj);
-    memset(mc, 0, sizeof mc);
-    memset(adjust, 0, sizeof adjust);
-    *(ULONGLONG *)(obj + 0x00) = (ULONGLONG)(ULONG_PTR)blob;
-    *(ULONGLONG *)(obj + 0x08) = (ULONGLONG)(ULONG_PTR)mc;
-    *(short *)(blob + DG_OBJS_NMODELS) = (short)JOINTS;
-    *(LONG *)(mc + 0x14) = 24;                          /* n_joints */
-    *(ULONGLONG *)(mc + 0x48) = (ULONGLONG)(ULONG_PTR)adjust;
-    for (j = 0; j < JOINTS; j++) {
-        unsigned char *o = blob + DG_OBJS_ARRAY + j * STRIDE;
-        float *m = (float *)o;
-        m[0] = m[5] = m[10] = m[15] = 1.0f;
-        m[12] = (float)(j * 10);
-        m[13] = (float)(j * 20);
-        m[14] = (float)(j * 30);
-        *(short *)(o + DG_OBJ_PARENT) = parent[j];
-    }
-
-    /* The probe refuses to guess topology, so the skeleton has to be measured
-       first - the same dependency it has live. */
-    InterlockedExchange(&g_b.skel_probe, 1);
-    InterlockedExchange(&g_b.skel_base, 3);
-    InterlockedExchange(&g_b.skel_for_lo, 0);
-    InterlockedExchange(&g_b.skel_for_hi, 0);
-    InterlockedExchange(&g_b.skel_stride, 0);
-    skel_probe_now(arm, 0);
-    if (g_b.skel_stride != STRIDE) {
-        printf("  FAIL   adjust probe: the skeleton did not measure, so "
-               "nothing below could mean anything\n");
-        return 1;
-    }
-
-    InterlockedExchange(&g_b.adj_probe, 1);
-    InterlockedExchange(&g_b.adj_joint, 5);
-    InterlockedExchange(&g_b.adj_deg, 30);
-    InterlockedExchange(&g_b.adj_axis, 0);
-    InterlockedExchange(&g_b.adj_pending_case, -1);
-    InterlockedExchange(&g_b.adj_write_tick, 0);
-    InterlockedExchange(&g_b.c_adj_held, 0);
-    InterlockedExchange(&g_b.adj_samples[0], 0);
-    InterlockedExchange(&g_b.adj_samples[1], 0);
-    InterlockedExchange(&g_b.c_ticks, 0);
-
-    for (t = 0; t < TICKS; t++) {
-        /* The fake hierarchy pass: once per tick, BEFORE the seams, which is
-           where the real one sits relative to the camera hook. It moves the
-           joint and its child by whatever adjust[] holds, so a read can only
-           ever see a write that a pass actually consumed. */
-        /* Each axis gets its own decade, so a case that reads back under the
-           wrong index is a visibly different number rather than a near miss. */
-        float *mj = (float *)(blob + DG_OBJS_ARRAY + 5 * STRIDE);
-        float *mk = (float *)(blob + DG_OBJS_ARRAY + 6 * STRIDE);
-        float d = adjust[5 * 4 + 0] * 100.0f + adjust[5 * 4 + 1] * 10000.0f +
-                  adjust[5 * 4 + 2] * 1000000.0f;
-        mj[12] = 1000.0f + d;
-        mk[12] = 2000.0f + d;
-        /* The rotation half of the fake pass, for the per-cycle reduction:
-           the engine model measured on 2026-08-30 maps adjust X/Y/Z onto
-           world -Z/+Y/+X (a -90 degree yaw frame). Write the joint's 3x3 as
-           the logged rows would read it - world images of the local axes,
-           i.e. the transpose of the world rotation - so the reduction's
-           oracle is an independent -90.00 and three 30.00 degree angles. */
-        {
-            static const double AX[3][3] = { { 0.0, 0.0, -1.0 },
-                                             { 0.0, 1.0,  0.0 },
-                                             { 1.0, 0.0,  0.0 } };
-            int which = -1, a, b;
-            double R[3][3], ang;
-            if (adjust[5 * 4 + 0] != 0.0f) which = 0;
-            else if (adjust[5 * 4 + 1] != 0.0f) which = 1;
-            else if (adjust[5 * 4 + 2] != 0.0f) which = 2;
-            ang = (which >= 0) ? 30.0 * 3.14159265358979323846 / 180.0 : 0.0;
-            for (a = 0; a < 3; a++)
-                for (b = 0; b < 3; b++) {
-                    double u = (which >= 0) ? AX[which][a] : 0.0;
-                    double v = (which >= 0) ? AX[which][b] : 0.0;
-                    double e = 0.0;
-                    double kk[3][3] = { { 0.0, 0.0, 0.0 }, { 0.0, 0.0, 0.0 },
-                                        { 0.0, 0.0, 0.0 } };
-                    if (which >= 0) {
-                        kk[0][1] = -AX[which][2]; kk[0][2] =  AX[which][1];
-                        kk[1][0] =  AX[which][2]; kk[1][2] = -AX[which][0];
-                        kk[2][0] = -AX[which][1]; kk[2][1] =  AX[which][0];
-                        e = kk[a][b];
-                    }
-                    R[a][b] = (a == b ? 1.0 : 0.0) * cos(ang) + sin(ang) * e +
-                              (1.0 - cos(ang)) * u * v;
-                }
-            for (a = 0; a < 3; a++)
-                for (b = 0; b < 3; b++) mj[a * 4 + b] = (float)R[b][a];
-        }
-        InterlockedExchange(&g_b.c_ticks, t);
-        for (s = 0; s < SEAMS_PER_TICK; s++)
-            adj_probe_now(arm);
-    }
-
-    {
-        long total = 0;
-        for (j = 0; j < DG_ADJ_CASES; j++) {
-            if (g_b.adj_samples[j] <= 0) bad++;
-            total += g_b.adj_samples[j];
-        }
-        /* One turn-over per settle window at most, whatever the seam rate. */
-        if (total > TICKS / DG_ADJ_SETTLE_TICKS + 1) bad++;
-    }
-    if (g_b.c_adj_held <= 0) bad++;             /* the holds have to be real */
-    /* Meetplan A' bracket: every sampled case carries a write-side and a
-       read-side word set, the read at least the settle window after the
-       write, and with no player on this desk both sides say ok = 0 rather
-       than inventing a heading. */
-    {
-        int bracketed = 0;
-        for (j = 0; j < DG_ADJ_CASES; j++) {
-            const volatile LONG *w0 = &g_b.adj_words[(j * 2 + 0) * 5];
-            const volatile LONG *w1 = &g_b.adj_words[(j * 2 + 1) * 5];
-            if (g_b.adj_samples[j] <= 0) continue;
-            /* A case written after its last read (the cycle's tail) carries
-               a write newer than its read; every other case reads no sooner
-               than the settle window after its write - and there have to BE
-               such cases, or the read side was never written at all. */
-            if (w1[0] >= w0[0]) {
-                if (w1[0] - w0[0] < DG_ADJ_SETTLE_TICKS) bad++;
-                else bracketed++;
-            }
-            if (!w0[1] && (w0[2] || w0[3] || w0[4])) bad++;
-            if (!w1[1] && (w1[2] || w1[3] || w1[4])) bad++;
-        }
-        if (bracketed < DG_ADJ_CASES - 1) bad++;
-    }
-    /* The per-cycle reduction against the fake pass's independent model:
-       adjust-X rotated about world -Z, so its heading is -90.00; every case
-       recovers its 30.00 degrees; the Y case's axis is world up; no player
-       on the desk, so the words are 0 and the cycle says so. */
-    {
-        DG_ADJ_CYCLE cy;
-        int got = 0;
-        while (dg_bridge_adj_cycle_take(&cy)) {
-            got++;
-            if (fabs((double)cy.yaw_deg + 90.0) > 0.05) bad++;
-            for (j = 0; j < 3; j++)
-                if (fabs((double)cy.ang_deg[j] - 30.0) > 0.05) bad++;
-            if ((double)cy.ydot < 0.9999) bad++;
-            if (cy.ok != 0 || cy.rot0 != 0 || cy.rot3 != 0) bad++;
-        }
-        if (got < 1) bad++;
-    }
-    /* The root is walked to the end of the parent chain, not assumed. */
-    if (g_b.adj_indices[0] != 0 || g_b.adj_indices[1] != 4 ||
-        g_b.adj_indices[2] != 5 || g_b.adj_indices[3] != 6) bad++;
-
-    /* 30 degrees about one axis writes sin(15) = 0.258819 into that component,
-       and the fake pass gives each axis its own decade: identity lands the
-       joint at 1000, X at 1025.88, Y at 3588.19, Z at 259819. Reading a case
-       back under the wrong index is therefore off by orders of magnitude, not
-       by a rounding error - which is the point of the spread. */
-    {
-        static const float want[DG_ADJ_CASES] =
-            { 0.0f, 25.8819f, 2588.19f, 258819.0f };
-        for (j = 0; j < DG_ADJ_CASES; j++) {
-            float gj, gc;
-            memcpy(&gj, (const void *)
-                   &g_b.adj_world[(j * DG_ADJ_JOINTS + 2) * 16 + 12], sizeof gj);
-            memcpy(&gc, (const void *)
-                   &g_b.adj_world[(j * DG_ADJ_JOINTS + 3) * 16 + 12], sizeof gc);
-            if (!(gj > 1000.0f + want[j] * 0.999f - 0.1f &&
-                  gj < 1000.0f + want[j] * 1.001f + 0.1f)) bad++;
-            if (!(gc > 2000.0f + want[j] * 0.999f - 0.1f &&
-                  gc < 2000.0f + want[j] * 1.001f + 0.1f)) bad++;
-        }
-        /* The headline, stated on its own: the cases have to DIFFER. Identical
-           cases were the live failure, and a spread of ranges alone would let a
-           regression read as four near misses instead of as that. */
-        memcpy(&c0j, (const void *)
-               &g_b.adj_world[(0 * DG_ADJ_JOINTS + 2) * 16 + 12], sizeof c0j);
-        memcpy(&c1j, (const void *)
-               &g_b.adj_world[(1 * DG_ADJ_JOINTS + 2) * 16 + 12], sizeof c1j);
-        memcpy(&c0c, (const void *)
-               &g_b.adj_world[(2 * DG_ADJ_JOINTS + 2) * 16 + 12], sizeof c0c);
-        memcpy(&c1c, (const void *)
-               &g_b.adj_world[(3 * DG_ADJ_JOINTS + 2) * 16 + 12], sizeof c1c);
-        if (c0j == c1j || c1j == c0c || c0c == c1c) bad++;
-    }
-
-    InterlockedExchange(&g_b.adj_probe, 0);
-    InterlockedExchange(&g_b.adj_pending_case, -1);
-    InterlockedExchange(&g_b.skel_probe, 0);
-    InterlockedExchange(&g_b.skel_stride, 0);
-    InterlockedExchange(&g_b.skel_for_lo, 0);
-    InterlockedExchange(&g_b.skel_for_hi, 0);
-    InterlockedExchange(&g_b.skel_base, 0);
-    InterlockedExchange(&g_b.c_ticks, 0);
-
-    printf("  %-6s adjust probe: one case per hierarchy pass, so five seams a "
-           "tick cannot read a pose the write never reached; identity and all "
-           "three axes come back distinct, correctly paired, and the root is "
-           "walked to the end of the parent chain\n",
-           bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-static int t_bend_writes_one_joint_behind_its_gate(void)
-{
-    /* An OBJECT (objs, m_ctrl, ...) and a MOTION_CONTROL, laid out by offset
-       rather than by struct, because the offsets are the thing under test. */
-    static unsigned char obj[0x40], mc[0x60];
-    static float adj[21 * 4];
-    ULONGLONG arm = (ULONGLONG)(ULONG_PTR)obj;
-    int bad = 0, i;
-    double want_s = sin(45.0 * 3.14159265358979323846 / 180.0 * 0.5);
-    double want_c = cos(45.0 * 3.14159265358979323846 / 180.0 * 0.5);
-
-    memset(obj, 0, sizeof(obj));
-    memset(mc, 0, sizeof(mc));
-    for (i = 0; i < 21 * 4; i++) adj[i] = -1.0f;
-    *(ULONGLONG *)(obj + 0x08) = (ULONGLONG)(ULONG_PTR)mc;
-    *(ULONGLONG *)(mc + 0x48) = (ULONGLONG)(ULONG_PTR)adj;
-
-    g_b.a.gm_player_arm_body = 0;                 /* release must not need it */
-    InterlockedExchange(&g_b.bend_deg, 45);
-    InterlockedExchange(&g_b.bend_joint, 5);
-    InterlockedExchange(&g_b.bent_joint, -1);
-
-    /* Too few joints to be a skeleton we recognise: nothing may be written. */
-    *(int *)(mc + 0x14) = 20;
-    arm_bend_now(arm, NULL);
-    if (adj[5 * 4] != -1.0f) bad++;
-    if (*(ULONGLONG *)(mc + 0x38) != 0) bad++;
-
-    /* Nor a count that is obvious nonsense. */
-    *(int *)(mc + 0x14) = 100000;
-    arm_bend_now(arm, NULL);
-    if (adj[5 * 4] != -1.0f) bad++;
-
-    /* 55 is what the subjective arm actually reports, and joint 5 is inside
-       it, so the write is allowed. The old gate demanded exactly 21 and
-       refused this - which is the case that cost a live run. */
-    *(int *)(mc + 0x14) = 55;
-    arm_bend_now(arm, NULL);
-    if (fabs(adj[5 * 4 + 0] - want_s) > 1e-6) bad++;
-    if (adj[5 * 4 + 1] != 0.0f || adj[5 * 4 + 2] != 0.0f) bad++;
-    if (fabs(adj[5 * 4 + 3] - want_c) > 1e-6) bad++;
-    if (*(ULONGLONG *)(mc + 0x38) != (1ULL << 5)) bad++;
-    if (adj[4 * 4] != -1.0f || adj[6 * 4] != -1.0f) bad++;  /* neighbours */
-
-    /* A joint outside the skeleton is refused rather than written past the
-       end of the array, which is the failure this gate exists to prevent. */
-    {
-        float guard = adj[20 * 4];
-        InterlockedExchange(&g_b.bend_joint, 19);
-        *(int *)(mc + 0x14) = 19;
-        arm_bend_now(arm, NULL);
-        if (adj[19 * 4] != -1.0f) bad++;
-        if (adj[20 * 4] != guard) bad++;
-        *(int *)(mc + 0x14) = 55;
-        InterlockedExchange(&g_b.bend_joint, 5);
-    }
-
-    /* Release leaves an identity quaternion and a clear bit, which is exactly
-       what a joint nobody has touched looks like. */
-    g_b.a.gm_player_arm_body = (ULONGLONG)(ULONG_PTR)&arm;
-    arm_bend_release();
-    if (adj[5 * 4 + 0] != 0.0f || adj[5 * 4 + 3] != 1.0f) bad++;
-    if (*(ULONGLONG *)(mc + 0x38) != 0) bad++;
-    /* ...and only once: a second release must not write a joint back. */
-    adj[5 * 4 + 3] = 7.0f;
-    arm_bend_release();
-    if (adj[5 * 4 + 3] != 7.0f) bad++;
-
-    {
-        double q[4] = { 0.0, 0.5, 0.0, 0.8660254037844387 };
-        *(int *)(mc + 0x14) = 55;
-        arm_bend_now(arm, q);
-        if (adj[5 * 4 + 1] != 0.5f) bad++;
-        if (*(ULONGLONG *)(mc + 0x38) != (1ULL << 5)) bad++;
-    }
-
-    /* A quaternion that is not unit length is refused outright. Tracking hands
-       over garbage on the frame it drops a controller, and a zero here does
-       not tilt the model, it collapses it. */
-    {
-        double bad_q[4] = { 0.0, 0.0, 0.0, 0.0 };
-        adj[5 * 4 + 1] = -1.0f;
-        arm_bend_now(arm, bad_q);
-        if (adj[5 * 4 + 1] != -1.0f) bad++;
-    }
-
-    /* Neither pose nor angle: release, never hold the last one. */
-    InterlockedExchange(&g_b.bend_deg, 0);
-    InterlockedExchange(&g_b.bent_joint, 5);
-    g_b.a.gm_player_arm_body = (ULONGLONG)(ULONG_PTR)&arm;
-    arm_bend_now(arm, NULL);
-    if (adj[5 * 4 + 3] != 1.0f) bad++;
-    if (*(ULONGLONG *)(mc + 0x38) != 0) bad++;
-    g_b.a.gm_player_arm_body = 0;
-    InterlockedExchange(&g_b.bend_deg, 45);
-
-    /* Joint 6 belongs to SetPos, which writes it every frame. */
-    for (i = 0; i < 21 * 4; i++) adj[i] = -1.0f;
-    *(ULONGLONG *)(mc + 0x38) = 0;
-    InterlockedExchange(&g_b.bend_joint, 6);
-    arm_bend_now(arm, NULL);
-    if (adj[6 * 4] != -1.0f) bad++;
-    if (*(ULONGLONG *)(mc + 0x38) != 0) bad++;
-
-    g_b.a.gm_player_arm_body = 0;
-    InterlockedExchange(&g_b.bend_deg, 0);
-    InterlockedExchange(&g_b.bend_joint, 5);
-    InterlockedExchange(&g_b.bent_joint, -1);
-
-    printf("  %-6s joint rotation: skeleton-gated, tracked pose beats the "
-           "fixed angle, non-unit refused, no pose releases, joint 6 refused\n",
-           bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-static double test_quat_angle(const double q[4])
-{
-    double w = fabs(q[3]);
-    if (w > 1.0) w = 1.0;
-    return 2.0 * acos(w);
-}
-
-static int t_ik_glue_uses_measured_adjust_space(void)
-{
-    static const double joints[5][3] = {
-        {   0.0,   0.0,   0.0 },       /* joint 2 */
-        {   0.0,   0.0, 100.0 },       /* joint 3: outward pole basis */
-        {   0.0,   0.0,   0.0 },       /* joint 4: shoulder */
-        { 200.0,   0.0,   0.0 },       /* joint 5: elbow */
-        { 400.0,   0.0,   0.0 }        /* joint 6: wrist */
-    };
-    static const double target[3] = { 250.0, -150.0, 100.0 };
-    static const double far_target[3] = { 1400.0, 0.0, 0.0 };
-    static const double root_pos[3] = { 0.0, 0.0, 0.0 };
-    static const double view[3] = { -100.0, -200.0, 300.0 };
-    static const double root[4][4] = {
-        { 0.0, 1.0, 0.0, 0.0 },
-        { 0.0, 0.0, 1.0, 0.0 },
-        { 1.0, 0.0, 0.0, 0.0 },
-        { 10.0, 20.0, 30.0, 1.0 }
-    };
-    double q4[4], q5[4], h4[4], h5[4];
-    double world_x[4] = { 0.5, 0.0, 0.0, 0.8660254037844387 };
-    double adjust[4], recovered[4], bad_joints[5][3], mapped[3], unmapped[3];
-    double distance, limit;
-    static unsigned char obj[0x40], mc[0x60];
-    static float joint_adjust[21 * 4];
-    ULONGLONG arm = (ULONGLONG)(ULONG_PTR)obj;
-    unsigned clamped = 0;
-    double a, h;
-    int i, bad = 0;
-
-    /* The live four-axis fit says a world +X rotation is adjust +Z, within the
-       measured sub-degree residual. Preserve both its axis and its angle. */
-    world_quat_to_adjust(&ADJ_FRAME_LEGACY, world_x, adjust);
-    if (!(adjust[2] > 0.499 && fabs(adjust[0]) < 0.003 &&
-          fabs(adjust[1]) < 0.003 && fabs(adjust[3] - world_x[3]) < 1e-6))
-        bad++;
-    if (!adjust_quat_to_world(&ADJ_FRAME_LEGACY, adjust, recovered)) bad++;
-    if (fabs(recovered[0] - world_x[0]) > 1e-8 ||
-        fabs(recovered[1] - world_x[1]) > 1e-8 ||
-        fabs(recovered[2] - world_x[2]) > 1e-8 ||
-        fabs(recovered[3] - world_x[3]) > 1e-8) bad++;
-
-    /* The bridge, not the hook, applies the arm root. This cyclic basis and
-       translation are the independent other half of the hook's view test. */
-    arm_view_to_world(root, view, mapped);
-    if (fabs(mapped[0] - 310.0) > 1e-9 ||
-        fabs(mapped[1] + 80.0) > 1e-9 ||
-        fabs(mapped[2] + 170.0) > 1e-9) bad++;
-    if (!arm_world_to_view(root, mapped, unmapped)) bad++;
-    for (i = 0; i < 3; i++)
-        if (fabs(unmapped[i] - view[i]) > 1e-9) bad++;
-    if (!arm_target_plausible(root_pos, joints, target,
-                              &distance, &limit)) bad++;
-    if (fabs(distance - sqrt(95000.0)) > 1e-9 ||
-        fabs(limit - 500.0) > 1e-9) bad++;
-    if (arm_target_plausible(root_pos, joints, far_target,
-                             &distance, &limit)) bad++;
-
-    if (!solve_arm_adjust(&ADJ_FRAME_LEGACY, joints, target, 1.0, NULL, NULL, q4, q5, &clamped)) bad++;
-    if (clamped != 0) bad++;
-    if (!solve_arm_adjust(&ADJ_FRAME_LEGACY, joints, target, 0.5, NULL, NULL, h4, h5, NULL)) bad++;
-    for (i = 0; i < 2; i++) {
-        const double *full = i ? q5 : q4;
-        const double *half = i ? h5 : h4;
-        double nf = sqrt(full[0]*full[0] + full[1]*full[1] +
-                         full[2]*full[2] + full[3]*full[3]);
-        double nh = sqrt(half[0]*half[0] + half[1]*half[1] +
-                         half[2]*half[2] + half[3]*half[3]);
-        if (fabs(nf - 1.0) > 1e-9 || fabs(nh - 1.0) > 1e-9) bad++;
-        a = test_quat_angle(full);
-        h = test_quat_angle(half);
-        if (!(a > 1e-4) || fabs(h - 0.5 * a) > 1e-8) bad++;
-    }
-
-    memcpy(bad_joints, joints, sizeof bad_joints);
-    memcpy(bad_joints[3], bad_joints[2], sizeof bad_joints[3]);
-    if (solve_arm_adjust(&ADJ_FRAME_LEGACY, bad_joints, target, 1.0, NULL, NULL, q4, q5, NULL)) bad++;
-    if (solve_arm_adjust(&ADJ_FRAME_LEGACY, joints, target, 0.0, NULL, NULL, q4, q5, NULL)) bad++;
-
-    /* Leaving the subjective view is an ownership transition of its own. It
-       must release both joints even though the IK writer is not entered. */
-    memset(obj, 0, sizeof obj);
-    memset(mc, 0, sizeof mc);
-    memset(joint_adjust, 0, sizeof joint_adjust);
-    *(ULONGLONG *)(obj + 0x08) = (ULONGLONG)(ULONG_PTR)mc;
-    *(LONG *)(mc + 0x14) = 55;
-    *(ULONGLONG *)(mc + 0x48) = (ULONGLONG)(ULONG_PTR)joint_adjust;
-    joint_adjust[4 * 4] = 0.5f; joint_adjust[4 * 4 + 3] = 0.5f;
-    joint_adjust[5 * 4] = 0.5f; joint_adjust[5 * 4 + 3] = 0.5f;
-    /* Joint 6 belongs to the animation on this run. It is loaded with a
-       recognisable rotation and a flag bit we never claimed, and must come
-       back untouched: releasing more than was taken is as wrong as releasing
-       less. */
-    joint_adjust[6 * 4] = 0.6f; joint_adjust[6 * 4 + 3] = 0.8f;
-    *(ULONGLONG *)(mc + 0x38) = (1ULL << 4) | (1ULL << 5) | (1ULL << 6);
-    g_b.a.gm_player_arm_body = (ULONGLONG)(ULONG_PTR)&arm;
-    g_b.ik_owned_arm = arm;
-    g_b.ik_owned_mctrl = (ULONGLONG)(ULONG_PTR)mc;
-    g_b.ik_owned_adjust = (ULONGLONG)(ULONG_PTR)joint_adjust;
-    g_b.ik_owned_mask = (1ULL << 4) | (1ULL << 5);
-    InterlockedExchange(&g_b.ik_active, 1);
-    InterlockedExchange(&g_b.armed, 1);
-    g_b.fps.state = DG_FPS_OFF;
-    dg_bridge_arm_seam_now(NULL);
-    if (joint_adjust[4 * 4] != 0.0f || joint_adjust[4 * 4 + 3] != 1.0f ||
-        joint_adjust[5 * 4] != 0.0f || joint_adjust[5 * 4 + 3] != 1.0f ||
-        joint_adjust[6 * 4] != 0.6f || joint_adjust[6 * 4 + 3] != 0.8f ||
-        *(ULONGLONG *)(mc + 0x38) != (1ULL << 6) || g_b.ik_active != 0) bad++;
-    if (g_b.ik_owned_mask != 0) bad++;
-
-    /* Even a stale/legacy ownership bit for joint 6 is not authority to touch
-       SetPos's slot or flag. Only joints 4 and 5 come back. */
-    joint_adjust[4 * 4] = 0.5f; joint_adjust[4 * 4 + 3] = 0.5f;
-    joint_adjust[5 * 4] = 0.5f; joint_adjust[5 * 4 + 3] = 0.5f;
-    joint_adjust[6 * 4] = 0.6f; joint_adjust[6 * 4 + 3] = 0.8f;
-    *(ULONGLONG *)(mc + 0x38) = (1ULL << 4) | (1ULL << 5) | (1ULL << 6);
-    g_b.ik_owned_arm = arm;
-    g_b.ik_owned_mctrl = (ULONGLONG)(ULONG_PTR)mc;
-    g_b.ik_owned_adjust = (ULONGLONG)(ULONG_PTR)joint_adjust;
-    g_b.ik_owned_mask = (1ULL << 4) | (1ULL << 5) | (1ULL << 6);
-    InterlockedExchange(&g_b.ik_active, 1);
-    arm_ik_release();
-    if (joint_adjust[4 * 4] != 0.0f || joint_adjust[4 * 4 + 3] != 1.0f ||
-        joint_adjust[5 * 4] != 0.0f || joint_adjust[5 * 4 + 3] != 1.0f ||
-        joint_adjust[6 * 4] != 0.6f || joint_adjust[6 * 4 + 3] != 0.8f ||
-        *(ULONGLONG *)(mc + 0x38) != (1ULL << 6) ||
-        g_b.ik_owned_mask != 0) bad++;
-
-    /* A replacement model must never receive a release meant for the old
-       model. Identity mismatch clears local ownership and writes no byte. */
-    joint_adjust[4 * 4] = 0.25f;
-    joint_adjust[5 * 4] = 0.75f;
-    *(ULONGLONG *)(mc + 0x38) = (1ULL << 4) | (1ULL << 5);
-    g_b.ik_owned_arm = arm + 8;
-    g_b.ik_owned_mctrl = (ULONGLONG)(ULONG_PTR)mc;
-    g_b.ik_owned_adjust = (ULONGLONG)(ULONG_PTR)joint_adjust;
-    g_b.ik_owned_mask = (1ULL << 4) | (1ULL << 5);
-    InterlockedExchange(&g_b.ik_active, 1);
-    {
-        LONG mismatches = g_b.c_arm_release_owner_mismatch;
-        arm_ik_release();
-        if (joint_adjust[4 * 4] != 0.25f ||
-            joint_adjust[5 * 4] != 0.75f ||
-            *(ULONGLONG *)(mc + 0x38) != ((1ULL << 4) | (1ULL << 5)) ||
-            g_b.c_arm_release_owner_mismatch != mismatches + 1) bad++;
-    }
-    InterlockedExchange(&g_b.armed, 0);
-    g_b.a.gm_player_arm_body = 0;
-
-    printf("  %-6s arm IK glue: live-root view transform, dynamic reach "
-           "envelope, dynamic lengths, measured world-to-adjust conjugation, "
-           "identity blend, degenerate-input refusal, and inactive-view "
-           "release\n",
-           bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-/* Axis/angle to {x,y,z,w}, written out here rather than borrowed so the test
-   states its own inputs. */
-static void th_axis(double ax, double ay, double az, double deg, double q[4])
-{
-    double n = sqrt(ax * ax + ay * ay + az * az);
-    double h = deg * 3.14159265358979323846 / 360.0;
-    double s = sin(h);
-    q[0] = ax / n * s; q[1] = ay / n * s; q[2] = az / n * s; q[3] = cos(h);
-}
-
-/* The signed twist of a (near-)pure-twist world quaternion about a unit
-   axis, degrees. Written out here so the tests measure with their own
-   ruler instead of the helper's. */
-static double tg_twist_deg(const double q[4], const double axis[3])
-{
-    double d = q[0] * axis[0] + q[1] * axis[1] + q[2] * axis[2];
-    return 2.0 * atan2(d, q[3]) * 180.0 / 3.14159265358979323846;
-}
-
-/* The carried-up residual the grip roll exists to close, replicated from
-   the DESIGN (carry perp-of-up across the chain, compare against perp on
-   the displayed bone) rather than read out of the helper. */
-static double tg_residual_deg(const double q4a[4], const double q5a[4],
-                              const double anim_fore[3], const double up[3])
-{
-    double w4[4], w5[4], chain[4], fn[3], an[3], axisv[3];
-    double perp[3], carried[3], wanted[3], cx[3];
-    double n, d;
-    int k;
-    if (!adjust_quat_to_world(&ADJ_FRAME_LEGACY, q4a, w4) ||
-        !adjust_quat_to_world(&ADJ_FRAME_LEGACY, q5a, w5)) return 1e9;
-    dg_ik_quat_mul(w5, w4, chain);
-    n = sqrt(anim_fore[0] * anim_fore[0] + anim_fore[1] * anim_fore[1] +
-             anim_fore[2] * anim_fore[2]);
-    for (k = 0; k < 3; k++) fn[k] = anim_fore[k] / n;
-    arm_quat_rotate(chain, fn, axisv);
-    n = sqrt(axisv[0] * axisv[0] + axisv[1] * axisv[1] + axisv[2] * axisv[2]);
-    for (k = 0; k < 3; k++) an[k] = axisv[k] / n;
-    d = up[0] * fn[0] + up[1] * fn[1] + up[2] * fn[2];
-    for (k = 0; k < 3; k++) perp[k] = up[k] - d * fn[k];
-    arm_quat_rotate(chain, perp, carried);
-    d = up[0] * an[0] + up[1] * an[1] + up[2] * an[2];
-    for (k = 0; k < 3; k++) wanted[k] = up[k] - d * an[k];
-    n = sqrt(carried[0] * carried[0] + carried[1] * carried[1] +
-             carried[2] * carried[2]);
-    if (!(n > 1e-9)) return 1e9;
-    for (k = 0; k < 3; k++) carried[k] /= n;
-    n = sqrt(wanted[0] * wanted[0] + wanted[1] * wanted[1] +
-             wanted[2] * wanted[2]);
-    if (!(n > 1e-9)) return 1e9;
-    for (k = 0; k < 3; k++) wanted[k] /= n;
-    cx[0] = carried[1] * wanted[2] - carried[2] * wanted[1];
-    cx[1] = carried[2] * wanted[0] - carried[0] * wanted[2];
-    cx[2] = carried[0] * wanted[1] - carried[1] * wanted[0];
-    return atan2(cx[0] * an[0] + cx[1] * an[1] + cx[2] * an[2],
-                 carried[0] * wanted[0] + carried[1] * wanted[1] +
-                 carried[2] * wanted[2]) * 180.0 / 3.14159265358979323846;
-}
-
-/* t_grip_roll - the vr_arm_uproll owner (ROLL_ONTWERP_V3 par. 5). Every leg
-   asserts its own preconditions in the fixture, because a leg whose
-   precondition silently fails is a leg that passes while testing nothing. */
-static int t_grip_roll(void)
-{
-    static const double joints[5][3] = {
-        {   0.0,   0.0,   0.0 },
-        {   0.0,   0.0, 100.0 },
-        {   0.0,   0.0,   0.0 },
-        { 200.0,   0.0,   0.0 },
-        { 400.0,   0.0,   0.0 }
-    };
-    static const double target[3] = { 250.0, -150.0, 100.0 };
-    static const double t2[3] = { 150.0, -250.0, 50.0 };
-    DG_GRIP_ROLL_IN gr;
-    double p4[4], p5[4], c4[4], c5[4], r4[4], r5[4];
-    double fore[3], up[3];
-    double res_plain, res_corr;
-    unsigned clamped;
-    LONG up0, sk0, fb0;
-    int k, bad = 0, pb = 0;
-#define TG_LEG(name) do { if (bad != pb) { \
-        printf("    [grip-roll leg %s] +%d\n", name, bad - pb); pb = bad; } \
-    } while (0)
-
-    memset(&gr, 0, sizeof gr);
-    gr.on = 1;
-    gr.have_readback = 1;
-    gr.slot_q4[3] = 1.0;
-    gr.slot_q5[3] = 1.0;
-    for (k = 0; k < 3; k++) gr.raw_fore[k] = joints[4][k] - joints[3][k];
-    fore[0] = 200.0; fore[1] = 0.0; fore[2] = 0.0;
-    up[0] = 0.0; up[1] = 1.0; up[2] = 0.0;
-    g_b.arm_orient_have_prev = 0;
-
-    /* Off is bit-for-bit off: NULL and on=0 produce the same quaternions
-       and move no counter. */
-    up0 = g_b.c_orient_uprolled; sk0 = g_b.c_uproll_skipped;
-    if (!solve_arm_adjust(&ADJ_FRAME_LEGACY, joints, target, 1.0, NULL, NULL, p4, p5,
-                          &clamped)) bad++;
-    {
-        DG_GRIP_ROLL_IN off = gr;
-        off.on = 0;
-        g_b.arm_orient_have_prev = 0;
-        if (!solve_arm_adjust(&ADJ_FRAME_LEGACY, joints, target, 1.0, NULL, &off, c4, c5,
-                              &clamped)) bad++;
-        if (memcmp(p4, c4, sizeof p4) || memcmp(p5, c5, sizeof p5)) bad++;
-    }
-    if (g_b.c_orient_uprolled != up0 || g_b.c_uproll_skipped != sk0) bad++;
-    TG_LEG("off");
-
-    /* Alignment: the plain rig must carry a real residual (the
-       precondition), the corrected rig must close it, the counter must
-       move by exactly one, and q4 - the elbow's joint - must not move. */
-    res_plain = tg_residual_deg(p4, p5, fore, up);
-    if (!(fabs(res_plain) > 5.0 && fabs(res_plain) < 179.0)) bad++;
-    up0 = g_b.c_orient_uprolled;
-    g_b.arm_orient_have_prev = 0;
-    if (!solve_arm_adjust(&ADJ_FRAME_LEGACY, joints, target, 1.0, NULL, &gr, c4, c5,
-                          &clamped)) bad++;
-    res_corr = tg_residual_deg(c4, c5, fore, up);
-    if (!(fabs(res_corr) < 0.01)) bad++;
-    if (memcmp(p4, c4, sizeof p4)) bad++;
-    if (g_b.c_orient_uprolled != up0 + 1) bad++;
-    TG_LEG("align");
-
-    /* Fail-closed: an untrusted read-back leaves the solve EXACTLY the
-       plain one and counts the skip instead of guessing. */
-    {
-        DG_GRIP_ROLL_IN nr = gr;
-        nr.have_readback = 0;
-        sk0 = g_b.c_uproll_skipped; up0 = g_b.c_orient_uprolled;
-        g_b.arm_orient_have_prev = 0;
-        if (!solve_arm_adjust(&ADJ_FRAME_LEGACY, joints, target, 1.0, NULL, &nr, r4, r5,
-                              &clamped)) bad++;
-        if (memcmp(r5, p5, sizeof r5)) bad++;
-        if (g_b.c_uproll_skipped != sk0 + 1 ||
-            g_b.c_orient_uprolled != up0) bad++;
-    }
-    TG_LEG("fail-closed");
-
-    /* Divergence: the slots say the animation is NOT what the solver was
-       fed - the exact case the cache-trusting version got wrong. The
-       displayed forearm direction (chain applied to the slot-derived
-       animation bone) must be identical with and without the correction,
-       and the correction itself must be a real rotation. */
-    {
-        DG_GRIP_ROLL_IN dv = gr;
-        double s4w[4], s5w[4], t1[3], anim[3];
-        double w4p[4], w5p[4], w4c[4], w5c[4], chp[4], chc[4];
-        double dp[3], dc[3], n1, n2, dot;
-        th_axis(0.0, 0.0, 1.0, 20.0, s4w);
-        th_axis(0.0, 1.0, 0.0, 30.0, s5w);
-        world_quat_to_adjust(&ADJ_FRAME_LEGACY, s4w, dv.slot_q4);
-        world_quat_to_adjust(&ADJ_FRAME_LEGACY, s5w, dv.slot_q5);
-        anim[0] = 200.0; anim[1] = 0.0; anim[2] = 0.0;
-        arm_quat_rotate(s4w, anim, t1);
-        arm_quat_rotate(s5w, t1, dv.raw_fore);
-        g_b.arm_orient_have_prev = 0;
-        if (!solve_arm_adjust(&ADJ_FRAME_LEGACY, joints, target, 1.0, NULL, &dv, c4, c5,
-                              &clamped)) bad++;
-        if (!(dg_ik_quat_angle(c5, p5) * 180.0 /
-              3.14159265358979323846 > 0.1)) bad++;
-        if (!adjust_quat_to_world(&ADJ_FRAME_LEGACY, p4, w4p) || !adjust_quat_to_world(&ADJ_FRAME_LEGACY, p5, w5p) ||
-            !adjust_quat_to_world(&ADJ_FRAME_LEGACY, c4, w4c) || !adjust_quat_to_world(&ADJ_FRAME_LEGACY, c5, w5c))
-            bad++;
-        dg_ik_quat_mul(w5p, w4p, chp);
-        dg_ik_quat_mul(w5c, w4c, chc);
-        arm_quat_rotate(chp, anim, dp);
-        arm_quat_rotate(chc, anim, dc);
-        n1 = sqrt(dp[0] * dp[0] + dp[1] * dp[1] + dp[2] * dp[2]);
-        n2 = sqrt(dc[0] * dc[0] + dc[1] * dc[1] + dc[2] * dc[2]);
-        dot = (dp[0] * dc[0] + dp[1] * dc[1] + dp[2] * dc[2]) / (n1 * n2);
-        if (dot > 1.0) dot = 1.0;
-        if (!(acos(dot) * 180.0 / 3.14159265358979323846 < 1e-3)) bad++;
-    }
-    TG_LEG("divergence");
-
-    /* Purity is an ANCHORED claim (ROLL_ONTWERP_V3 par. 2.4): the straight
-       rest of the glue rig has no arm plane and falls back to continuity,
-       which is history-bearing by design. This bent-rest rig anchors - the
-       counter is the witness - and there the same pair twice is bitwise
-       the same answer, and a three-solve loop returning to its first
-       target returns to its first answer. */
-    {
-        static const double joints_bent[5][3] = {
-            {   0.0,   0.0,   0.0 },
-            {   0.0,   0.0, 100.0 },
-            {   0.0,   0.0,   0.0 },
-            { 180.0,   0.0,  80.0 },
-            { 380.0,   0.0,  80.0 }
-        };
-        LONG an0 = g_b.c_orient_anchored;
-        DG_GRIP_ROLL_IN gb = gr;
-        for (k = 0; k < 3; k++)
-            gb.raw_fore[k] = joints_bent[4][k] - joints_bent[3][k];
-        g_b.arm_orient_have_prev = 0;
-        if (!solve_arm_adjust(&ADJ_FRAME_LEGACY, joints_bent, target, 1.0, NULL, &gb, r4, r5,
-                              &clamped)) bad++;
-        if (g_b.c_orient_anchored != an0 + 1) bad++;
-        g_b.arm_orient_have_prev = 0;
-        if (!solve_arm_adjust(&ADJ_FRAME_LEGACY, joints_bent, target, 1.0, NULL, &gb, c4, c5,
-                              &clamped)) bad++;
-        if (memcmp(r4, c4, sizeof r4) || memcmp(r5, c5, sizeof r5)) bad++;
-        if (!solve_arm_adjust(&ADJ_FRAME_LEGACY, joints_bent, t2, 1.0, NULL, &gb, c4, c5,
-                              &clamped)) bad++;
-        if (!solve_arm_adjust(&ADJ_FRAME_LEGACY, joints_bent, target, 1.0, NULL, &gb, c4, c5,
-                              &clamped)) bad++;
-        for (k = 0; k < 4; k++)
-            if (fabs(c4[k] - r4[k]) > 1e-12 ||
-                fabs(c5[k] - r5[k]) > 1e-12) bad++;
-    }
-    TG_LEG("purity");
-
-    /* The fade oracle, hand-computed in the design (ROLL_ONTWERP_V3 par.
-       2.3) and asserted against the helper directly: exact through 150
-       degrees, the three in-band fractions, zero at the branch, and a
-       continuous single-signed sweep. */
-    {
-        static const struct { double th, alpha; } tab[] = {
-            { 120.0, 120.0 }, { 150.0, 150.0 },
-            { 157.5, 132.890625 }, { 165.0, 82.5 }, { 172.5, 26.953125 }
-        };
-        double q4a[4], q5a[4], wq[4], back[4], axx[3];
-        double alpha, prev_alpha, th;
-        int i;
-        axx[0] = 1.0; axx[1] = 0.0; axx[2] = 0.0;
-        for (i = 0; i < 5; i++) {
-            DG_GRIP_ROLL_IN fg = gr;
-            fg.raw_fore[0] = 1.0; fg.raw_fore[1] = 0.0; fg.raw_fore[2] = 0.0;
-            memset(q4a, 0, sizeof q4a); q4a[3] = 1.0;
-            th_axis(1.0, 0.0, 0.0, -tab[i].th, wq);
-            world_quat_to_adjust(&ADJ_FRAME_LEGACY, wq, q5a);
-            arm_grip_roll(&ADJ_FRAME_LEGACY, &fg, q4a, q5a);
-            if (!adjust_quat_to_world(&ADJ_FRAME_LEGACY, q5a, back)) bad++;
-            alpha = tg_twist_deg(back, axx) + tab[i].th;
-            if (fabs(alpha - tab[i].alpha) >
-                ((tab[i].th <= 150.0) ? 1e-6 : 1e-5)) {
-                printf("    [fade dbg] th=%.3f expect=%.9f got=%.9f "
-                       "raw_twist=%.9f\n", tab[i].th, tab[i].alpha, alpha,
-                       tg_twist_deg(back, axx));
-                bad++;
-            }
-        }
-        {
-            DG_GRIP_ROLL_IN fg = gr;
-            fg.raw_fore[0] = 1.0; fg.raw_fore[1] = 0.0; fg.raw_fore[2] = 0.0;
-            memset(q4a, 0, sizeof q4a); q4a[3] = 1.0;
-            th_axis(1.0, 0.0, 0.0, -(180.0 - 1e-6), wq);
-            world_quat_to_adjust(&ADJ_FRAME_LEGACY, wq, q5a);
-            arm_grip_roll(&ADJ_FRAME_LEGACY, &fg, q4a, q5a);
-            if (!adjust_quat_to_world(&ADJ_FRAME_LEGACY, q5a, back)) bad++;
-            alpha = tg_twist_deg(back, axx) + (180.0 - 1e-6);
-            if (!(fabs(alpha) < 1e-3)) bad++;
-        }
-        prev_alpha = 0.0;
-        for (th = 1.0; th < 179.5; th += 0.5) {
-            DG_GRIP_ROLL_IN fg = gr;
-            fg.raw_fore[0] = 1.0; fg.raw_fore[1] = 0.0; fg.raw_fore[2] = 0.0;
-            memset(q4a, 0, sizeof q4a); q4a[3] = 1.0;
-            th_axis(1.0, 0.0, 0.0, -th, wq);
-            world_quat_to_adjust(&ADJ_FRAME_LEGACY, wq, q5a);
-            arm_grip_roll(&ADJ_FRAME_LEGACY, &fg, q4a, q5a);
-            if (!adjust_quat_to_world(&ADJ_FRAME_LEGACY, q5a, back)) bad++;
-            alpha = tg_twist_deg(back, axx) + th;
-            if (!_finite(alpha) || alpha < -1e-6) bad++;
-            /* Continuity, not monotonicity: the fade's steepest slope is
-               |d(alpha)/d(th)| ~ 7.8 deg/deg near 165 (s' peaks at 1.5),
-               so a 0.5-degree step moves alpha at most ~3.9 degrees. */
-            if (th > 1.0 && fabs(alpha - prev_alpha) > 4.5) bad++;
-            prev_alpha = alpha;
-        }
-    }
-    TG_LEG("fade-oracle");
-
-    /* Partiality inside the vertical band: a forearm 5 degrees from
-       vertical must be corrected PARTIALLY - strictly between 20 and 80
-       percent of the demanded 5-degree roll. A mutation that keeps the
-       gate but drops the weight corrects fully here and dies. */
-    {
-        DG_GRIP_ROLL_IN fg = gr;
-        double fdir[3], q4a[4], q5a[4], wq[4], back[4], alpha;
-        double s5 = sin(5.0 * 3.14159265358979323846 / 180.0);
-        double c5v = cos(5.0 * 3.14159265358979323846 / 180.0);
-        fdir[0] = s5; fdir[1] = c5v; fdir[2] = 0.0;
-        fg.raw_fore[0] = fdir[0]; fg.raw_fore[1] = fdir[1];
-        fg.raw_fore[2] = fdir[2];
-        memset(q4a, 0, sizeof q4a); q4a[3] = 1.0;
-        th_axis(fdir[0], fdir[1], fdir[2], -5.0, wq);
-        world_quat_to_adjust(&ADJ_FRAME_LEGACY, wq, q5a);
-        arm_grip_roll(&ADJ_FRAME_LEGACY, &fg, q4a, q5a);
-        if (!adjust_quat_to_world(&ADJ_FRAME_LEGACY, q5a, back)) bad++;
-        alpha = tg_twist_deg(back, fdir) + 5.0;
-        if (!(alpha > 1.0 && alpha < 4.0)) bad++;
-    }
-    TG_LEG("partiality");
-
-    /* The up axis: with the bone along +X and world up the helper's own
-       +Y, a -30-degree demand closes exactly. The rewired-axis mutation
-       (up_w sideways, parallel to this bone) fades the correction to
-       nothing here and the residual stands - this leg dies. */
-    {
-        DG_GRIP_ROLL_IN fg = gr;
-        double q4a[4], q5a[4], wq[4], back[4], axx[3], resid;
-        axx[0] = 1.0; axx[1] = 0.0; axx[2] = 0.0;
-        fg.raw_fore[0] = 1.0; fg.raw_fore[1] = 0.0; fg.raw_fore[2] = 0.0;
-        memset(q4a, 0, sizeof q4a); q4a[3] = 1.0;
-        th_axis(1.0, 0.0, 0.0, -30.0, wq);
-        world_quat_to_adjust(&ADJ_FRAME_LEGACY, wq, q5a);
-        arm_grip_roll(&ADJ_FRAME_LEGACY, &fg, q4a, q5a);
-        if (!adjust_quat_to_world(&ADJ_FRAME_LEGACY, q5a, back)) bad++;
-        resid = tg_twist_deg(back, axx);
-        if (!(fabs(resid) < 1e-6)) bad++;
-    }
-    TG_LEG("up-axis");
-
-    /* Blend purity: at weight 0.5 the corrected forearm quaternion is the
-       half-blended one composed with a PURE twist about the displayed
-       bone - and the fixture first proves its base and twist do not
-       commute, so the leg cannot pass by commutativity. */
-    {
-        double h4[4], h5[4], hc4[4], hc5[4];
-        double w4[4], w5[4], wc5[4], ch[4], delta[4], conj[4];
-        double axv[3], n, para, perp2;
-        double ab[4], ba[4];
-        g_b.arm_orient_have_prev = 0;
-        if (!solve_arm_adjust(&ADJ_FRAME_LEGACY, joints, target, 0.5, NULL, NULL, h4, h5,
-                              &clamped)) bad++;
-        g_b.arm_orient_have_prev = 0;
-        if (!solve_arm_adjust(&ADJ_FRAME_LEGACY, joints, target, 0.5, NULL, &gr, hc4, hc5,
-                              &clamped)) bad++;
-        if (!adjust_quat_to_world(&ADJ_FRAME_LEGACY, h4, w4) || !adjust_quat_to_world(&ADJ_FRAME_LEGACY, h5, w5) ||
-            !adjust_quat_to_world(&ADJ_FRAME_LEGACY, hc5, wc5)) bad++;
-        dg_ik_quat_mul(w5, w4, ab);
-        dg_ik_quat_mul(w4, w5, ba);
-        if (!(dg_ik_quat_angle(ab, ba) * 180.0 /
-              3.14159265358979323846 > 1.0)) bad++;
-        dg_ik_quat_mul(w5, w4, ch);
-        arm_quat_rotate(ch, fore, axv);
-        n = sqrt(axv[0] * axv[0] + axv[1] * axv[1] + axv[2] * axv[2]);
-        for (k = 0; k < 3; k++) axv[k] /= n;
-        dg_ik_quat_conj(w5, conj);
-        dg_ik_quat_mul(wc5, conj, delta);
-        para = fabs(delta[0] * axv[0] + delta[1] * axv[1] +
-                    delta[2] * axv[2]);
-        perp2 = sqrt(delta[0] * delta[0] + delta[1] * delta[1] +
-                     delta[2] * delta[2] - para * para);
-        if (!(para > 1e-4)) bad++;
-        if (!(perp2 < 1e-6)) bad++;
-        if (memcmp(h4, hc4, sizeof h4)) bad++;
-    }
-    TG_LEG("blend");
-
-    /* CONTINUED scope: this straight-rest rig takes the fallback path (the
-       counter is the witness), two different seeded histories give two
-       different bases there, and the correction stays a pure twist about
-       the displayed bone on both. */
-    {
-        double a5[4], b5[4], x4[4];
-        fb0 = g_b.c_orient_fallback;
-        g_b.arm_orient_have_prev = 0;
-        if (!solve_arm_adjust(&ADJ_FRAME_LEGACY, joints, target, 1.0, NULL, &gr, x4, a5,
-                              &clamped)) bad++;
-        if (!solve_arm_adjust(&ADJ_FRAME_LEGACY, joints, t2, 1.0, NULL, &gr, x4, b5,
-                              &clamped)) bad++;
-        if (g_b.c_orient_fallback < fb0 + 1) bad++;
-        if (!(dg_ik_quat_angle(a5, b5) * 180.0 /
-              3.14159265358979323846 > 0.01)) bad++;
-    }
-
-    TG_LEG("fallback-history");
-#undef TG_LEG
-    g_b.arm_orient_have_prev = 0;
-    printf("  %-6s grip roll: off is off, alignment closed with the elbow "
-           "untouched, fail-closed read-back, wrist fixed under slot "
-           "divergence, bitwise purity, hand-computed fade oracle, in-band "
-           "partiality, up-axis oracle, blend twist-purity, fallback "
-           "history\n",
-           bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-/* Lay a world rotation into a joint matrix the way the hierarchy pass does:
-   row r is the world direction of local axis r. */
-static void th_write_basis(float *m, const double q[4])
-{
-    double axis[3], world[3];
-    int r, k;
-    for (r = 0; r < 3; r++) {
-        axis[0] = axis[1] = axis[2] = 0.0;
-        axis[r] = 1.0;
-        arm_quat_rotate(q, axis, world);
-        for (k = 0; k < 3; k++) m[r * 4 + k] = (float)world[k];
-        m[r * 4 + 3] = 0.0f;
-    }
-    m[15] = 1.0f;
-}
-
-static double th_angle_between(const double a[4], const double b[4])
-{
-    return dg_ik_quat_angle(a, b) * 180.0 / 3.14159265358979323846;
-}
-
-/* The engine's pull on the shift SVECTOR, with the part run 13 (2026-09-03)
-   proved: GV_NearExp4PV measures the way back to zero along the SHORT ARC of
-   the 4096-unit turn, so a short written past a half turn is folded before
-   it is pulled. A write of 2426 - the 4/3 precompensation of 1820 - lands
-   at -1253, three quarters of a turn from the ask, which the hand shows as a
-   90-degree flip. Inside the half turn this is the plain x - x/4 the older
-   legs modelled. */
-static int th_engine_pull(int x)
-{
-    int w = x % 4096;
-    if (w < 0) w += 4096;
-    if (w >= 2048) w -= 4096;
-    return w - w / 4;
-}
-
-/* Compose our cached shoulder/forearm adjustments plus SetPos's independently
-   supplied hand adjustment exactly as the engine does. */
-static int th_next_hand(const double anim[4], const double hand_adjust[4],
-                        double out[4])
-{
-    double a[3][4], w[3][4], chain[4];
-    int j, k;
-    for (j = 0; j < 2; j++) {
-        for (k = 0; k < 4; k++)
-            a[j][k] = (double)g_b.arm_map_cached_adjust[j * 4 + k];
-        if (!adjust_quat_to_world(&ADJ_FRAME_LEGACY, a[j], w[j])) return 0;
-    }
-    for (k = 0; k < 4; k++) a[2][k] = hand_adjust[k];
-    if (!adjust_quat_to_world(&ADJ_FRAME_LEGACY, a[2], w[2])) return 0;
-    dg_ik_quat_mul(w[1], w[0], chain);          /* fore then upper */
-    dg_ik_quat_mul(w[2], chain, chain);         /* hand outermost */
-    dg_ik_quat_mul(chain, anim, out);
-    return 1;
-}
-
-/* Rotate an entire fake rig rigidly about its root's position: every joint
-   basis turned by `turn` in world, every joint position swung around the
-   root. This is what a body turn looks like to the seam - the hierarchy
-   moves as one piece and the player's input does not. */
-static void th_turn_rig(unsigned char *joints, int stride, int count,
-                        const double turn[4])
-{
-    double origin[3], rows[3][3], q[4], nq[4], p[3], r[3];
-    const float *root = (const float *)joints;
-    int j, k, rr;
-    for (k = 0; k < 3; k++) origin[k] = (double)root[12 + k];
-    for (j = 0; j < count; j++) {
-        float *m = (float *)(joints + j * stride);
-        for (rr = 0; rr < 3; rr++)
-            for (k = 0; k < 3; k++) rows[rr][k] = (double)m[rr * 4 + k];
-        if (!dg_ik_basis_quat((const double (*)[3])rows, q)) continue;
-        dg_ik_quat_mul(turn, q, nq);
-        for (k = 0; k < 3; k++) p[k] = (double)m[12 + k] - origin[k];
-        th_write_basis(m, nq);
-        arm_quat_rotate(turn, p, r);
-        for (k = 0; k < 3; k++) m[12 + k] = (float)(origin[k] + r[k]);
-    }
-}
-
-/* The shoulder-relative world offset a pair published: where the driven
-   hand target sits relative to the character's shoulder, in world
-   coordinates. The shoulder itself rides the body; this offset belongs to
-   the player, and a body yaw must leave it alone. */
-static void th_pair_offset(const double live_root_q[4],
-                           const double root_pos[3], double offset[3])
-{
-    double shoulder_view[3], shoulder_world[3];
-    float f;
-    LONG v;
-    int k;
-    for (k = 0; k < 3; k++) {
-        v = InterlockedCompareExchange(&g_b.s_arm_shoulder_view[k], 0, 0);
-        memcpy(&f, &v, sizeof f);
-        shoulder_view[k] = (double)f;
-    }
-    arm_quat_rotate(live_root_q, shoulder_view, shoulder_world);
-    for (k = 0; k < 3; k++) {
-        v = InterlockedCompareExchange(&g_b.s_arm_ik_target[k], 0, 0);
-        memcpy(&f, &v, sizeof f);
-        offset[k] = (double)f - (root_pos[k] + shoulder_world[k]);
-    }
-}
-
-/* The probe is only worth running if our copy of the game's conversion is
-   faithful, so this pins it against facts that do not come from the copy:
-   single-axis rotations, whose quaternions are known without any Euler
-   convention at all, and a composed case built by multiplying three axis
-   quaternions with the IK module's own product. */
-/* The hole this closes, exercised through the real seam entry point.
- *
- * The tick seam is the only writer of fps.state, and it nearly stops during a
- * codec or a cutscene while the camera seam speeds up - 465 ticks against 2474
- * camera samples in the window of dg_hook.f5_adj_nosignal_2026-08-18 that
- * contained both. So fps.state is not merely late during those states, it is
- * frozen at whatever it read before they began, which is ACTIVE.
- *
- * The test therefore never calls the tick seam at all. It plants ACTIVE, moves
- * the status words underneath, and requires the writer to stand down anyway -
- * which is exactly the situation the log measured and which no test covered
- * before this one. */
-static int t_writer_stands_down_on_the_seams_own_reading(void)
-{
-    enum { STRIDE = 0x180, JOINTS = 7 };
-    static unsigned char blob[DG_OBJS_ARRAY + JOINTS * STRIDE];
-    static unsigned char obj[0x40], mc[0x70];
-    static float adjust[55 * 4];
-    static LONG game, game_scn, menu, menu_scn;
-    static ULONGLONG player;
-    ULONGLONG arm = (ULONGLONG)(ULONG_PTR)obj;
-    DG_ANCHORS saved_anchors = g_b.a;
-    DG_BRIDGE_ARM_TARGET target;
-    LONG refused;
-    int j, bad = 0;
-
-    memset(blob, 0, sizeof blob);
-    memset(obj, 0, sizeof obj);
-    memset(mc, 0, sizeof mc);
-    memset(adjust, 0, sizeof adjust);
-    *(ULONGLONG *)(obj + 0x00) = (ULONGLONG)(ULONG_PTR)blob;
-    *(ULONGLONG *)(obj + 0x08) = (ULONGLONG)(ULONG_PTR)mc;
-    *(LONG *)(mc + 0x14) = 55;
-    *(ULONGLONG *)(mc + 0x48) = (ULONGLONG)(ULONG_PTR)adjust;
-    for (j = 0; j < JOINTS; j++) {
-        float *m = (float *)(blob + DG_OBJS_ARRAY + j * STRIDE);
-        m[0] = m[5] = m[10] = m[15] = 1.0f;
-    }
-    ((float *)(blob + DG_OBJS_ARRAY + 3 * STRIDE))[14] = 100.0f;
-    ((float *)(blob + DG_OBJS_ARRAY + 5 * STRIDE))[12] = 200.0f;
-    ((float *)(blob + DG_OBJS_ARRAY + 6 * STRIDE))[12] = 300.0f;
-    ((float *)(blob + DG_OBJS_ARRAY + 6 * STRIDE))[13] = 173.20508f;
-
-    InterlockedExchange(&g_b.skel_stride, STRIDE);
-    InterlockedExchange(&g_b.skel_parents_read, JOINTS);
-    InterlockedExchange(&g_b.skel_region_end, (LONG)sizeof blob);
-    for (j = 0; j < JOINTS; j++) InterlockedExchange(&g_b.skel_parents[j], 0);
-    InterlockedExchange(&g_b.skel_parents[3], 2);
-    InterlockedExchange(&g_b.skel_parents[4], 3);
-    InterlockedExchange(&g_b.skel_parents[5], 4);
-    InterlockedExchange(&g_b.skel_parents[6], 5);
-
-    game = game_scn = menu = menu_scn = 0;
-    player = 0;
-    g_b.a.gm_game_status = (ULONGLONG)(ULONG_PTR)&game;
-    g_b.a.gm_game_status_scn = (ULONGLONG)(ULONG_PTR)&game_scn;
-    g_b.a.gm_menu_status = (ULONGLONG)(ULONG_PTR)&menu;
-    g_b.a.gm_menu_status_scn = (ULONGLONG)(ULONG_PTR)&menu_scn;
-    g_b.a.gm_player_status = (ULONGLONG)(ULONG_PTR)&player;
-    g_b.a.gm_player_arm_body = (ULONGLONG)(ULONG_PTR)&arm;
-    g_b.a.arm_cam_rotate_shift = 0;
-    InterlockedExchange(&g_b.armed, 1);
-    InterlockedExchange(&g_b.ik_active, 0);
-    InterlockedExchange(&g_b.c_seam_refused_unsafe, 0);
-    InterlockedExchange(&g_b.c_ticks, DG_ADJ_SETTLE_TICKS + 1);
-    /* ACTIVE, and never revisited - the tick seam is not called even once. */
-    g_b.fps.state = DG_FPS_ACTIVE;
-    arm_map_forget();
-
-    memset(&target, 0, sizeof target);
-    target.write = 1;
-    target.weight = 1.0;
-    target.stream_id = 11;
-    target.pair_id = 900;
-    target.wrist_view[0] = 770.0;
-    target.hand_quat[3] = 1.0;
-
-    /* Safe: acquisition, settle and calibration proceed as usual, so the test
-       is not passing merely because nothing works. */
-    for (j = 0; j < 6; j++) {
-        target.pair_id++;
-        InterlockedIncrement(&g_b.c_ticks);
-        dg_bridge_arm_seam_now(&target);
-    }
-    if (*(ULONGLONG *)(mc + 0x38) == 0) bad++;      /* it did write */
-    if (g_b.c_seam_refused_unsafe != 0) bad++;
-
-    /* A story cutscene starts. STATE_SCN_DEMO, in the scenario half of the
-       word - the half a reader that took only GM_GameStatus would miss. */
-    refused = g_b.c_seam_refused_unsafe;
-    game_scn = 0x08000000;
-    target.pair_id++;
-    InterlockedIncrement(&g_b.c_ticks);
-    dg_bridge_arm_seam_now(&target);
-    if (g_b.c_seam_refused_unsafe != refused + 1) bad++;
-    if (*(ULONGLONG *)(mc + 0x38) != 0) bad++;      /* and it let go */
-    if (g_b.fps.state != DG_FPS_ACTIVE) bad++;      /* while still "ACTIVE" */
-
-    /* It stays stood down for as long as the scene runs. */
-    for (j = 0; j < 20; j++) {
-        target.pair_id++;
-        InterlockedIncrement(&g_b.c_ticks);
-        dg_bridge_arm_seam_now(&target);
-    }
-    if (*(ULONGLONG *)(mc + 0x38) != 0) bad++;
-    if (g_b.c_seam_refused_unsafe != refused + 21) bad++;
-
-    /* The scene ends, a codec call starts. MENU_RADIO_ON, the only bit that
-       can see one, and again in the scenario half. */
-    game_scn = 0;
-    menu_scn = 0x00000400;
-    target.pair_id++;
-    InterlockedIncrement(&g_b.c_ticks);
-    dg_bridge_arm_seam_now(&target);
-    if (*(ULONGLONG *)(mc + 0x38) != 0) bad++;
-    if (g_b.c_seam_refused_unsafe != refused + 22) bad++;
-
-    /* An alarm is not a cutscene. STATE_DETECT must not stand the writer down,
-       or a chase becomes the one time the arm stops working. */
-    menu_scn = 0;
-    game = 0x00000004;
-    for (j = 0; j < 6; j++) {
-        target.pair_id++;
-        InterlockedIncrement(&g_b.c_ticks);
-        dg_bridge_arm_seam_now(&target);
-    }
-    if (*(ULONGLONG *)(mc + 0x38) == 0) bad++;
-    if (g_b.c_seam_refused_unsafe != refused + 22) bad++;
-
-    InterlockedExchange(&g_b.armed, 0);
-    arm_map_forget();
-    g_b.a = saved_anchors;
-    InterlockedExchange(&g_b.skel_stride, 0);
-    InterlockedExchange(&g_b.skel_parents_read, 0);
-    InterlockedExchange(&g_b.skel_region_end, 0);
-    InterlockedExchange(&g_b.c_ticks, 0);
-    InterlockedExchange(&g_b.c_seam_refused_unsafe, 0);
-    g_b.fps.state = DG_FPS_OFF;
-
-    printf("  %-6s writer safety: with fps.state frozen at ACTIVE - which is "
-           "what a codec or cutscene does to the tick seam - the joint writer "
-           "still stands down on the camera seam's own reading of a scenario "
-           "demo and of the codec, and an alarm still counts as gameplay\n",
-           bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-static int t_set_pos_quat_matches_the_game(void)
-{
-    double rot[3], q[4], want[4], qx[4], qy[4], qz[4], chain[4];
-    int bad = 0, k;
-
-    /* Units first: 4096 PS2 units is a full turn, so 1024 is a right angle and
-       half of it lands on cos/sin of 45 degrees. Everything below depends on
-       that scale being right, and nothing below could tell a wrong scale from
-       a wrong axis if this were not checked on its own. */
-    rot[0] = 0.0; rot[1] = 1024.0; rot[2] = 0.0;
-    set_pos_quat(rot, q);
-    if (fabs(q[0]) > 1e-9 || fabs(q[1] - 0.70710678) > 1e-6 ||
-        fabs(q[2]) > 1e-9 || fabs(q[3] - 0.70710678) > 1e-6) bad++;
-
-    /* A pure X turn, which both branches happen to agree on - so this pins the
-       axis without depending on which branch ran. */
-    rot[0] = 1024.0; rot[1] = 0.0; rot[2] = 0.0;
-    set_pos_quat(rot, q);
-    if (fabs(q[0] - 0.70710678) > 1e-6 || fabs(q[1]) > 1e-9 ||
-        fabs(q[2]) > 1e-9 || fabs(q[3] - 0.70710678) > 1e-6) bad++;
-
-    /* And the branch that makes vy != 0 non-negotiable. With vy zero SetPos
-       takes GM_RotToQuatXAfterY, which forces q.vy = 0 and never looks at vz
-       at all: a quarter turn about Z asked for this way is silently discarded.
-       That is the whole reason the solver must keep vy off zero, and it is
-       worth a test rather than a comment. */
-    rot[0] = 0.0; rot[1] = 0.0; rot[2] = 1024.0;
-    set_pos_quat(rot, q);
-    if (fabs(q[3] - 1.0) > 1e-9) bad++;          /* identity: vz thrown away */
-
-    /* One unit of vy - 0.088 degrees, invisible - switches to the full XYZ
-       path and the same vz now arrives. */
-    rot[0] = 0.0; rot[1] = 1.0; rot[2] = 1024.0;
-    set_pos_quat(rot, q);
-    if (fabs(q[2] - 0.70710678) > 1e-4 || fabs(q[3] - 0.70710678) > 1e-4) bad++;
-    if (fabs(q[1]) > 1e-2) bad++;                /* and vy really is tiny */
-
-    /* All zero is identity, which is what the 2026-08-18 run observed the game
-       writing into adjust[6] on all 115 arm-camera ticks. */
-    rot[0] = rot[1] = rot[2] = 0.0;
-    set_pos_quat(rot, q);
-    if (q[0] != 0.0 || q[1] != 0.0 || q[2] != 0.0 || fabs(q[3] - 1.0) > 1e-12)
-        bad++;
-
-    /* The composition order, built independently: three axis quaternions
-       multiplied with dg_ik_quat_mul, which the IK suite proves separately.
-       MT_EulerToQuatXYZ is q = Rz(vz) * Ry(vy) * Rx(vx) - X applied first. A
-       different order gives a visibly different rotation for these angles. */
-    rot[0] = 300.0; rot[1] = -700.0; rot[2] = 450.0;
-    set_pos_quat(rot, q);
-    {
-        double ax = rot[0] * 2.0 * 3.14159265358979323846 / 4096.0;
-        double ay = rot[1] * 2.0 * 3.14159265358979323846 / 4096.0;
-        double az = rot[2] * 2.0 * 3.14159265358979323846 / 4096.0;
-        qx[0] = sin(ax * 0.5); qx[1] = 0.0; qx[2] = 0.0; qx[3] = cos(ax * 0.5);
-        qy[0] = 0.0; qy[1] = sin(ay * 0.5); qy[2] = 0.0; qy[3] = cos(ay * 0.5);
-        qz[0] = 0.0; qz[1] = 0.0; qz[2] = sin(az * 0.5); qz[3] = cos(az * 0.5);
-        dg_ik_quat_mul(qz, qy, chain);
-        dg_ik_quat_mul(chain, qx, want);
-    }
-    for (k = 0; k < 4; k++)
-        if (fabs(q[k] - want[k]) > 1e-9) bad++;
-
-    /* The reverse order must NOT match, or the check above would pass on any
-       implementation at all. */
-    dg_ik_quat_mul(qx, qy, chain);
-    dg_ik_quat_mul(chain, qz, want);
-    {
-        double worst = 0.0;
-        for (k = 0; k < 4; k++)
-            if (fabs(q[k] - want[k]) > worst) worst = fabs(q[k] - want[k]);
-        if (worst < 0.01) bad++;
-    }
-
-    /* Every result is a rotation. */
-    rot[0] = -1900.0; rot[1] = 2048.0; rot[2] = 1700.0;
-    set_pos_quat(rot, q);
-    {
-        double n = sqrt(q[0]*q[0] + q[1]*q[1] + q[2]*q[2] + q[3]*q[3]);
-        if (fabs(n - 1.0) > 1e-9) bad++;
-    }
-
-    printf("  %-6s SetPos conversion: 4096 units to a turn, XYZ Euler applied "
-           "X first, and the vy=0 branch really does discard vz - which is why "
-           "the hand solver may never write vy zero\n",
-           bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-/* The probe's own hands: what it writes, what it clamps, and that it gives the
-   SVECTOR back. It writes into a global the game owns, so "stops writing" is
-   not good enough - it has to put zero there, which is the value every
-   weapon's table entry holds. */
-
-static int t_the_two_halves_of_the_conversion_agree(void)
-{
-    static const double AXES[8][3] = {
-        {  1.0,  0.0,  0.0 }, {  0.0,  1.0,  0.0 }, {  0.0,  0.0,  1.0 },
-        {  0.6, -0.8,  0.0 }, {  0.3,  0.2, -0.9 }, { -0.5,  0.5,  0.7 },
-        {  0.9,  0.1,  0.4 }, { -0.2, -0.7,  0.6 }
-    };
-    double worst = 0.0, worst_clamped = 0.0;
-    int samples = 0, clamped = 0, singular = 0, bad = 0;
-    int a, d;
-
-    for (a = 0; a < 8; a++) {
-        double n = sqrt(AXES[a][0] * AXES[a][0] + AXES[a][1] * AXES[a][1] +
-                        AXES[a][2] * AXES[a][2]);
-        for (d = -175; d <= 175; d += 5) {
-            double half = (double)d * 3.14159265358979323846 / 360.0;
-            double s = sin(half) / n;
-            double want[4], got[4], rot[3];
-            short ps[3];
-            unsigned flags = 0;
-            double miss;
-            int k;
-
-            want[0] = AXES[a][0] * s;
-            want[1] = AXES[a][1] * s;
-            want[2] = AXES[a][2] * s;
-            want[3] = cos(half);
-
-            if (!dg_ik_quat_to_ps_angles(want, ps, &flags)) { bad++; continue; }
-            /* Never zero, or SetPos would take the branch that throws vz away
-               and this whole round trip would be measuring the wrong function. */
-            if (ps[1] == 0) bad++;
-            if (flags & DG_IK_PS_VY_CLAMPED) clamped++;
-            if (flags & DG_IK_PS_SINGULAR) singular++;
-
-            for (k = 0; k < 3; k++) rot[k] = (double)ps[k];
-            set_pos_quat(rot, got);
-            miss = dg_ik_quat_angle(want, got) * 180.0 /
-                   3.14159265358979323846;
-            samples++;
-            if (flags & DG_IK_PS_VY_CLAMPED) {
-                if (miss > worst_clamped) worst_clamped = miss;
-                if (miss > 0.176) bad++;
-            } else {
-                if (miss > worst) worst = miss;
-                if (miss > 0.132) bad++;
-            }
-        }
-    }
-    if (samples < 500) bad++;
-    /* Both interesting cases have to actually occur, or the bounds above were
-       never exercised and the numbers printed below mean nothing. */
-    if (!clamped) bad++;
-
-    /* And the poles, which is where an Euler decomposition is worth least and
-       a silent answer would be worth nothing at all. */
-    {
-        double pole[4], got[4], rot[3];
-        short ps[3];
-        unsigned flags = 0;
-        double half = 3.14159265358979323846 / 4.0;   /* 90 deg about Y */
-        int k;
-        pole[0] = 0.0; pole[1] = sin(half); pole[2] = 0.0; pole[3] = cos(half);
-        if (!dg_ik_quat_to_ps_angles(pole, ps, &flags)) bad++;
-        if (!(flags & DG_IK_PS_SINGULAR)) bad++;      /* reported, not hidden */
-        if (ps[1] != 1024 && ps[1] != -1024) bad++;
-        for (k = 0; k < 3; k++) rot[k] = (double)ps[k];
-        set_pos_quat(rot, got);
-        if (dg_ik_quat_angle(pole, got) * 180.0 / 3.14159265358979323846 > 0.2)
-            bad++;
-    }
-
-    printf("  %-6s conversion halves agree: %d rotations survive the inverse "
-           "in dg_ik.c and the forward transcription here, worst %.4f deg "
-           "(%.4f on the %d vy-clamped), %d at a gimbal pole and every one of "
-           "them reported\n",
-           bad ? "FAIL" : "ok", samples, worst, worst_clamped, clamped,
-           singular);
-    return bad ? 1 : 0;
-}
-
-static int t_hand_probe_owns_and_returns_the_svector(void)
-{
-    short live[3] = { 111, 222, 333 };
-    DG_BRIDGE_CONFIG cfg;
-    ULONGLONG saved = g_b.a.arm_cam_rotate_shift;
-    LONG writes;
-    int bad = 0;
-
-    g_b.a.arm_cam_rotate_shift = (ULONGLONG)(ULONG_PTR)live;
-    InterlockedExchange(&g_b.hand_probe_owned, 0);
-    InterlockedExchange(&g_b.c_hand_probe_writes, 0);
-
-    /* Off means untouched, not zeroed: a probe nobody asked for must leave the
-       game exactly as it found it. */
-    InterlockedExchange(&g_b.hand_probe, 0);
-    hand_probe_write();
-    if (live[0] != 111 || live[1] != 222 || live[2] != 333) bad++;
-    if (g_b.c_hand_probe_writes != 0) bad++;
-
-    memset(&cfg, 0, sizeof cfg);
-    cfg.fps_mode = DG_FPS_MODE_TOGGLE;
-    cfg.hand_probe = 1;
-    cfg.hand_probe_rot[0] = 40;
-    cfg.hand_probe_rot[1] = 256;
-    cfg.hand_probe_rot[2] = -90;
-    dg_bridge_configure(&cfg);
-    writes = g_b.c_hand_probe_writes;
-    hand_probe_write();
-    if (live[0] != 40 || live[1] != 256 || live[2] != -90) bad++;
-    if (g_b.c_hand_probe_writes != writes + 1) bad++;
-    if (!g_b.hand_probe_owned) bad++;
-
-    /* A short read as an angle wraps, so a value past half a turn is not a
-       bigger rotation - it is a different one. Clamped, both ways. */
-    cfg.hand_probe_rot[0] = 40000;
-    cfg.hand_probe_rot[1] = -40000;
-    cfg.hand_probe_rot[2] = 0;
-    dg_bridge_configure(&cfg);
-    hand_probe_write();
-    if (live[0] != 2048 || live[1] != -2048 || live[2] != 0) bad++;
-
-    /* Turning it off hands the SVECTOR back rather than leaving our angle in
-       a global the game will pick up again next time the arm camera comes on. */
-    cfg.hand_probe = 0;
-    dg_bridge_configure(&cfg);
-    if (live[0] != 0 || live[1] != 0 || live[2] != 0) bad++;
-    if (g_b.hand_probe_owned) bad++;
-
-    /* And a second release is not a second write into someone else's memory. */
-    live[0] = 7;
-    hand_probe_release();
-    if (live[0] != 7) bad++;
-
-    g_b.a.arm_cam_rotate_shift = saved;
-    InterlockedExchange(&g_b.hand_probe, 0);
-    InterlockedExchange(&g_b.hand_probe_owned, 0);
-    InterlockedExchange(&g_b.c_hand_probe_writes, 0);
-
-    printf("  %-6s hand probe: off writes nothing, on writes the configured "
-           "angles clamped to half a turn, and release puts back the 0,0,0 "
-           "every weapon's own table holds\n", bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-static int t_hand_tick_writer_is_fail_closed(void)
-{
-    union { ULONGLONG align; unsigned char b[0x300]; } actor;
-    union { ULONGLONG align; unsigned char b[0xD20]; } player;
-    ULONGLONG arm, arm_slot;
-    ULONGLONG saved_arm_anchor = g_b.a.gm_player_arm_body;
-    ULONGLONG saved_shift = g_b.a.arm_cam_rotate_shift;
-    short shift[3] = { 7, 8, 9 };
-    short command[3] = { 100, -200, 300 };
-    LONG n;
-    int bad = 0;
-
-    memset(&actor, 0, sizeof actor);
-    memset(&player, 0, sizeof player);
-    arm = (ULONGLONG)(ULONG_PTR)(actor.b + 0x60);
-    arm_slot = arm;
-    *(ULONGLONG *)(actor.b + 0x228) =
-        (ULONGLONG)(ULONG_PTR)(player.b + 0xCF4);
-    *(ULONGLONG *)(player.b + 0xBA8) = arm;
-    *(LONG *)(player.b + 0xBB0) = 6;
-    *(LONG *)(player.b + 0xB90) = 1;
-    g_b.a.gm_player_arm_body = (ULONGLONG)(ULONG_PTR)&arm_slot;
-    g_b.a.arm_cam_rotate_shift = (ULONGLONG)(ULONG_PTR)shift;
-    InterlockedExchange(&g_b.hand_command_requested, 1);
-    InterlockedExchange(&g_b.c_ticks, 100);
-    hand_command_clear();
-
-    n = g_b.c_arm_hand_tick_writes;
-    if (!hand_command_publish(command, 41)) bad++;
-    hand_drive_write();
-    if (shift[0] != 100 || shift[1] != -200 || shift[2] != 300) bad++;
-    if (g_b.c_arm_hand_tick_writes != n + 1) bad++;
-
-    shift[0] = 11;
-    *(LONG *)(player.b + 0xB90) = DG_WEAPON_MIC;
-    if (resolve_motion_player(NULL,NULL,NULL) != DG_RESOLVE_OK ||
-        resolve_player(NULL,NULL,NULL) != DG_RESOLVE_MIC) bad++;
-    n = g_b.c_arm_hand_tick_mic;
-    hand_drive_write();
-    if (shift[0] != 11 || g_b.c_arm_hand_tick_mic != n + 1) bad++;
-
-    *(LONG *)(player.b + 0xB90) = 99;
-    n = g_b.c_arm_hand_tick_bad_weapon;
-    hand_drive_write();
-    if (shift[0] != 11 || g_b.c_arm_hand_tick_bad_weapon != n + 1) bad++;
-
-    *(LONG *)(player.b + 0xB90) = 1;
-    *(ULONGLONG *)(player.b + 0xBA8) = arm + 8;
-    n = g_b.c_arm_hand_tick_owner_mismatch;
-    hand_drive_write();
-    if (shift[0] != 11 || g_b.c_arm_hand_tick_owner_mismatch != n + 1) bad++;
-    *(ULONGLONG *)(player.b + 0xBA8) = arm;
-
-    arm_slot = 0;
-    n = g_b.c_arm_hand_tick_no_player;
-    hand_drive_write();
-    if (shift[0] != 11 || g_b.c_arm_hand_tick_no_player != n + 1) bad++;
-    arm_slot = arm;
-
-    InterlockedExchange(&g_b.c_ticks, 103);
-    n = g_b.c_arm_hand_tick_stale;
-    hand_drive_write();
-    if (shift[0] != 11 || g_b.c_arm_hand_tick_stale != n + 1) bad++;
-
-    n = g_b.c_arm_hand_tick_no_command;
-    hand_drive_write();
-    if (shift[0] != 11 || g_b.c_arm_hand_tick_no_command != n + 1) bad++;
-
-    hand_command_clear();
-    InterlockedExchange(&g_b.hand_command_requested, 0);
-    InterlockedExchange(&g_b.c_ticks, 0);
-    g_b.a.gm_player_arm_body = saved_arm_anchor;
-    g_b.a.arm_cam_rotate_shift = saved_shift;
-
-    printf("  %-6s hand tick gate: coherent command writes once; stale, null "
-           "player, owner mismatch, invalid weapon and microphone each refuse "
-           "without touching ArmCamRotateShift\n", bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-/* The wrist channel's release. Our command sits in ArmCamRotateShift when a
-   stream ends, the game only decays it 25% per frame, and the next stream's
-   rest capture reads the hierarchy two ticks later - so unless the release
-   WRITES the zero, every recalibration inherits half the previous stream's
-   wrist error. A session of 2026-08-19 rode that ratchet through nine
-   B-press recalibrations without ever unpinning the envelope. */
-static int t_release_gives_the_wrist_back(void)
-{
-    union { ULONGLONG align; unsigned char b[0x300]; } actor;
-    union { ULONGLONG align; unsigned char b[0xD20]; } player;
-    ULONGLONG arm, arm_slot;
-    ULONGLONG saved_arm_anchor = g_b.a.gm_player_arm_body;
-    ULONGLONG saved_shift = g_b.a.arm_cam_rotate_shift;
-    short shift[3] = { 7, 8, 9 };
-    short command[3] = { 100, -200, 300 };
-    LONG n;
-    int bad = 0;
-
-    memset(&actor, 0, sizeof actor);
-    memset(&player, 0, sizeof player);
-    arm = (ULONGLONG)(ULONG_PTR)(actor.b + 0x60);
-    arm_slot = arm;
-    *(ULONGLONG *)(actor.b + 0x228) =
-        (ULONGLONG)(ULONG_PTR)(player.b + 0xCF4);
-    *(ULONGLONG *)(player.b + 0xBA8) = arm;
-    *(LONG *)(player.b + 0xBB0) = 6;
-    *(LONG *)(player.b + 0xB90) = 1;
-    g_b.a.gm_player_arm_body = (ULONGLONG)(ULONG_PTR)&arm_slot;
-    g_b.a.arm_cam_rotate_shift = (ULONGLONG)(ULONG_PTR)shift;
-    InterlockedExchange(&g_b.hand_command_requested, 1);
-    InterlockedExchange(&g_b.c_ticks, 100);
-    InterlockedExchange(&g_b.hand_drive_owned, 0);
-    InterlockedExchange(&g_b.hand_zero_pending, 0);
-    hand_command_clear();
-
-    /* A release before we ever wrote owes nothing: the channel is the game's
-       and a zero would stomp whatever it was doing with it. */
-    InterlockedExchange(&g_b.hand_zero_pending, 0);
-    if (InterlockedCompareExchange(&g_b.hand_drive_owned, 0, 0)) bad++;
-    arm_map_forget();
-    if (InterlockedCompareExchange(&g_b.hand_zero_pending, 0, 0)) bad++;
-    hand_drive_write();
-    if (shift[0] != 7 || shift[1] != 8 || shift[2] != 9) bad++;
-
-    /* Write once: now we own the channel. */
-    if (!hand_command_publish(command, 41)) bad++;
-    hand_drive_write();
-    if (shift[0] != 100 || shift[1] != -200 || shift[2] != 300) bad++;
-    if (!InterlockedCompareExchange(&g_b.hand_drive_owned, 0, 0)) bad++;
-
-    /* A stream restart owes a zero, and the next tick pays it - exactly
-       once. */
-    n = g_b.c_arm_hand_zeroed;
-    arm_map_forget();
-    if (!InterlockedCompareExchange(&g_b.hand_zero_pending, 0, 0)) bad++;
-    hand_drive_write();
-    if (shift[0] != 0 || shift[1] != 0 || shift[2] != 0) bad++;
-    if (g_b.c_arm_hand_zeroed != n + 1) bad++;
-    shift[0] = 5;
-    hand_drive_write();
-    if (shift[0] != 5) bad++;
-    if (g_b.c_arm_hand_zeroed != n + 1) bad++;
-
-    /* The debt goes through the same gates as every other wrist write. A
-       refused player keeps it OWED rather than dropping it. */
-    if (!hand_command_publish(command, 41)) bad++;
-    hand_drive_write();                       /* own the channel again */
-    if (shift[0] != 100) bad++;
-    arm_map_forget();
-    *(LONG *)(player.b + 0xB90) = DG_WEAPON_MIC;
-    hand_drive_write();
-    if (shift[0] != 100) bad++;               /* untouched through the gate */
-    if (!InterlockedCompareExchange(&g_b.hand_zero_pending, 0, 0)) bad++;
-    *(LONG *)(player.b + 0xB90) = 1;
-    hand_drive_write();
-    if (shift[0] != 0) bad++;                 /* paid once the gate opens */
-
-    /* The OTHER release moment: a stream BEGIN owes the same zero. Forget and
-       begin are separate functions and only one of them being wired is
-       exactly the mutation that survived the first sweep of this test. */
-    if (!hand_command_publish(command, 41)) bad++;
-    hand_drive_write();
-    if (shift[0] != 100) bad++;
-    {
-        DG_BRIDGE_ARM_TARGET t2;
-        memset(&t2, 0, sizeof t2);
-        t2.pair_id = 1; t2.stream_id = 1; t2.weight = 1.0;
-        n = g_b.c_arm_hand_zeroed;
-        arm_map_begin(0, 0, &t2);
-        if (!InterlockedCompareExchange(&g_b.hand_zero_pending, 0, 0)) bad++;
-        hand_drive_write();
-        if (shift[0] != 0 || g_b.c_arm_hand_zeroed != n + 1) bad++;
-    }
-
-    /* A live command supersedes an owed zero: the channel is spoken for
-       again, and a zero landing after it would stomp a real wrist. */
-    InterlockedExchange(&g_b.hand_zero_pending, 1);
-    if (!hand_command_publish(command, 41)) bad++;
-    n = g_b.c_arm_hand_zeroed;
-    hand_drive_write();
-    if (shift[0] != 100 || shift[1] != -200 || shift[2] != 300) bad++;
-    if (InterlockedCompareExchange(&g_b.hand_zero_pending, 0, 0)) bad++;
-    /* Withdraw the command the ordinary way - a clear alone is a hiccup, not
-       a release, so it owes nothing. */
-    hand_command_clear();
-    if (InterlockedCompareExchange(&g_b.hand_zero_pending, 0, 0)) bad++;
-    shift[1] = 44;
-    hand_drive_write();                       /* no command, no debt */
-    if (shift[1] != 44) bad++;
-    if (g_b.c_arm_hand_zeroed != n) bad++;
-
-    hand_command_clear();
-    InterlockedExchange(&g_b.hand_zero_pending, 0);
-    InterlockedExchange(&g_b.hand_drive_owned, 0);
-    InterlockedExchange(&g_b.hand_command_requested, 0);
-    InterlockedExchange(&g_b.c_ticks, 0);
-    g_b.a.gm_player_arm_body = saved_arm_anchor;
-    g_b.a.arm_cam_rotate_shift = saved_shift;
-
-    printf("  %-6s wrist release: a stream restart writes the zero the decay "
-           "only drifts toward - once, through the gates, only if we ever "
-           "wrote, and never over a live command\n", bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-/* F9: the walking write, end to end across the seams. dg_move_test.c already
-   proves the decision table; what only exists here is the crossing - a camera
-   seam publishing a level while the game tick consumes it - and the stores
-   themselves: which bytes, which flags, and the guarantee that every refusal
-   leaves the pad byte-identical. The pad is compared wholesale after every
-   refused tick for the same reason the fire test does it: "it did not write"
-   is worth nothing unless it is measured. */
-/* Third person and prone (2026-09-11). Same fixture as the walk test: a
-   fake pad and a fake PL_SubjectMove word, move_tick driven directly. */
-static int t_walking_in_third_person_and_prone(void)
-{
-    union { ULONGLONG align; unsigned char b[0x40]; } padmem, padwas;
-    ULONGLONG pad;
-    ULONGLONG saved_pad = g_b.a.player_pad;
-    ULONGLONG saved_subj = g_b.a.pl_subject_move;
-    ULONGLONG saved_status = g_b.tick_status;
-    LONG saved_state = g_b.fps.state;
-    LONG saved_mode = g_b.walk_mode, saved_turn = g_b.turn_mode;
-    LONG saved_third = g_b.move_third, saved_prone = g_b.move_prone;
-    LONG saved_cam = g_b.s_cam_dir, saved_sign = g_b.move_dir_sign;
-    LONG saved_off = g_b.move_dir_offset, saved_max = g_b.move_prone_max;
-    ULONGLONG saved_workl = g_b.workl_ptr;
-    LONG subject_word = 0;
-    DG_BRIDGE_MOVE cmd;
-    LONG n;
-    int bad = 0;
-    short dir;
-
-    union { ULONGLONG align; unsigned char b[0x520]; } worklmem;
-    ULONGLONG workl_var = (ULONGLONG)(ULONG_PTR)worklmem.b;
-    memset(&worklmem, 0, sizeof worklmem);
-    *(LONG *)(worklmem.b + 0x510) = -1;
-    g_b.workl_ptr = (ULONGLONG)(ULONG_PTR)&workl_var;
-#define TP_RESET() do { memset(&padmem, 0, sizeof padmem); \
-        *(LONG *)(padmem.b + 0) = 1; \
-        padmem.b[4 + DG_PAD_LEFT_DX_OFFSET] = 128; \
-        padmem.b[4 + DG_PAD_LEFT_DY_OFFSET] = 128; \
-        padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] = 128; \
-        padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET + 1] = 128; \
-        *(short *)(padmem.b + 4 + DG_PAD_DIR_OFFSET) = (short)0x7777; \
-        padwas = padmem; } while (0)
-
-    pad = (ULONGLONG)(ULONG_PTR)(padmem.b + 4);
-    g_b.a.player_pad = pad;
-    g_b.a.pl_subject_move = (ULONGLONG)(ULONG_PTR)&subject_word;
-    g_b.fps.state = DG_FPS_OFF;
-    InterlockedExchange(&g_b.s_late_unsafe, 0);
-    InterlockedExchange(&g_b.armed, 1);
-    InterlockedExchange(&g_b.walk_mode, 1);
-    InterlockedExchange(&g_b.turn_mode, 1);
-    InterlockedExchange(&g_b.move_deadzone_mils, 150);
-    InterlockedExchange(&g_b.turn_gain_mils, 1000);
-    InterlockedExchange(&g_b.move_valid, 0);
-    InterlockedExchange(&g_b.c_ticks, 500);
-    InterlockedExchange(&g_b.move_third, 0);
-    InterlockedExchange(&g_b.move_prone, 0);
-    InterlockedExchange(&g_b.move_prone_max, 120);
-    InterlockedExchange(&g_b.move_dir_offset, 0);
-    InterlockedExchange(&g_b.move_dir_sign, 1);
-    InterlockedExchange(&g_b.s_cam_dir, 1024);
-    g_b.tick_status = 0;
-    memset(&cmd, 0, sizeof cmd);
-    cmd.valid = 1; cmd.y = 1.0; cmd.turn_x = 1.0; cmd.turn_valid = 1;
-
-    /* 1. Feature off: third person refuses at the gate, byte-identical. */
-    TP_RESET();
-    dg_bridge_move_now(&cmd);
-    n = g_b.c_move_blocked_gate;
-    move_tick(1);
-    if (g_b.c_move_blocked_gate != n + 1) bad++;
-    if (memcmp(&padmem, &padwas, sizeof padmem)) bad++;
-
-    /* 2. On: a forward stick writes bytes, the UDLR bit, L_USE and
-       pad->dir = camera yaw (stick up: VecDir2 2048, + yaw + 2048). The
-       right stick stays silent in third person. */
-    InterlockedExchange(&g_b.move_third, 1);
-    TP_RESET();
-    dg_bridge_move_now(&cmd);
-    n = g_b.c_move_writes;
-    move_tick(1);
-    if (g_b.c_move_writes != n + 1) bad++;
-    if (padmem.b[4 + DG_PAD_LEFT_DY_OFFSET] != 1) bad++;
-    if (!(*(LONG *)(padmem.b + 4 + DG_PAD_STATUS_OFFSET) & DG_MOVE_PAD_U)) bad++;
-    if (!(*(short *)(padmem.b + 4 + DG_PAD_ANALOG_OFFSET) & DG_MOVE_ANALOG_L_USE)) bad++;
-    if (*(short *)(padmem.b + 4 + DG_PAD_ANALOG_OFFSET) & DG_MOVE_ANALOG_R_USE) bad++;
-    if (padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] != 128) bad++;
-    dir = *(short *)(padmem.b + 4 + DG_PAD_DIR_OFFSET);
-    if (dir != 1024) bad++;
-    if (g_b.c_move_third_writes < 1) bad++;
-    /* And CheckDirection's two words, redone from our bytes: PadTo = dir,
-       PadForce = full stick = (127-48)*256/80 = 252. */
-    if (*(LONG *)(worklmem.b + 0x510) != 1024) bad++;
-    if (*(LONG *)(worklmem.b + 0x514) != 252) bad++;
-
-    /* 3. The game's own first-person look (PLAYER_WATCH) refuses. */
-    g_b.tick_status = 0x1ULL;
-    TP_RESET();
-    dg_bridge_move_now(&cmd);
-    n = g_b.c_move_blocked_gate;
-    move_tick(1);
-    if (g_b.c_move_blocked_gate != n + 1) bad++;
-    if (memcmp(&padmem, &padwas, sizeof padmem)) bad++;
-    g_b.tick_status = 0;
-
-    /* 4. PL_SubjectMove nonzero while we do not hold first person refuses:
-       the bytes would mean something else there. */
-    subject_word = 1;
-    TP_RESET();
-    dg_bridge_move_now(&cmd);
-    n = g_b.c_move_blocked_gate;
-    move_tick(1);
-    if (g_b.c_move_blocked_gate != n + 1) bad++;
-    if (memcmp(&padmem, &padwas, sizeof padmem)) bad++;
-    subject_word = 0;
-
-    /* 5. No camera yaw published: bytes still go, dir is left alone. */
-    InterlockedExchange(&g_b.s_cam_dir, -1);
-    TP_RESET();
-    dg_bridge_move_now(&cmd);
-    n = g_b.c_move_writes;
-    move_tick(1);
-    if (g_b.c_move_writes != n + 1) bad++;
-    if (*(short *)(padmem.b + 4 + DG_PAD_DIR_OFFSET) != (short)0x7777) bad++;
-    InterlockedExchange(&g_b.s_cam_dir, 1024);
-
-    /* 6. Mirror knob: sign -1 flips the yaw, offset adds. */
-    InterlockedExchange(&g_b.move_dir_sign, -1);
-    InterlockedExchange(&g_b.move_dir_offset, 100);
-    TP_RESET();
-    dg_bridge_move_now(&cmd);
-    move_tick(1);
-    dir = *(short *)(padmem.b + 4 + DG_PAD_DIR_OFFSET);
-    if (dir != ((-1024 + 100 + 2048 + 2048) & 4095)) bad++;
-    InterlockedExchange(&g_b.move_dir_sign, 1);
-    InterlockedExchange(&g_b.move_dir_offset, 0);
-
-    /* 7. Prone in first person. Off: the old full byte, dir untouched.
-       On: deflection capped at 120 (byte 8), dir written, own counter. */
-    InterlockedExchange(&g_b.move_third, 0);
-    g_b.fps.state = DG_FPS_ACTIVE;
-    subject_word = 1;
-    g_b.tick_status = 0x20ULL;
-    TP_RESET();
-    dg_bridge_move_now(&cmd);
-    n = g_b.c_move_writes;
-    move_tick(1);
-    if (g_b.c_move_writes != n + 1) bad++;
-    if (padmem.b[4 + DG_PAD_LEFT_DY_OFFSET] != 1) bad++;
-    if (*(short *)(padmem.b + 4 + DG_PAD_DIR_OFFSET) != (short)0x7777) bad++;
-    InterlockedExchange(&g_b.move_prone, 1);
-    TP_RESET();
-    dg_bridge_move_now(&cmd);
-    n = g_b.c_move_prone_writes;
-    move_tick(1);
-    if (g_b.c_move_prone_writes != n + 1) bad++;
-    if (padmem.b[4 + DG_PAD_LEFT_DY_OFFSET] != 8) bad++;
-    if (!(*(LONG *)(padmem.b + 4 + DG_PAD_STATUS_OFFSET) & DG_MOVE_PAD_U)) bad++;
-    dir = *(short *)(padmem.b + 4 + DG_PAD_DIR_OFFSET);
-    if (dir != 1024) bad++;
-    /* Prone force: deflection 120 -> (120-48)*256/80 = 230, under the run
-       threshold 252 and above the walk one 150: the ordinary crawl. */
-    if (*(LONG *)(worklmem.b + 0x510) != 1024) bad++;
-    if (*(LONG *)(worklmem.b + 0x514) != 230) bad++;
-    /* Copy seam live: no redo at all (CheckDirection does it), no refusal. */
-    InterlockedExchange(&g_b.seam_is_copy, 1);
-    *(LONG *)(worklmem.b + 0x510) = -1; *(LONG *)(worklmem.b + 0x514) = 0;
-    TP_RESET();
-    dg_bridge_move_now(&cmd);
-    n = g_b.c_move_no_workl;
-    move_tick(1);
-    if (g_b.c_move_no_workl != n) bad++;
-    if (*(LONG *)(worklmem.b + 0x510) != -1) bad++;
-    if (padmem.b[4 + DG_PAD_LEFT_DY_OFFSET] != 8) bad++;
-    InterlockedExchange(&g_b.seam_is_copy, 0);
-    /* No workL anchor: bytes still go, the refusal is counted. */
-    g_b.workl_ptr = 0;
-    TP_RESET();
-    dg_bridge_move_now(&cmd);
-    n = g_b.c_move_no_workl;
-    move_tick(1);
-    if (g_b.c_move_no_workl != n + 1) bad++;
-    if (padmem.b[4 + DG_PAD_LEFT_DY_OFFSET] != 8) bad++;
-    g_b.workl_ptr = (ULONGLONG)(ULONG_PTR)&workl_var;
-    /* Standing in first person (no GROUND bit): the cap and dir stay away. */
-    g_b.tick_status = 0;
-    TP_RESET();
-    dg_bridge_move_now(&cmd);
-    move_tick(1);
-    if (padmem.b[4 + DG_PAD_LEFT_DY_OFFSET] != 1) bad++;
-    if (*(short *)(padmem.b + 4 + DG_PAD_DIR_OFFSET) != (short)0x7777) bad++;
-#undef TP_RESET
-
-    g_b.a.player_pad = saved_pad;
-    g_b.a.pl_subject_move = saved_subj;
-    g_b.tick_status = saved_status;
-    g_b.fps.state = saved_state;
-    InterlockedExchange(&g_b.walk_mode, saved_mode);
-    InterlockedExchange(&g_b.turn_mode, saved_turn);
-    InterlockedExchange(&g_b.move_third, saved_third);
-    InterlockedExchange(&g_b.move_prone, saved_prone);
-    InterlockedExchange(&g_b.s_cam_dir, saved_cam);
-    InterlockedExchange(&g_b.move_dir_sign, saved_sign);
-    InterlockedExchange(&g_b.move_dir_offset, saved_off);
-    InterlockedExchange(&g_b.move_prone_max, saved_max);
-    InterlockedExchange(&g_b.move_valid, 0);
-    g_b.workl_ptr = saved_workl;
-    printf("  %-6s third person walks on its own gate (off, WATCH, subject word) "
-           "with pad->dir from the camera yaw and no turn; prone caps the "
-           "deflection and writes dir; standing first person is untouched\n",
-           bad ? "FAIL" : "PASS");
-    return bad;
-}
-
-static int t_walking_speaks_only_over_silence(void)
-{
-    union { ULONGLONG align; unsigned char b[0x40]; } padmem, padwas;
-    ULONGLONG pad;
-    ULONGLONG saved_pad = g_b.a.player_pad;
-    ULONGLONG saved_subj = g_b.a.pl_subject_move;
-    LONG saved_state = g_b.fps.state;
-    LONG saved_mode = g_b.walk_mode;
-    LONG saved_turn = g_b.turn_mode;
-    LONG subject_word = 1;
-    DG_BRIDGE_MOVE cmd;
-    LONG n;
-    int bad = 0, i;
-
-    memset(&padmem, 0, sizeof padmem);
-    pad = (ULONGLONG)(ULONG_PTR)(padmem.b + 4);
-    *(LONG *)(padmem.b + 0) = 1;                    /* PlayerPad.enable */
-    /* A neutral pad the way the driver leaves one: centred stick bytes. */
-    padmem.b[4 + DG_PAD_LEFT_DX_OFFSET] = 128;
-    padmem.b[4 + DG_PAD_LEFT_DY_OFFSET] = 128;
-    padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] = 128;
-    padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET + 1] = 128;
-
-    g_b.a.player_pad = pad;
-    g_b.a.pl_subject_move = (ULONGLONG)(ULONG_PTR)&subject_word;
-    g_b.fps.state = DG_FPS_ACTIVE;
-    InterlockedExchange(&g_b.s_late_unsafe, 0);
-    InterlockedExchange(&g_b.armed, 1);
-    InterlockedExchange(&g_b.walk_mode, 1);
-    InterlockedExchange(&g_b.turn_mode, 0);
-    InterlockedExchange(&g_b.move_deadzone_mils, 150);
-    InterlockedExchange(&g_b.turn_gain_mils, 1000);
-    InterlockedExchange(&g_b.move_valid, 0);
-    InterlockedExchange(&g_b.c_ticks, 500);
-    padwas = padmem;
-
-    memset(&cmd, 0, sizeof cmd);
-    cmd.valid = 1;
-    cmd.y = 1.0;
-
-    /* Mode off is inert even with a full stick published. */
-    InterlockedExchange(&g_b.walk_mode, 0);
-    dg_bridge_move_now(&cmd);
-    n = g_b.c_move_writes;
-    move_tick(1);
-    if (g_b.c_move_writes != n || memcmp(&padmem, &padwas, sizeof padmem)) bad++;
-    InterlockedExchange(&g_b.walk_mode, 1);
-
-    /* Full forward, published five times per tick the way the camera seam
-       does, consumed once: forward is a LOW dy byte, the analog-in-use flag,
-       and PAD_U - the three fields the game needs to walk, together. */
-    for (i = 0; i < 5; i++) dg_bridge_move_now(&cmd);
-    n = g_b.c_move_writes;
-    move_tick(1);
-    if (g_b.c_move_writes != n + 1) bad++;
-    if (padmem.b[4 + DG_PAD_LEFT_DY_OFFSET] != 1 ||
-        padmem.b[4 + DG_PAD_LEFT_DX_OFFSET] != 128) bad++;
-    if (!(*(short *)(padmem.b + 4 + DG_PAD_ANALOG_OFFSET) &
-          (short)DG_MOVE_ANALOG_L_USE)) bad++;
-    if ((*(LONG *)(padmem.b + 4 + DG_PAD_STATUS_OFFSET) &
-         (LONG)DG_MOVE_PAD_UDLR) != (LONG)DG_MOVE_PAD_U) bad++;
-
-    /* The player's own dpad silences a full synthetic stick, byte for byte. */
-    memset(&padmem, 0, sizeof padmem);
-    *(LONG *)(padmem.b + 0) = 1;
-    padmem.b[4 + DG_PAD_LEFT_DX_OFFSET] = 128;
-    padmem.b[4 + DG_PAD_LEFT_DY_OFFSET] = 128;
-    *(LONG *)(padmem.b + 4 + DG_PAD_STATUS_OFFSET) = (LONG)DG_MOVE_PAD_L;
-    padwas = padmem;
-    dg_bridge_move_now(&cmd);
-    n = g_b.c_move_yielded;
-    move_tick(1);
-    if (g_b.c_move_yielded != n + 1) bad++;
-    if (memcmp(&padmem, &padwas, sizeof padmem)) bad++;
-
-    /* A deflected physical stick does the same. */
-    *(LONG *)(padmem.b + 4 + DG_PAD_STATUS_OFFSET) = 0;
-    padmem.b[4 + DG_PAD_LEFT_DX_OFFSET] = 200;
-    padwas = padmem;
-    dg_bridge_move_now(&cmd);
-    n = g_b.c_move_yielded;
-    move_tick(1);
-    if (g_b.c_move_yielded != n + 1) bad++;
-    if (memcmp(&padmem, &padwas, sizeof padmem)) bad++;
-
-    /* Inside the deadzone: named idle, pad untouched - a resting stick leaves
-       no fingerprint at all. */
-    padmem.b[4 + DG_PAD_LEFT_DX_OFFSET] = 128;
-    padwas = padmem;
-    cmd.y = 0.05;
-    dg_bridge_move_now(&cmd);
-    n = g_b.c_move_idle;
-    move_tick(1);
-    if (g_b.c_move_idle != n + 1) bad++;
-    if (memcmp(&padmem, &padwas, sizeof padmem)) bad++;
-
-    /* A publisher that died mid-walk stops the character: stale, untouched.
-       This is the axis version of "no coasting into a wall". */
-    cmd.y = 1.0;
-    dg_bridge_move_now(&cmd);
-    InterlockedExchange(&g_b.c_ticks, 500 + DG_MOVE_FRESH_TICKS + 1);
-    n = g_b.c_move_stale;
-    move_tick(1);
-    if (g_b.c_move_stale != n + 1) bad++;
-    if (memcmp(&padmem, &padwas, sizeof padmem)) bad++;
-    InterlockedExchange(&g_b.c_ticks, 500);
-
-    /* The gate: first person not held means not one byte, and the refusal has
-       its own name. Same for an unvouched controller. */
-    g_b.fps.state = DG_FPS_OFF;
-    dg_bridge_move_now(&cmd);
-    n = g_b.c_move_blocked_gate;
-    move_tick(1);
-    if (g_b.c_move_blocked_gate != n + 1) bad++;
-    if (memcmp(&padmem, &padwas, sizeof padmem)) bad++;
-    g_b.fps.state = DG_FPS_ACTIVE;
-
-    cmd.valid = 0;
-    dg_bridge_move_now(&cmd);
-    n = g_b.c_move_no_command;
-    move_tick(1);
-    if (g_b.c_move_no_command != n + 1) bad++;
-    if (memcmp(&padmem, &padwas, sizeof padmem)) bad++;
-
-    /* PlayerPad.enable clear means the player reads a different record:
-       writing ours would land where nobody looks, so it is the gate again. */
-    cmd.valid = 1;
-    *(LONG *)(padmem.b + 0) = 0;
-    padwas = padmem;
-    dg_bridge_move_now(&cmd);
-    n = g_b.c_move_blocked_gate;
-    move_tick(1);
-    if (g_b.c_move_blocked_gate != n + 1) bad++;
-    if (memcmp(&padmem, &padwas, sizeof padmem)) bad++;
-
-    *(LONG *)(padmem.b + 0) = 1;
-    padwas = padmem;
-    cmd.valid = 1;
-    cmd.y = 1.0;
-    subject_word = 0;
-    dg_bridge_move_now(&cmd);
-    n = g_b.c_move_not_subject;
-    move_tick(1);
-    if (g_b.c_move_not_subject != n + 1) bad++;
-    if (memcmp(&padmem, &padwas, sizeof padmem)) bad++;
-    /* And an absent anchor refuses identically - fail closed, never a read
-       through zero. */
-    g_b.a.pl_subject_move = 0;
-    dg_bridge_move_now(&cmd);
-    n = g_b.c_move_not_subject;
-    move_tick(1);
-    if (g_b.c_move_not_subject != n + 1) bad++;
-    if (memcmp(&padmem, &padwas, sizeof padmem)) bad++;
-    g_b.a.pl_subject_move = (ULONGLONG)(ULONG_PTR)&subject_word;
-    subject_word = 1;
-
-    /* The turn half. Full right on the right stick becomes a right_dx byte
-       past the game's margin plus the R_USE flag - and the walk bytes stay
-       exactly where the walk left them: the two halves are independent. The
-       pad is re-neutralised in full first: the dpad leg above memsets it and
-       leaves right_dx at 0, which the yield correctly reads as a physical
-       full-left stick - a fine test of the yield, but not the one this leg
-       is making. */
-    memset(&padmem, 0, sizeof padmem);
-    *(LONG *)(padmem.b + 0) = 1;
-    padmem.b[4 + DG_PAD_LEFT_DX_OFFSET] = 128;
-    padmem.b[4 + DG_PAD_LEFT_DY_OFFSET] = 128;
-    padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] = 128;
-    padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET + 1] = 128;
-    InterlockedExchange(&g_b.turn_mode, 1);
-    memset(&cmd, 0, sizeof cmd);
-    cmd.valid = 1;
-    cmd.turn_valid = 1;
-    cmd.turn_x = 1.0;
-    dg_bridge_move_now(&cmd);
-    n = g_b.c_turn_writes;
-    move_tick(1);
-    if (g_b.c_turn_writes != n + 1) bad++;
-    if (padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] <= 128 + DG_MOVE_GAME_MARGIN)
-        bad++;
-    if (!(*(short *)(padmem.b + 4 + DG_PAD_ANALOG_OFFSET) &
-          (short)DG_MOVE_ANALOG_R_USE)) bad++;
-    if (padmem.b[4 + DG_PAD_LEFT_DX_OFFSET] != 128 ||
-        padmem.b[4 + DG_PAD_LEFT_DY_OFFSET] != 128) bad++;
-
-    /* Left deflection turns left: a LOW byte. */
-    padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] = 128;
-    *(short *)(padmem.b + 4 + DG_PAD_ANALOG_OFFSET) = 0;
-    cmd.turn_x = -1.0;
-    dg_bridge_move_now(&cmd);
-    move_tick(1);
-    if (padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] >= 128 - DG_MOVE_GAME_MARGIN)
-        bad++;
-
-    padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] = 128;
-    *(short *)(padmem.b + 4 + DG_PAD_ANALOG_OFFSET) = 0;
-    cmd.turn_x = 0.16;
-    dg_bridge_move_now(&cmd);
-    n = g_b.c_turn_writes;
-    move_tick(1);
-    if (g_b.c_turn_writes != n + 1) bad++;
-    if (padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] < 128 + DG_MOVE_SUBJECT_MARGIN)
-        bad++;
-
-    /* The player's own right stick silences the turn - and ONLY the turn:
-       the walk must still be free to speak on the same tick. */
-    padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] = 220;   /* physical right stick */
-    *(short *)(padmem.b + 4 + DG_PAD_ANALOG_OFFSET) = 0;
-    padwas = padmem;
-    cmd.y = 1.0;
-    cmd.turn_x = -1.0;
-    dg_bridge_move_now(&cmd);
-    n = g_b.c_turn_yielded;
-    move_tick(1);
-    if (g_b.c_turn_yielded != n + 1) bad++;
-    if (padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] != 220) bad++;      /* theirs */
-    if (padmem.b[4 + DG_PAD_LEFT_DY_OFFSET] == 128) bad++;       /* ours   */
-    padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] = 128;
-
-    /* And the mirror: a physical LEFT stick yields the walk while the turn
-       still speaks. */
-    padmem.b[4 + DG_PAD_LEFT_DX_OFFSET] = 20;
-    padmem.b[4 + DG_PAD_LEFT_DY_OFFSET] = 128;
-    *(short *)(padmem.b + 4 + DG_PAD_ANALOG_OFFSET) = 0;
-    dg_bridge_move_now(&cmd);
-    n = g_b.c_move_yielded;
-    move_tick(1);
-    if (g_b.c_move_yielded != n + 1) bad++;
-    if (padmem.b[4 + DG_PAD_LEFT_DX_OFFSET] != 20) bad++;        /* theirs */
-    if (padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] >= 128 - DG_MOVE_GAME_MARGIN)
-        bad++;                                                   /* ours   */
-
-    /* Both sticks at once: two writes, one tick, neither suppressing the
-       other - walking while turning is the whole point of putting the turn on
-       the stick at all. */
-    padmem.b[4 + DG_PAD_LEFT_DX_OFFSET] = 128;
-    padmem.b[4 + DG_PAD_LEFT_DY_OFFSET] = 128;
-    padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] = 128;
-    *(short *)(padmem.b + 4 + DG_PAD_ANALOG_OFFSET) = 0;
-    *(LONG *)(padmem.b + 4 + DG_PAD_STATUS_OFFSET) = 0;
-    cmd.y = 1.0;
-    cmd.turn_x = 1.0;
-    cmd.turn_valid = 1;
-    dg_bridge_move_now(&cmd);
-    n = g_b.c_turn_writes;
-    i = (int)g_b.c_move_writes;
-    move_tick(1);
-    if (g_b.c_turn_writes != n + 1 || (int)g_b.c_move_writes != i + 1) bad++;
-    if (padmem.b[4 + DG_PAD_LEFT_DY_OFFSET] == 128) bad++;
-    if (padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] <= 128 + DG_MOVE_GAME_MARGIN)
-        bad++;
-
-    /* Walk OFF with turn ON: the left stick must not reach the pad - the
-       off-switch is a blanking of the input, and this leg is what notices if
-       that blanking ever falls out. */
-    InterlockedExchange(&g_b.walk_mode, 0);
-    padmem.b[4 + DG_PAD_LEFT_DX_OFFSET] = 128;
-    padmem.b[4 + DG_PAD_LEFT_DY_OFFSET] = 128;
-    padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] = 128;
-    *(short *)(padmem.b + 4 + DG_PAD_ANALOG_OFFSET) = 0;
-    /* Status too: the leg above left its own PAD_U in it, and a stray dpad
-       bit turns this leg into a yield test - which would pass with the very
-       blanking it exists to check ripped out. */
-    *(LONG *)(padmem.b + 4 + DG_PAD_STATUS_OFFSET) = 0;
-    dg_bridge_move_now(&cmd);
-    move_tick(1);
-    if (padmem.b[4 + DG_PAD_LEFT_DX_OFFSET] != 128 ||
-        padmem.b[4 + DG_PAD_LEFT_DY_OFFSET] != 128) bad++;
-    if (padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] <= 128 + DG_MOVE_GAME_MARGIN)
-        bad++;
-    InterlockedExchange(&g_b.walk_mode, 1);
-
-    /* An unvouched right controller is a centred turn, not a frozen one. */
-    padmem.b[4 + DG_PAD_LEFT_DX_OFFSET] = 128;
-    padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] = 128;
-    *(short *)(padmem.b + 4 + DG_PAD_ANALOG_OFFSET) = 0;
-    padwas = padmem;
-    cmd.y = 0.0;
-    cmd.turn_valid = 0;
-    cmd.turn_x = 1.0;
-    dg_bridge_move_now(&cmd);
-    n = g_b.c_turn_writes;
-    move_tick(1);
-    if (g_b.c_turn_writes != n) bad++;
-    if (padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] != 128) bad++;
-
-    InterlockedExchange(&g_b.move_valid, 0);
-    InterlockedExchange(&g_b.walk_mode, saved_mode);
-    InterlockedExchange(&g_b.turn_mode, saved_turn);
-    InterlockedExchange(&g_b.armed, 0);
-    InterlockedExchange(&g_b.c_ticks, 0);
-    g_b.a.player_pad = saved_pad;
-    g_b.a.pl_subject_move = saved_subj;
-    g_b.fps.state = saved_state;
-
-    printf("  %-6s walking+turning: coherent pad writes on their own sticks, "
-           "independent yields, and every refusal - yield, idle, stale, gate, "
-           "unvouched, wrong record, not-subject - leaves the pad "
-           "byte-identical\n",
-           bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-/* U2: the pad seam, the one place this project writes into the game's own
-   input record. Everything here is a refusal except the last leg, because a
-   stuck or misdirected menu button is the worst failure this feature has:
-   the front-end's confirm sits on "overwrite this save". */
-/* The ordered press log is the instrument that will name this build's
-   confirm button, and the last reading of this same data was wrong: a
-   histogram was read, a guess was made about which of two words was
-   confirm, and it was the other one. So the order gets a test - including
-   the fold, because a fold that swallowed repeats would turn five
-   deliberate presses into one entry and mislead exactly as badly. */
-static int t_press_order_keeps_presses_in_order(void)
-{
-    union { ULONGLONG align; unsigned char b[0x40]; } rec;
-    static LONG menu_word, menu_scn;
-    DG_ANCHORS saved = g_b.a;
-    LONG saved_mode = g_b.menu_mode;
-    DWORD *press = (DWORD *)(rec.b + DG_GV_PAD_PRESS_OFFSET);
-    int j, bad = 0;
-
-    memset(&rec, 0, sizeof rec);
-    menu_word = 0;
-    menu_scn = 0;
-    memset(&g_b.a, 0, sizeof g_b.a);
-    g_b.a.gv_pad_data_direct = (ULONGLONG)(ULONG_PTR)rec.b;
-    g_b.a.gm_menu_status = (ULONGLONG)(ULONG_PTR)&menu_word;
-    g_b.a.gm_menu_status_scn = (ULONGLONG)(ULONG_PTR)&menu_scn;
-    InterlockedExchange(&g_b.armed, 1);
-    InterlockedExchange(&g_b.c_ticks, 100);
-    /* MEASURE, deliberately: the whole point of this record is that it is
-       filled while the mod writes nothing, so the game's own buttons can be
-       read without ours mixed in. */
-    InterlockedExchange(&g_b.menu_mode, 1);
-    g_b.press_seq_n = 0;
-    for (j = 0; j < DG_PAD_PRESS_SEQ; j++) {
-        g_b.press_seq_word[j] = 0;
-        g_b.press_seq_ms[j] = 0;
-    }
-
-    *press = 0x00000020;   pad_seam_tick();     /* circle */
-    if (g_b.press_seq_n != 1) bad++;
-    if (g_b.press_seq_word[0] != 0x00000020) bad++;
-
-    /* The same word again on the very next frame is one button crossing the
-       edge detector twice, not a second press. */
-    pad_seam_tick();
-    if (g_b.press_seq_n != 1) bad++;
-
-    *press = 0x00000040;   pad_seam_tick();     /* cross */
-    *press = 0x00000020;   pad_seam_tick();     /* circle again */
-    if (g_b.press_seq_n != 3) bad++;
-    if (g_b.press_seq_word[1] != 0x00000040) bad++;
-    if (g_b.press_seq_word[2] != 0x00000020) bad++;
-
-    /* A frame with no press is not an event. */
-    *press = 0;            pad_seam_tick();
-    if (g_b.press_seq_n != 3) bad++;
-
-    /* And a genuine repeat, far enough apart to be a human pressing the
-       same key twice, must NOT be folded - five confirms collapsing into
-       one entry would misname the button as surely as reading the wrong
-       half of a pair did. */
-    Sleep(150);
-    *press = 0x00000020;   pad_seam_tick();
-    if (g_b.press_seq_n != 4) bad++;
-    if (g_b.press_seq_word[3] != 0x00000020) bad++;
-
-    /* Past the kept window the OLDEST go, and the running total keeps
-       counting - a log that silently dropped the newest would show the
-       navigation and hide the confirm. */
-    for (j = 0; j < DG_PAD_PRESS_SEQ; j++) {
-        *press = (DWORD)(0x00010000u + (unsigned)j);
-        pad_seam_tick();
-    }
-    if (g_b.press_seq_n != 4 + DG_PAD_PRESS_SEQ) bad++;
-    {
-        LONG total = g_b.press_seq_n;
-        LONG newest = g_b.press_seq_word[(total - 1) % DG_PAD_PRESS_SEQ];
-        LONG oldest_kept =
-            g_b.press_seq_word[(total - DG_PAD_PRESS_SEQ) % DG_PAD_PRESS_SEQ];
-        if (newest != (LONG)(0x00010000u + DG_PAD_PRESS_SEQ - 1)) bad++;
-        if (oldest_kept != 0x00010000) bad++;
-    }
-
-    g_b.a = saved;
-    InterlockedExchange(&g_b.menu_mode, saved_mode);
-    InterlockedExchange(&g_b.armed, 0);
-    g_b.press_seq_n = 0;
-
-    printf("  %-6s press order: distinct presses are kept in sequence, one "
-           "button across two frames is one entry, a real repeat 150 ms "
-           "later is two, an empty frame is none, and past %d the oldest "
-           "are dropped while the newest and the total survive\n",
-           bad ? "FAIL" : "ok", DG_PAD_PRESS_SEQ);
-    return bad ? 1 : 0;
-}
-
-static int t_menu_fresh_start_config(void)
-{
-    static const int values[] = { 0, 1, 2, -1, 3 };
-    void *saved;
-    DG_BRIDGE_CONFIG cfg;
-    DG_BRIDGE_MENU saved_cmd = g_script_menu_pending;
-    ULONGLONG saved_deadline = g_script_menu_deadline;
-    LONG saved_epoch = g_script_menu_pending_epoch, saved_cancel = g_script_menu_cancel;
-    char path[MAX_PATH];
-    const char *leaf;
-    int i, bad = 0;
-    /* The real startup can only reach its fingerprint refusal in this test
-       executable. Refuse to run this test under the game's filename. */
-    if (!GetModuleFileNameA(NULL, path, sizeof path)) return 1;
-    leaf = strrchr(path, '\\'); leaf = leaf ? leaf + 1 : path;
-    if (!_stricmp(leaf, GAME_EXE)) return 1;
-    saved = malloc(sizeof g_b);
-    if (!saved) return 1;
-    memcpy(saved, &g_b, sizeof g_b);
-    memset(&cfg, 0, sizeof cfg);
-    if (sane_menu_mode(NULL) != 0) bad++;
-    for (i = 0; i < (int)(sizeof values / sizeof values[0]); i++) {
-        int expected = i < 3 ? values[i] : 0;
-        memset(&g_b, 0, sizeof g_b);
-        g_b.menu_mode = 99;
-        cfg.menu_mode = values[i];
-        if (dg_bridge_start(NULL, &cfg) != 0 || g_b.started || g_b.armed ||
-            g_b.pad_detour_live || g_b.menu_mode != expected) bad++;
-    }
-    memcpy(&g_b, saved, sizeof g_b);
-    free(saved);
-    g_script_menu_pending = saved_cmd; g_script_menu_deadline = saved_deadline;
-    g_script_menu_pending_epoch = saved_epoch; g_script_menu_cancel = saved_cancel;
-    return bad;
-}
-
-static int t_script_menu_mailbox(void)
-{
-    void *saved = malloc(sizeof g_b);
-    DG_BRIDGE_MENU saved_cmd = g_script_menu_pending;
-    ULONGLONG saved_deadline = g_script_menu_deadline, arm = 0;
-    LONG saved_epoch = g_script_menu_pending_epoch, saved_cancel = g_script_menu_cancel;
-    DWORD direct[10] = {0};
-    DG_BRIDGE_MENU cmd;
-    int bad = 0;
-    if (!saved) return 1;
-    memcpy(saved, &g_b, sizeof g_b);
-    memset(&g_b, 0, sizeof g_b);
-    g_b.armed = 1; g_b.script_menu_only = 1; g_b.menu_mode = 2;
-    g_b.a.gm_player_arm_body = (ULONGLONG)(ULONG_PTR)&arm;
-    g_b.a.gv_pad_data_direct = (ULONGLONG)(ULONG_PTR)direct;
-    cmd.status = 0x20; cmd.clear = 0x40; cmd.allow = 1;
-    dg_bridge_menu_now(&cmd);
-    /* Split coverage: dg_hook's test_script_menu_session tests the real
-       preserve-neutral predicate. Here no publication models that decision;
-       this does not simulate an integrated Present/pad scheduling run. */
-    pad_seam_tick();
-    if (direct[1] != 0x20 || direct[2] != 0x20 || g_b.c_menu_writes != 1) bad++;
-    pad_seam_tick();
-    if (g_b.c_menu_writes != 1) bad++;
-    dg_bridge_menu_now(&cmd);
-    g_script_menu_deadline = GetTickCount64(); /* deterministic expiry; no sleep */
-    pad_seam_tick();
-    if (g_b.c_menu_writes != 1 || g_b.c_menu_stale != 1 || g_b.c_ticks) bad++;
-    dg_bridge_menu_now(&cmd);
-    dg_bridge_menu_now(NULL);
-    pad_seam_tick();
-    if (g_b.c_menu_writes != 1) bad++;
-    dg_bridge_menu_now(&cmd);
-    cmd.status = 0x40; cmd.clear = 0x20;
-    dg_bridge_menu_now(&cmd);
-    pad_seam_tick();
-    if (direct[1] != 0x40 || direct[2] != 0x40 || g_b.c_menu_writes != 2) bad++;
-    dg_bridge_menu_now(&cmd);
-    arm = 1;
-    pad_seam_tick();
-    arm = 0;
-    pad_seam_tick();
-    if (g_b.c_menu_writes != 2) bad++;
-    dg_bridge_menu_now(&cmd);
-    cmd.status = 0;
-    dg_bridge_menu_now(&cmd);
-    cmd.status = 0x40;
-    pad_seam_tick();
-    if (g_b.c_menu_writes != 2) bad++;
-    dg_bridge_menu_now(&cmd);
-    dg_bridge_stop(); /* started==0 must still withdraw the pending mailbox */
-    g_b.script_menu_only = 1;
-    pad_seam_tick();
-    if (g_b.c_menu_writes != 2) bad++;
-    dg_bridge_menu_now(&cmd);
-    AcquireSRWLockExclusive(&g_script_menu_lock);
-    script_menu_clear(1); /* failed try-lock must still invalidate publication */
-    ReleaseSRWLockExclusive(&g_script_menu_lock);
-    pad_seam_tick();
-    if (g_b.c_menu_writes != 2) bad++;
-    g_b.script_menu_only = 0;
-    dg_bridge_menu_now(&cmd);
-    cmd.status = 0;
-    dg_bridge_menu_now(&cmd); /* ordinary route retains neutral withdrawal */
-    pad_seam_tick();
-    if (g_b.c_menu_writes != 2) bad++;
-    memcpy(&g_b, saved, sizeof g_b);
-    free(saved);
-    g_script_menu_pending = saved_cmd; g_script_menu_deadline = saved_deadline;
-    g_script_menu_pending_epoch = saved_epoch; g_script_menu_cancel = saved_cancel;
-    return bad;
-}
-
-static int t_script_menu_context_guard(void)
-{
-    static ULONGLONG arm;
-    DG_ANCHORS saved_a = g_b.a;
-    LONG saved_armed = g_b.armed, saved_only = g_b.script_menu_only;
-    LONG saved_pending = g_b.start_pending, saved_status = g_b.menu_status;
-    LONG saved_allow = g_b.menu_allow, saved_clear = g_b.menu_clear;
-    LONG saved_pad_live = g_b.pad_detour_live;
-    LONG saved_menu_mode = g_b.menu_mode;
-    LONG saved_entries = g_b.c_pad_seam_entries, saved_queued = g_b.c_start_queued;
-    LONG saved_consumed = g_b.c_start_consumed, saved_refused = g_b.c_pad_context_refused;
-    int bad = 0;
-    memset(&g_b.a, 0, sizeof g_b.a);
-    g_b.armed = 1;
-    g_b.script_menu_only = 1;
-    g_b.start_pending = 0;
-    g_b.pad_detour_live = 1;
-    g_b.a.pad_press_ok = 1;
-    if (dg_bridge_menu_context_ready()) bad++; /* missing anchor */
-    g_b.a.gm_player_arm_body = (ULONGLONG)(ULONG_PTR)&arm;
-    arm = 0;
-    if (!dg_bridge_menu_context_ready()) bad++;
-    dg_bridge_start_now();
-    if (g_b.start_pending != 1) bad++;
-    if (g_b.c_start_queued != saved_queued + 1) bad++;
-    /* A queued START and menu publication become invalid before the pad
-       seam. Invalid nonzero is rejected without dereferencing the object. */
-    arm = 1;
-    if (dg_bridge_menu_context_ready()) bad++;
-    g_b.menu_status = 0x8000;
-    g_b.menu_clear = 0x100;
-    g_b.menu_allow = 1;
-    pad_seam_tick(); /* no pad addresses: a write would fault */
-    if (g_b.start_pending || g_b.menu_status || g_b.menu_allow || g_b.menu_clear) bad++;
-    if (g_b.c_pad_seam_entries != saved_entries + 1 ||
-        g_b.c_pad_context_refused != saved_refused + 1 ||
-        g_b.c_start_consumed != saved_consumed) bad++;
-    dg_bridge_start_now();
-    if (g_b.start_pending) bad++;
-    if (g_b.c_start_queued != saved_queued + 1) bad++;
-    arm = (ULONGLONG)(ULONG_PTR)&arm; /* valid nonzero object also refuses */
-    if (dg_bridge_menu_context_ready()) bad++;
-    arm = 0;
-    g_b.menu_mode = 0;
-    dg_bridge_start_now();
-    pad_seam_tick(); /* consumed counts dequeue, independently of pad address availability */
-    if (g_b.c_start_queued != saved_queued + 2 ||
-        g_b.c_start_consumed != saved_consumed + 1 ||
-        g_b.c_pad_seam_entries != saved_entries + 2 ||
-        g_b.c_pad_context_refused != saved_refused + 1) bad++;
-    {
-        DWORD direct[10] = {0}, normal[10] = {0}, normal_before[10];
-        DWORD scenario = 0x10;
-        direct[1] = 0x20; direct[2] = 0x40;
-        normal[9] = 0x400;
-        memcpy(normal_before, normal, sizeof normal);
-        g_b.a.gv_pad_data_direct = (ULONGLONG)(ULONG_PTR)direct;
-        g_b.a.gv_pad_data = (ULONGLONG)(ULONG_PTR)normal;
-        g_b.a.gv_pad_press = (ULONGLONG)(ULONG_PTR)&scenario;
-        dg_bridge_start_now();
-        pad_seam_tick();
-        if (direct[1] != 0x00100020 || direct[2] != 0x00100040 ||
-            scenario != 0x10 || memcmp(normal, normal_before, sizeof normal)) bad++;
-        /* The frontend-only route needs no normal/scenario addresses. */
-        direct[1] = 0x20; direct[2] = 0x40;
-        g_b.a.gv_pad_data = g_b.a.gv_pad_press = 0;
-        dg_bridge_start_now();
-        pad_seam_tick();
-        if (direct[1] != 0x00100020 || direct[2] != 0x00100040) bad++;
-        /* A context change after queueing still prevents every write. */
-        direct[1] = 0x20; direct[2] = 0x40;
-        dg_bridge_start_now();
-        arm = 1;
-        pad_seam_tick();
-        if (direct[1] != 0x20 || direct[2] != 0x40 || g_b.start_pending) bad++;
-        arm = 0;
-        /* Ordinary START retains the original three-record behavior. */
-        g_b.script_menu_only = 0;
-        g_b.a.gv_pad_data = (ULONGLONG)(ULONG_PTR)normal;
-        g_b.a.gv_pad_press = (ULONGLONG)(ULONG_PTR)&scenario;
-        dg_bridge_start_now();
-        pad_seam_tick();
-        if (direct[1] != 0x820 || direct[2] != 0x840 ||
-            scenario != 0x810 || normal[9] != 0x420) bad++;
-    }
-    g_b.armed = 0;
-    if (dg_bridge_menu_context_ready()) bad++;
-    g_b.a = saved_a;
-    g_b.armed = saved_armed; g_b.script_menu_only = saved_only;
-    g_b.start_pending = saved_pending; g_b.menu_status = saved_status;
-    g_b.menu_allow = saved_allow; g_b.menu_clear = saved_clear;
-    g_b.pad_detour_live = saved_pad_live;
-    g_b.menu_mode = saved_menu_mode;
-    InterlockedExchange(&g_b.c_pad_seam_entries, saved_entries);
-    InterlockedExchange(&g_b.c_start_queued, saved_queued);
-    InterlockedExchange(&g_b.c_start_consumed, saved_consumed);
-    InterlockedExchange(&g_b.c_pad_context_refused, saved_refused);
-    bad += t_script_menu_mailbox();
-    bad += t_menu_fresh_start_config();
-    printf("  %-6s script menu context: input guard, title bit, mailbox expiry/consume/replace/withdraw and normal isolation\n", bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-static int t_menu_seam_writes_only_where_it_may(void)
-{
-    union { ULONGLONG align; unsigned char b[0x40]; } rec;
-    static LONG menu_word, menu_scn;
-    DG_ANCHORS saved = g_b.a;
-    LONG saved_mode = g_b.menu_mode;
-    DG_BRIDGE_MENU cmd;
-    int bad = 0;
-    DWORD *status = (DWORD *)(rec.b + DG_GV_PAD_STATUS_OFFSET);
-    DWORD *press  = (DWORD *)(rec.b + DG_GV_PAD_PRESS_OFFSET);
-
-    memset(&rec, 0, sizeof rec);
-    menu_word = 0;
-    menu_scn = 0;
-    memset(&g_b.a, 0, sizeof g_b.a);
-    g_b.a.gv_pad_data_direct = (ULONGLONG)(ULONG_PTR)rec.b;
-    g_b.a.gm_menu_status = (ULONGLONG)(ULONG_PTR)&menu_word;
-    g_b.a.gm_menu_status_scn = (ULONGLONG)(ULONG_PTR)&menu_scn;
-    InterlockedExchange(&g_b.armed, 1);
-    InterlockedExchange(&g_b.c_ticks, 100);
-    InterlockedExchange(&g_b.menu_mode, 2);
-    InterlockedExchange(&g_b.c_menu_writes, 0);
-    InterlockedExchange(&g_b.c_menu_stale, 0);
-    InterlockedExchange(&g_b.c_menu_gate, 0);
-
-    cmd.status = DG_MENU_PAD_D;
-    cmd.allow = 1;
-
-    /* Mode below write: decided, published, and still not written. */
-    InterlockedExchange(&g_b.menu_mode, 1);
-    dg_bridge_menu_now(&cmd);
-    pad_seam_tick();
-    if (*status || *press || g_b.c_menu_writes) bad++;
-    InterlockedExchange(&g_b.menu_mode, 2);
-
-    /* A withdrawn command writes nothing - stopping IS the release. */
-    dg_bridge_menu_now(NULL);
-    pad_seam_tick();
-    if (*status || *press || g_b.c_menu_writes) bad++;
-
-    /* The ordinary case: status AND press, because the menus read the
-       flank and UpdatePad has already derived it by the time we run. */
-    dg_bridge_menu_now(&cmd);
-    pad_seam_tick();
-    if (*status != DG_MENU_PAD_D || *press != DG_MENU_PAD_D) bad++;
-    if (g_b.c_menu_writes != 1) bad++;
-
-    /* One shot. A second pass without a new command must add nothing: a
-       repeat here would be a held button the player never held. */
-    *status = 0;
-    *press = 0;
-    pad_seam_tick();
-    if (*status || *press || g_b.c_menu_writes != 1) bad++;
-
-    /* Bits outside the allowed set never reach the record, however they
-       got into the command. */
-    cmd.status = DG_MENU_PAD_D | 0x00000004u;   /* 0x4 is not a menu button */
-    dg_bridge_menu_now(&cmd);
-    pad_seam_tick();
-    if (*status != DG_MENU_PAD_D || *press != DG_MENU_PAD_D) bad++;
-    cmd.status = DG_MENU_PAD_D;
-
-    /* A weapon or item menu is out of scope by the user's decision, and the
-       flat-screen condition upstream is TRUE while one is open - so the
-       refusal has to live here, on the game thread, reading the live word. */
-    *status = 0;
-    *press = 0;
-    menu_word = 0x00000100;                     /* MENU_WEAPON_OPEN */
-    dg_bridge_menu_now(&cmd);
-    pad_seam_tick();
-    if (*status || *press) bad++;
-    if (g_b.c_menu_gate != 1) bad++;
-    menu_word = 0;
-    menu_scn = 0x00000200;                      /* MENU_ITEM_OPEN, scn half */
-    dg_bridge_menu_now(&cmd);
-    pad_seam_tick();
-    if (*status || *press) bad++;
-    if (g_b.c_menu_gate != 2) bad++;
-    menu_scn = 0;
-
-    /* A command from a Present hook that stopped firing is refused rather
-       than repeated. */
-    dg_bridge_menu_now(&cmd);
-    InterlockedExchange(&g_b.c_ticks, 200);
-    pad_seam_tick();
-    if (*status || *press) bad++;
-    if (g_b.c_menu_stale != 1) bad++;
-    InterlockedExchange(&g_b.c_ticks, 100);
-
-    /* An unarmed bridge writes nothing, whatever was published. */
-    dg_bridge_menu_now(&cmd);
-    InterlockedExchange(&g_b.armed, 0);
-    pad_seam_tick();
-    if (*status || *press) bad++;
-    InterlockedExchange(&g_b.armed, 1);
-
-    /* No record address: refuse rather than write to zero. */
-    g_b.a.gv_pad_data_direct = 0;
-    dg_bridge_menu_now(&cmd);
-    pad_seam_tick();
-    if (*status || *press) bad++;
-    g_b.a.gv_pad_data_direct = (ULONGLONG)(ULONG_PTR)rec.b;
-
-    *status = 0x00040040u;                      /* as if the runtime set it */
-    *press = 0x00040040u;
-    cmd.status = DG_MENU_PAD_A;
-    cmd.clear = 0x00040040u;
-    dg_bridge_menu_now(&cmd);
-    pad_seam_tick();
-    if (*status != DG_MENU_PAD_A || *press != DG_MENU_PAD_A) bad++;
-
-    /* A clear reaching outside the allowed set is refused like any other
-       bit: the marker may pick which BUTTON to silence, never more. */
-    *status = 0x01000000u;
-    *press = 0x01000000u;
-    cmd.status = DG_MENU_PAD_A;
-    cmd.clear = 0x01000000u;
-    dg_bridge_menu_now(&cmd);
-    pad_seam_tick();
-    if (*status != (0x01000000u | DG_MENU_PAD_A)) bad++;
-    cmd.clear = 0u;
-
-    /* And with nothing to say, nothing is cleared either - a clear is not
-       a licence to hold a button down for the player. */
-    *status = 0x00040040u;
-    *press = 0x00040040u;
-    cmd.status = 0u;
-    cmd.clear = 0x00040040u;
-    dg_bridge_menu_now(&cmd);
-    pad_seam_tick();
-    if (*status != 0x00040040u || *press != 0x00040040u) bad++;
-    cmd.status = DG_MENU_PAD_D;
-    cmd.clear = 0u;
-
-    /* Codec B consumes on the actual post-UpdatePad seam. The native cancel
-       word differs from the configured front-end word; SELECT also reaches
-       frequency selection independently of the runtime region assignment. */
-    *status = *press = 0;
-    menu_scn = 0x400u;
-    cmd.status = 0x00040020u;
-    cmd.allow = DG_CODEC_MENU_ALLOW_EXIT;
-    dg_bridge_menu_now(&cmd);
-    pad_seam_tick();
-    if (*status != 0x00040140u || *press != 0x00040140u) bad++;
-    *status = *press = 0;
-    pad_seam_tick();
-    if (*status || *press) bad++;
-    dg_bridge_menu_now(&cmd);
-    menu_scn = 0; /* codec ended between publication and consumption */
-    pad_seam_tick();
-    if (*status || *press || g_b.menu_status) bad++;
-    menu_scn = 0x400u;
-    *status = DG_MENU_PAD_STA;
-    dg_bridge_menu_now(&cmd);
-    pad_seam_tick();
-    if (*status != DG_MENU_PAD_STA || *press || g_b.menu_status) bad++;
-    *status = 0;
-    *press = DG_MENU_PAD_STA;
-    dg_bridge_menu_now(&cmd);
-    pad_seam_tick();
-    if (*status || *press != DG_MENU_PAD_STA || g_b.menu_status) bad++;
-    *status = *press = 0;
-    menu_scn = 0;
-    cmd.allow = 1;
-    cmd.status = DG_MENU_PAD_D;
-
-    /* And the record is otherwise untouched: only two dwords ever move. */
-    {
-        int k;
-        memset(&rec, 0, sizeof rec);
-        *status = 0;
-        *press = 0;
-        dg_bridge_menu_now(&cmd);
-        pad_seam_tick();
-        for (k = 0; k < 0x40; k++) {
-            if (k >= DG_GV_PAD_STATUS_OFFSET &&
-                k < DG_GV_PAD_STATUS_OFFSET + 4) continue;
-            if (k >= DG_GV_PAD_PRESS_OFFSET &&
-                k < DG_GV_PAD_PRESS_OFFSET + 4) continue;
-            if (rec.b[k] != 0) bad++;
-        }
-    }
-
-    InterlockedExchange(&g_b.armed, 0);
-    InterlockedExchange(&g_b.menu_mode, saved_mode);
-    InterlockedExchange(&g_b.menu_status, 0);
-    InterlockedExchange(&g_b.menu_allow, 0);
-    InterlockedExchange(&g_b.c_menu_writes, 0);
-    InterlockedExchange(&g_b.c_menu_stale, 0);
-    InterlockedExchange(&g_b.c_menu_gate, 0);
-    InterlockedExchange(&g_b.c_ticks, 0);
-    g_b.a = saved;
-
-    printf("  %-6s menu seam: the front-end record takes status and press "
-           "together, exactly once per command, only the allowed bits, and "
-           "never at all with the mode down, the command withdrawn or stale, "
-           "the bridge unarmed, no record, or a weapon/item menu open\n",
-           bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-static int t_body_follow_speaks_for_the_aim(void)
-{
-    union { ULONGLONG align; unsigned char b[0x40]; } padmem;
-    ULONGLONG saved_pad = g_b.a.player_pad;
-    ULONGLONG saved_subj = g_b.a.pl_subject_move;
-    LONG saved_state = g_b.fps.state;
-    LONG saved_mode = g_b.walk_mode;
-    LONG saved_turn = g_b.turn_mode;
-    LONG subject_word = 1;
-    DG_BRIDGE_MOVE cmd;
-    LONG n, fw, acc;
-    int bad = 0, i, k;
-
-    memset(&padmem, 0, sizeof padmem);
-    g_b.a.player_pad = (ULONGLONG)(ULONG_PTR)(padmem.b + 4);
-    *(LONG *)(padmem.b + 0) = 1;
-    padmem.b[4 + DG_PAD_LEFT_DX_OFFSET] = 128;
-    padmem.b[4 + DG_PAD_LEFT_DY_OFFSET] = 128;
-    padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] = 128;
-    padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET + 1] = 128;
-    g_b.a.pl_subject_move = (ULONGLONG)(ULONG_PTR)&subject_word;
-    g_b.fps.state = DG_FPS_ACTIVE;
-    InterlockedExchange(&g_b.s_late_unsafe, 0);
-    InterlockedExchange(&g_b.armed, 1);
-    InterlockedExchange(&g_b.walk_mode, 1);
-    InterlockedExchange(&g_b.turn_mode, 1);
-    InterlockedExchange(&g_b.move_deadzone_mils, 150);
-    InterlockedExchange(&g_b.turn_gain_mils, 1000);
-    InterlockedExchange(&g_b.turn_follow_thresh_mdeg, 40000);
-    InterlockedExchange(&g_b.turn_follow_full_mdeg, 90000);
-    InterlockedExchange(&g_b.turn_dir_acc, 0);
-    InterlockedExchange(&g_b.move_valid, 0);
-    /* A previous test may have left the fire machine mid-hold, and a held
-       trigger tightens the dead band below - every threshold assertion
-       here assumes the walking band. */
-    InterlockedExchange(&g_b.s_fire_state, DG_FIRE_IDLE);
-    InterlockedExchange(&g_b.c_ticks, 500);
-
-    /* The sign learns from drift responses to written bytes: twenty pairs
-       of +1 degree under a fresh positive-side write commit the
-       accumulator; a recalibration snap and sub-noise wiggle vote
-       nothing. */
-    g_b.turn_vote_have_prev = 0;
-    InterlockedExchange(&g_b.turn_last_write_dir, 0);
-    turn_dir_vote(10.0);
-    InterlockedExchange(&g_b.turn_last_write_dir, 1);
-    InterlockedExchange(&g_b.turn_last_write_tick, 499);
-    for (i = 1; i <= 20; i++) turn_dir_vote(10.0 + (double)i);
-    acc = InterlockedCompareExchange(&g_b.turn_dir_acc, 0, 0);
-    if (acc < 15) bad++;
-    turn_dir_vote(120.0);               /* +90 in one pair: a recal snap */
-    if (InterlockedCompareExchange(&g_b.turn_dir_acc, 0, 0) != acc) bad++;
-    turn_dir_vote(120.05);              /* under the noise floor */
-    if (InterlockedCompareExchange(&g_b.turn_dir_acc, 0, 0) != acc) bad++;
-
-    /* The gap arrives as a published fact; who publishes it is the
-       position path's business and is tested there
-       (t_the_gap_reads_the_facing_minus_the_body). This test owns the
-       CONSUMER: what move_tick does with a fresh +60. */
-    InterlockedExchange(&g_b.s_arm_aim_gap, f2l(60.0f));
-    InterlockedExchange(&g_b.arm_aim_gap_tick, 500);
-    (void)k;
-
-    /* A fresh +60 gap past the 40 threshold with a committed positive
-       sign: the follow turns, on the positive byte side, counted as its
-       own. */
-    memset(&cmd, 0, sizeof cmd);
-    cmd.valid = 1;
-    cmd.turn_valid = 1;
-    dg_bridge_move_now(&cmd);
-    n = g_b.c_turn_writes;
-    fw = g_b.c_turn_follow_writes;
-    move_tick(1);
-    if (g_b.c_turn_writes != n + 1) bad++;
-    if (g_b.c_turn_follow_writes != fw + 1) bad++;
-    if (padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] < 128 + DG_MOVE_SUBJECT_MARGIN)
-        bad++;
-
-    /* A committed NEGATIVE sign flips the byte side for the same gap. */
-    padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] = 128;
-    *(short *)(padmem.b + 4 + DG_PAD_ANALOG_OFFSET) = 0;
-    InterlockedExchange(&g_b.turn_dir_acc, -30);
-    dg_bridge_move_now(&cmd);
-    move_tick(1);
-    if (padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] > 128 - DG_MOVE_SUBJECT_MARGIN)
-        bad++;
-    InterlockedExchange(&g_b.turn_dir_acc, 30);
-
-    /* And the mirror gap: aiming the other way round flips the byte too -
-       the follow turns TOWARD the aim, not one habitual way. */
-    padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] = 128;
-    *(short *)(padmem.b + 4 + DG_PAD_ANALOG_OFFSET) = 0;
-    InterlockedExchange(&g_b.s_arm_aim_gap, f2l(-60.0f));
-    dg_bridge_move_now(&cmd);
-    move_tick(1);
-    if (padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] > 128 - DG_MOVE_SUBJECT_MARGIN)
-        bad++;
-    InterlockedExchange(&g_b.s_arm_aim_gap, f2l(60.0f));
-
-    /* Under the threshold: silence. */
-    padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] = 128;
-    *(short *)(padmem.b + 4 + DG_PAD_ANALOG_OFFSET) = 0;
-    InterlockedExchange(&g_b.s_arm_aim_gap, f2l(20.0f));
-    dg_bridge_move_now(&cmd);
-    n = g_b.c_turn_writes;
-    fw = g_b.c_follow_under;
-    move_tick(1);
-    if (g_b.c_turn_writes != n) bad++;
-    if (g_b.c_follow_under != fw + 1) bad++;
-    if (padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] != 128) bad++;
-
-    {
-        DG_MOVE_IN fi;
-        DG_MOVE_OUT fo;
-        memset(&fi, 0, sizeof fi);
-        fi.have_sample = 1;
-        fi.input_ok = 1;
-        fi.deadzone = 0.15;
-        fi.turn_on = 1;
-        fi.turn_gain = 1.0;
-        fi.right_dx = 128;      /* a centred physical stick: no yield */
-        fi.turn_x = 0.1501;
-        dg_move_step(&fi, &fo);
-        if (!fo.turn_write || fo.rdx <= 176) bad++;
-        fi.turn_x = -0.1501;
-        dg_move_step(&fi, &fo);
-        if (!fo.turn_write || fo.rdx >= 80) bad++;
-    }
-
-    /* The trigger holds the weapon up: the follow stands down, however
-       loud the gap - vanilla MGS2 roots the body in first-person aim,
-       so a write there cannot turn it and only drags the game's aim off
-       the player's turn (737 writes, 0.3 degrees of drift, measured
-       2026-08-23). A LOUD gap stays silent, the stand-down is counted,
-       and the byte never leaves centre. */
-    InterlockedExchange(&g_b.s_arm_aim_gap, f2l(60.0f));
-    InterlockedExchange(&g_b.s_fire_state, DG_FIRE_HOLD);
-    dg_bridge_move_now(&cmd);
-    n = g_b.c_turn_writes;
-    fw = g_b.c_follow_aim_hold;
-    move_tick(1);
-    if (g_b.c_turn_writes != n) bad++;
-    if (g_b.c_follow_aim_hold != fw + 1) bad++;
-    if (padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] != 128) bad++;
-    /* The actuator probe bypasses the stand-down on purpose: same loud
-       gap, same held trigger, but with vr_turn_probe on the follow DOES
-       write - the diagnostic run needs writes during aim - and the
-       sample ring holds the write it just measured. */
-    InterlockedExchange(&g_b.turn_probe, 1);
-    dg_bridge_move_now(&cmd);
-    n = g_b.c_turn_writes;
-    fw = g_b.turn_probe_w;
-    move_tick(1);
-    if (g_b.c_turn_writes != n + 1) bad++;
-    if (g_b.turn_probe_w != fw + 1) bad++;
-    {
-        DG_TURN_PROBE_SAMPLE ps;
-        int got = 0;
-        while (dg_bridge_turn_probe_take(&ps)) got = 1;
-        if (!got || ps.fire_state != DG_FIRE_HOLD || ps.wrote != 1) bad++;
-        /* The sample carries the loop term the follow steered on: the
-           60-degree gap set above, bit-exact through the f2l store. */
-        if (!got || ps.gap_deg != 60.0f) bad++;
-    }
-    /* DENSE: with the weapon up, a tick that writes nothing still leaves a
-       sample (wrote 0, byte 128) - the per-tick series the 2026-09-01
-       par. 9 measurement needs - and a tick with the weapon down leaves
-       none, so a dense session logs only aim time. */
-    InterlockedExchange(&g_b.turn_probe, 2);
-    InterlockedExchange(&g_b.s_arm_aim_gap, f2l(0.0f));
-    padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] = 128;
-    *(short *)(padmem.b + 4 + DG_PAD_ANALOG_OFFSET) = 0;
-    dg_bridge_move_now(&cmd);
-    n = g_b.c_turn_writes;
-    fw = g_b.turn_probe_w;
-    move_tick(1);
-    if (g_b.c_turn_writes != n) bad++;
-    if (g_b.turn_probe_w != fw + 1) bad++;
-    {
-        DG_TURN_PROBE_SAMPLE ps;
-        int got = 0;
-        while (dg_bridge_turn_probe_take(&ps)) got = 1;
-        if (!got || ps.wrote != 0 || ps.byte != 128 ||
-            ps.fire_state != DG_FIRE_HOLD) bad++;
-    }
-    InterlockedExchange(&g_b.s_fire_state, DG_FIRE_IDLE);
-    dg_bridge_move_now(&cmd);
-    fw = g_b.turn_probe_w;
-    move_tick(1);
-    if (g_b.turn_probe_w != fw) bad++;
-    /* `all` speaks with the weapon down too. */
-    InterlockedExchange(&g_b.turn_probe, 3);
-    dg_bridge_move_now(&cmd);
-    fw = g_b.turn_probe_w;
-    move_tick(1);
-    if (g_b.turn_probe_w != fw + 1) bad++;
-    {
-        DG_TURN_PROBE_SAMPLE ps;
-        while (dg_bridge_turn_probe_take(&ps)) {}
-    }
-    InterlockedExchange(&g_b.turn_probe, 2);
-    InterlockedExchange(&g_b.s_fire_state, DG_FIRE_HOLD);
-    InterlockedExchange(&g_b.s_arm_aim_gap, f2l(60.0f));
-    InterlockedExchange(&g_b.turn_probe, 0);
-
-    InterlockedExchange(&g_b.follow_aim, 1);
-    InterlockedExchange(&g_b.follow_src, 1);
-    padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] = 128;
-    *(short *)(padmem.b + 4 + DG_PAD_ANALOG_OFFSET) = 0;
-    dg_bridge_move_now(&cmd);
-    n = g_b.c_turn_writes;
-    fw = g_b.c_turn_follow_writes;
-    {
-        LONG ah = g_b.c_follow_aim_hold;
-        move_tick(1);
-        if (g_b.c_turn_writes != n + 1) bad++;
-        if (g_b.c_turn_follow_writes != fw + 1) bad++;
-        if (g_b.c_follow_aim_hold != ah) bad++;
-    }
-    InterlockedExchange(&g_b.follow_aim, 0);
-    InterlockedExchange(&g_b.follow_src, 2);
-    padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] = 128;
-    *(short *)(padmem.b + 4 + DG_PAD_ANALOG_OFFSET) = 0;
-    dg_bridge_move_now(&cmd);
-    n = g_b.c_turn_writes;
-    fw = g_b.c_follow_aim_hold;
-    move_tick(1);
-    if (g_b.c_turn_writes != n) bad++;
-    if (g_b.c_follow_aim_hold != fw + 1) bad++;
-    InterlockedExchange(&g_b.follow_src, 0);
-    padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] = 128;
-    *(short *)(padmem.b + 4 + DG_PAD_ANALOG_OFFSET) = 0;
-    /* And the moment the weapon drops, the same gap speaks again. */
-    InterlockedExchange(&g_b.s_fire_state, DG_FIRE_IDLE);
-    dg_bridge_move_now(&cmd);
-    n = g_b.c_turn_writes;
-    fw = g_b.c_turn_follow_writes;
-    move_tick(1);
-    if (g_b.c_turn_writes != n + 1) bad++;
-    if (g_b.c_turn_follow_writes != fw + 1) bad++;
-    InterlockedExchange(&g_b.s_arm_aim_gap, f2l(20.0f));
-    padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] = 128;
-    *(short *)(padmem.b + 4 + DG_PAD_ANALOG_OFFSET) = 0;
-
-    /* A stale gap: the hand stream died, the body stands still. */
-    InterlockedExchange(&g_b.s_arm_aim_gap, f2l(60.0f));
-    InterlockedExchange(&g_b.arm_aim_gap_tick, 400);
-    dg_bridge_move_now(&cmd);
-    n = g_b.c_turn_writes;
-    fw = g_b.c_follow_stale;
-    move_tick(1);
-    if (g_b.c_turn_writes != n) bad++;
-    if (g_b.c_follow_stale != fw + 1) bad++;
-
-    /* An uncommitted sign: silence, however loud the gap. */
-    InterlockedExchange(&g_b.arm_aim_gap_tick, 500);
-    InterlockedExchange(&g_b.turn_dir_acc, 5);
-    dg_bridge_move_now(&cmd);
-    n = g_b.c_turn_writes;
-    fw = g_b.c_follow_no_sign;
-    move_tick(1);
-    if (g_b.c_turn_writes != n) bad++;
-    if (g_b.c_follow_no_sign != fw + 1) bad++;
-    InterlockedExchange(&g_b.turn_dir_acc, 30);
-
-    /* A marker-declared sign arms the follow without a single lesson: the
-       2026-08-23 session sat mute on a -31 degree gap because the votes
-       were still 0. Seeded -1, the same fresh +60 gap turns immediately,
-       on the negative byte side; a non-declaration (0) leaves the
-       accumulator exactly as learning left it. */
-    InterlockedExchange(&g_b.turn_dir_acc, 0);
-    turn_dir_seed(0);
-    if (InterlockedCompareExchange(&g_b.turn_dir_acc, 0, 0) != 0) bad++;
-    turn_dir_seed(-1);
-    if (InterlockedCompareExchange(&g_b.turn_dir_acc, 0, 0) != -30) bad++;
-    padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] = 128;
-    *(short *)(padmem.b + 4 + DG_PAD_ANALOG_OFFSET) = 0;
-    dg_bridge_move_now(&cmd);
-    fw = g_b.c_turn_follow_writes;
-    move_tick(1);
-    if (g_b.c_turn_follow_writes != fw + 1) bad++;
-    if (padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] > 128 - DG_MOVE_SUBJECT_MARGIN)
-        bad++;
-    InterlockedExchange(&g_b.turn_dir_acc, 30);
-
-    /* The player's stick always wins, and the write is theirs, not the
-       follow's. */
-    padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] = 128;
-    *(short *)(padmem.b + 4 + DG_PAD_ANALOG_OFFSET) = 0;
-    cmd.turn_x = -1.0;
-    dg_bridge_move_now(&cmd);
-    n = g_b.c_turn_writes;
-    fw = g_b.c_turn_follow_writes;
-    move_tick(1);
-    if (g_b.c_turn_writes != n + 1) bad++;
-    if (g_b.c_turn_follow_writes != fw) bad++;
-    if (padmem.b[4 + DG_PAD_RIGHT_DX_OFFSET] > 128 - DG_MOVE_SUBJECT_MARGIN)
-        bad++;
-
-    InterlockedExchange(&g_b.turn_follow_thresh_mdeg, 0);
-    InterlockedExchange(&g_b.turn_follow_full_mdeg, 0);
-    InterlockedExchange(&g_b.turn_dir_acc, 0);
-    InterlockedExchange(&g_b.turn_last_write_dir, 0);
-    InterlockedExchange(&g_b.turn_last_write_tick, 0);
-    InterlockedExchange(&g_b.s_arm_aim_gap, 0);
-    InterlockedExchange(&g_b.arm_aim_gap_tick, 0);
-    g_b.turn_vote_have_prev = 0;
-    InterlockedExchange(&g_b.move_valid, 0);
-    InterlockedExchange(&g_b.walk_mode, saved_mode);
-    InterlockedExchange(&g_b.turn_mode, saved_turn);
-    InterlockedExchange(&g_b.armed, 0);
-    InterlockedExchange(&g_b.c_ticks, 0);
-    g_b.a.player_pad = saved_pad;
-    g_b.a.pl_subject_move = saved_subj;
-    g_b.fps.state = saved_state;
-
-    printf("  %-6s body follow: the sign commits from drift responses "
-           "(snaps and noise voteless), the consumer steers on the aim "
-           "gap it steers on, a committed sign turns the right byte side, "
-           "threshold, staleness, an uncommitted sign and the player's "
-           "own stick each silence it AND say so on their own counter, "
-           "and a marker-declared sign arms the follow with zero "
-           "lessons\n",
-           bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-/* The trigger's crossing, end to end, on the seams that actually carry it.
- *
- * dg_fire_test.c already proves the contract itself. What is left is the part
- * that only exists here: a camera seam publishing while a game tick consumes,
- * a staleness bound, the game-side gate, and - the claim this whole step is
- * built around - that DRY writes absolutely nothing. The pad buffer below is
- * checked byte for byte after every single tick, because "it only evaluates"
- * is exactly the kind of promise that is worth nothing unless it is measured.
- */
-static int t_the_trigger_crosses_the_seams(void)
-{
-    union { ULONGLONG align; unsigned char b[0x300]; } actor;
-    union { ULONGLONG align; unsigned char b[0xD20]; } player;
-    union { ULONGLONG align; unsigned char b[0x40]; } wp_set;
-    /* enable, then the 40 bytes the merge point copies, with room to spare */
-    union { ULONGLONG align; unsigned char b[0x40]; } padmem, padwas;
-    ULONGLONG arm, arm_slot, pad;
-    ULONGLONG saved_arm = g_b.a.gm_player_arm_body;
-    ULONGLONG saved_pad = g_b.a.player_pad;
-    ULONGLONG saved_mask = g_b.a.pad_weapon;
-    ULONGLONG saved_player_status = g_b.a.gm_player_status;
-    ULONGLONG native_status = 0x800ULL;
-    LONG saved_state = g_b.fps.state;
-    LONG mask = 0x0008;                 /* a plausible PL_PAD_WEAPON (PAD_R1) */
-    DG_BRIDGE_FIRE cmd;
-    LONG n;
-    int bad = 0, i;
-
-    memset(&actor, 0, sizeof actor);
-    memset(&player, 0, sizeof player);
-    memset(&wp_set, 0, sizeof wp_set);
-    memset(&padmem, 0, sizeof padmem);
-
-    arm = (ULONGLONG)(ULONG_PTR)(actor.b + 0x60);
-    arm_slot = arm;
-    *(ULONGLONG *)(actor.b + 0x228) = (ULONGLONG)(ULONG_PTR)(player.b + 0xCF4);
-    *(ULONGLONG *)(player.b + 0xBA8) = arm;
-    *(LONG *)(player.b + 0xBB0) = 6;
-    *(LONG *)(player.b + 0xB90) = 1;                    /* a real weapon */
-    *(ULONGLONG *)(player.b + 0xBA0) = (ULONGLONG)(ULONG_PTR)wp_set.b;
-    *(LONG *)(wp_set.b + 0x10) = (LONG)DG_FIRE_WP_PRESSURE;
-
-    pad = (ULONGLONG)(ULONG_PTR)(padmem.b + 4);         /* enable sits below */
-    *(LONG *)(padmem.b + 0) = 1;                        /* PlayerPad.enable */
-
-    g_b.a.gm_player_arm_body = (ULONGLONG)(ULONG_PTR)&arm_slot;
-    g_b.a.gm_player_status = (ULONGLONG)(ULONG_PTR)&native_status;
-    *(LONG *)(player.b + 0xC84) = 8;
-    g_b.a.player_pad = pad;
-    g_b.a.pad_weapon = (ULONGLONG)(ULONG_PTR)&mask;
-    g_b.fps.state = DG_FPS_ACTIVE;
-    InterlockedExchange(&g_b.s_late_unsafe, 0);
-    InterlockedExchange(&g_b.armed, 1);
-    InterlockedExchange(&g_b.fire_mode, DG_FIRE_MODE_DRY);
-    InterlockedExchange(&g_b.c_ticks, 500);
-    dg_fire_reset(&g_b.fire);
-    InterlockedExchange(&g_b.fire_valid, 0);
-    padwas = padmem;
-
-    memset(&cmd, 0, sizeof cmd);
-    cmd.click = 0.55;
-    cmd.value = 0.60;
-    cmd.valid = 1;
-    cmd.stream_id = 3;
-
-    /* A pull, offered by five camera seams inside one tick the way the real
-       seam does, then consumed once. */
-    cmd.press_seq = 1;
-    n = g_b.c_fire_drawn;
-    for (i = 0; i < 5; i++) dg_bridge_fire_now(&cmd);
-    fire_tick(1);
-    if (g_b.c_fire_drawn != n + 1) bad++;
-    if (memcmp(&padmem, &padwas, sizeof padmem) != 0) bad++;
-
-    /* held: no more draws, no shot */
-    {
-        LONG drew = g_b.c_fire_drawn;
-        n = g_b.c_fire_released;
-        for (i = 0; i < 10; i++) {
-            dg_bridge_fire_now(&cmd);
-            fire_tick(1);
-            if (memcmp(&padmem, &padwas, sizeof padmem) != 0) bad++;
-        }
-        if (g_b.c_fire_drawn != drew) bad++;
-        if (g_b.c_fire_released != n) bad++;
-        if (g_b.s_fire_pressure < DG_FIRE_TH) bad++;
-    }
-
-    /* Full pull: synthetic native release, physical trigger stays held. */
-    cmd.value = 0.9;
-    dg_bridge_fire_now(&cmd);
-    /* Native draw, reload/wall and absent HOLD each defer the firing edge. */
-    *(LONG *)(player.b + 0xC84) = 7;
-    fire_tick(1);
-    if (g_b.c_fire_released != n) bad++;
-    *(LONG *)(player.b + 0xC84) = 8;
-    *(LONG *)(player.b + 0xCA8) = 3;
-    fire_tick(1);
-    if (g_b.c_fire_released != n) bad++;
-    *(LONG *)(player.b + 0xCA8) = 0;
-    native_status = 0;
-    fire_tick(1);
-    if (g_b.c_fire_released != n) bad++;
-    native_status = 0x800ULL;
-    fire_tick(1);
-    if (g_b.c_fire_released != n + 1) bad++;
-    if (memcmp(&padmem, &padwas, sizeof padmem) != 0) bad++;
-
-    /* An aim that outlives the publications. The camera seam and the game tick
-       are not locked to each other - the dry run published 0.8 samples per tick
-       - so an aim has to survive a few quiet ticks without the weapon dropping,
-       and the age has to reach the contract instead of being judged here. */
-    {
-        LONG n_coast = g_b.c_fire_coasting;
-        cmd.value = 0.60;
-        cmd.press_seq = 2;
-        cmd.release_seq = 1;
-        dg_bridge_fire_now(&cmd);
-        fire_tick(1);                           /* draws */
-        if (g_b.fire.state != DG_FIRE_HOLD) bad++;
-        for (i = 1; i <= 6; i++) {              /* nobody publishes for six */
-            InterlockedExchange(&g_b.c_ticks, 500 + i);
-            fire_tick(1);
-        }
-        if (g_b.c_fire_coasting <= n_coast) bad++;
-        if (g_b.fire.state != DG_FIRE_HOLD) bad++;
-        if (memcmp(&padmem, &padwas, sizeof padmem) != 0) bad++;
-        /* and the pull still ends in exactly one release when it comes back */
-        n = g_b.c_fire_released;
-        cmd.value = 0.9;
-        InterlockedExchange(&g_b.c_ticks, 507);
-        dg_bridge_fire_now(&cmd);
-        fire_tick(1);
-        if (g_b.c_fire_released != n + 1) bad++;
-    }
-    InterlockedExchange(&g_b.c_ticks, 500);
-
-    /* a command nobody refreshed goes stale rather than repeating forever */
-    cmd.press_seq = 3;
-    dg_bridge_fire_now(&cmd);
-    InterlockedExchange(&g_b.c_ticks, 510);
-    n = g_b.c_fire_stale;
-    fire_tick(1);
-    if (g_b.c_fire_stale != n + 1) bad++;
-    InterlockedExchange(&g_b.c_ticks, 510);
-
-    /* the camera seam standing the trigger down entirely */
-    n = g_b.c_fire_drawn;
-    dg_bridge_fire_now(NULL);
-    cmd.press_seq = 4;
-    fire_tick(1);
-    if (g_b.c_fire_drawn != n) bad++;
-
-    /* the player's own weapon button, seen through the pad the game filled */
-    dg_fire_reset(&g_b.fire);
-    *(LONG *)(padmem.b + 4 + DG_PAD_STATUS_OFFSET) = mask;
-    padwas = padmem;
-    cmd.press_seq = 5;
-    dg_bridge_fire_now(&cmd);
-    n = g_b.c_fire_blocked_phys;
-    {
-        LONG drew = g_b.c_fire_drawn;
-        fire_tick(1);
-        if (g_b.c_fire_blocked_phys != n + 1) bad++;
-        if (g_b.c_fire_drawn != drew) bad++;
-    }
-    *(LONG *)(padmem.b + 4 + DG_PAD_STATUS_OFFSET) = 0;
-    padwas = padmem;
-
-    /* the Bluepoint pad layer switched off: the player reads a different pad
-       record, so our contract would be written where nobody looks */
-    dg_fire_reset(&g_b.fire);
-    *(LONG *)(padmem.b + 0) = 0;
-    padwas = padmem;
-    cmd.press_seq = 6;
-    dg_bridge_fire_now(&cmd);
-    n = g_b.c_fire_blocked_gate;
-    {
-        LONG drew = g_b.c_fire_drawn;
-        fire_tick(1);
-        if (g_b.c_fire_blocked_gate != n + 1) bad++;
-        if (g_b.c_fire_drawn != drew) bad++;
-    }
-    *(LONG *)(padmem.b + 0) = 1;
-    padwas = padmem;
-
-    /* out of first person, and the camera seam's own unsafe reading */
-    dg_fire_reset(&g_b.fire);
-    g_b.fps.state = DG_FPS_OFF;
-    cmd.press_seq = 7;
-    dg_bridge_fire_now(&cmd);
-    n = g_b.c_fire_blocked_gate;
-    fire_tick(1);
-    if (g_b.c_fire_blocked_gate != n + 1) bad++;
-    g_b.fps.state = DG_FPS_ACTIVE;
-    InterlockedExchange(&g_b.s_late_unsafe, 1);
-    dg_bridge_fire_now(&cmd);
-    n = g_b.c_fire_blocked_gate;
-    fire_tick(1);
-    if (g_b.c_fire_blocked_gate != n + 1) bad++;
-    InterlockedExchange(&g_b.s_late_unsafe, 0);
-
-    /* the weapon type reaches the contract from the live wp_set */
-    dg_fire_reset(&g_b.fire);
-    *(LONG *)(wp_set.b + 0x10) = (LONG)DG_FIRE_WP_CONSECUTIVE;
-    cmd.press_seq = 8;
-    cmd.release_seq = 7;
-    dg_bridge_fire_now(&cmd);
-    fire_tick(1);
-    if ((unsigned int)g_b.s_fire_wtype != DG_FIRE_WP_CONSECUTIVE) bad++;
-
-    /* a stream change forgets a pull that belonged to the old session */
-    cmd.stream_id = 4;
-    cmd.press_seq = 8;              /* same number, different stream */
-    dg_bridge_fire_now(&cmd);
-    n = g_b.c_fire_drawn;
-    fire_tick(1);
-    if (g_b.c_fire_drawn != n + 1) bad++;
-
-    /* off means off: not one counter moves and the machine forgets */
-    InterlockedExchange(&g_b.fire_mode, DG_FIRE_MODE_OFF);
-    cmd.stream_id = 5;
-    cmd.press_seq = 9;
-    cmd.release_seq = 8;
-    dg_bridge_fire_now(&cmd);
-    n = g_b.c_fire_drawn;
-    for (i = 0; i < 5; i++) fire_tick(1);
-    if (g_b.c_fire_drawn != n) bad++;
-    if (g_b.fire.state != DG_FIRE_IDLE) bad++;
-
-    if (memcmp(&padmem, &padwas, sizeof padmem) != 0) bad++;
-
-    g_b.a.gm_player_arm_body = saved_arm;
-    g_b.a.gm_player_status = saved_player_status;
-    g_b.a.player_pad = saved_pad;
-    g_b.a.pad_weapon = saved_mask;
-    g_b.fps.state = saved_state;
-    InterlockedExchange(&g_b.armed, 0);
-    InterlockedExchange(&g_b.fire_mode, DG_FIRE_MODE_OFF);
-    InterlockedExchange(&g_b.fire_valid, 0);
-    InterlockedExchange(&g_b.c_ticks, 0);
-    dg_fire_reset(&g_b.fire);
-
-    printf("  %-6s trigger crosses the seams: five camera-seam offers are one "
-           "draw, six ticks with nobody publishing coast the aim instead of "
-           "dropping it, the release is one release, and a stale command, a "
-           "stood-down seam, the player's own button, PlayerPad disabled, "
-           "leaving first person and an unsafe camera reading each refuse - "
-           "with the pad buffer byte-identical after every tick\n",
-           bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-/* Action() refills the pad from GV_PadData before our seam runs, so a tick
-   always starts from the player's own input and never from what we wrote last
-   tick. Modelled here, because without it the checks below would be reading
-   our own writes back and calling them the player's. */
-static void pad_refill(unsigned char *base, LONG own_status, LONG own_press,
-                       LONG own_release, int slot, int own_pressure)
-{
-    *(LONG *)(base + DG_PAD_STATUS_OFFSET) = own_status;
-    *(LONG *)(base + DG_PAD_PRESS_OFFSET) = own_press;
-    *(LONG *)(base + DG_PAD_RELEASE_OFFSET) = own_release;
-    memset(base + DG_PAD_PRESSURE_OFFSET, 0, DG_PAD_PRESSURE_COUNT);
-    if (slot >= 0 && slot < DG_PAD_PRESSURE_COUNT)
-        base[DG_PAD_PRESSURE_OFFSET + slot] = (unsigned char)own_pressure;
-}
-
-/* The invariant, checked over the whole buffer rather than field by field:
-   outside the four contract fields nothing changed at all, and inside them
-   nothing was taken away - no bit cleared, no pressure byte lowered. A write
-   that got an offset wrong fails this even if every field check passes. */
-static int pad_only_added(const unsigned char *now, const unsigned char *was,
-                          size_t len)
-{
-    size_t i;
-    for (i = 0; i < len; i++) {
-        /* the pad sits at base+4: status/press/release span [8,20), the
-           twelve pressure bytes [28,40) */
-        if (i >= 8 && i < 20) {
-            if ((now[i] & was[i]) != was[i]) return 0;
-        } else if (i >= 28 && i < 40) {
-            if (now[i] < was[i]) return 0;
-        } else if (now[i] != was[i]) {
-            return 0;
-        }
-    }
-    return 1;
-}
-
-/* ON, and the one rule it lives by: we only ever ADD to the pad. Every check
-   here is a subtraction the write must not make. */
-static int t_the_trigger_only_ever_adds(void)
-{
-    union { ULONGLONG align; unsigned char b[0x300]; } actor;
-    union { ULONGLONG align; unsigned char b[0xD20]; } player;
-    union { ULONGLONG align; unsigned char b[0x40]; } wp_set;
-    union { ULONGLONG align; unsigned char b[0x40]; } padmem, padwas;
-    ULONGLONG arm, arm_slot, pad;
-    ULONGLONG saved_arm = g_b.a.gm_player_arm_body;
-    ULONGLONG saved_pad = g_b.a.player_pad;
-    ULONGLONG saved_mask = g_b.a.pad_weapon;
-    ULONGLONG saved_idx = g_b.a.pad_press_weapon;
-    ULONGLONG saved_player_status = g_b.a.gm_player_status;
-    ULONGLONG native_status = 0x800ULL;
-    LONG saved_state = g_b.fps.state;
-    LONG mask = 0x0008;                 /* a plausible PL_PAD_WEAPON (PAD_R1) */
-    LONG pidx = 4;                      /* a plausible PL_PAD_PRESS_WEAPON */
-    LONG mine = 0x1234;                 /* bits that are the player's, not ours */
-    DG_BRIDGE_FIRE cmd;
-    unsigned char *base;
-    int deep = DG_FIRE_TH;
-    LONG n, n2;
-    int bad = 0;
-
-    memset(&actor, 0, sizeof actor);
-    memset(&player, 0, sizeof player);
-    memset(&wp_set, 0, sizeof wp_set);
-    memset(&padmem, 0, sizeof padmem);
-
-    arm = (ULONGLONG)(ULONG_PTR)(actor.b + 0x60);
-    arm_slot = arm;
-    *(ULONGLONG *)(actor.b + 0x228) = (ULONGLONG)(ULONG_PTR)(player.b + 0xCF4);
-    *(ULONGLONG *)(player.b + 0xBA8) = arm;
-    *(LONG *)(player.b + 0xBB0) = 6;
-    *(LONG *)(player.b + 0xB90) = 1;
-    *(ULONGLONG *)(player.b + 0xBA0) = (ULONGLONG)(ULONG_PTR)wp_set.b;
-    *(LONG *)(wp_set.b + 0x10) = (LONG)DG_FIRE_WP_PRESSURE;
-
-    base = padmem.b + 4;
-    pad = (ULONGLONG)(ULONG_PTR)base;
-    *(LONG *)(padmem.b + 0) = 1;                        /* PlayerPad.enable */
-
-    g_b.a.gm_player_arm_body = (ULONGLONG)(ULONG_PTR)&arm_slot;
-    g_b.a.gm_player_status = (ULONGLONG)(ULONG_PTR)&native_status;
-    *(LONG *)(player.b + 0xC84) = 8;
-    g_b.a.player_pad = pad;
-    g_b.a.pad_weapon = (ULONGLONG)(ULONG_PTR)&mask;
-    g_b.a.pad_press_weapon = (ULONGLONG)(ULONG_PTR)&pidx;
-    g_b.fps.state = DG_FPS_ACTIVE;
-    InterlockedExchange(&g_b.s_late_unsafe, 0);
-    InterlockedExchange(&g_b.armed, 1);
-    InterlockedExchange(&g_b.fire_mode, DG_FIRE_MODE_ON);
-    InterlockedExchange(&g_b.c_ticks, 500);
-    dg_fire_reset(&g_b.fire);
-    InterlockedExchange(&g_b.fire_valid, 0);
-
-    memset(&cmd, 0, sizeof cmd);
-    cmd.click = 0.55;
-    cmd.value = 0.60;
-    cmd.valid = 1;
-    cmd.stream_id = 11;
-
-    /* 0. The mode survives the journey from the marker to the writer. This
-          is not plumbing pedantry: a build once parsed `on`, said so in its
-          session banner, and then had a second gate downgrade it to OFF - so
-          the run wrote nothing and the log did not say why. The banner
-          reports intent; only this reports what the writer will honour. */
-    {
-        DG_BRIDGE_CONFIG cfg;
-        LONG before = g_b.fire_mode;
-        memset(&cfg, 0, sizeof cfg);
-        cfg.fire_mode = DG_FIRE_MODE_ON;
-        dg_bridge_configure(&cfg);
-        if (g_b.fire_mode != DG_FIRE_MODE_ON) bad++;
-        cfg.fire_mode = DG_FIRE_MODE_DRY;
-        dg_bridge_configure(&cfg);
-        if (g_b.fire_mode != DG_FIRE_MODE_DRY) bad++;
-        cfg.fire_mode = 99;                     /* and a typo is never a write */
-        dg_bridge_configure(&cfg);
-        if (g_b.fire_mode != DG_FIRE_MODE_OFF) bad++;
-        InterlockedExchange(&g_b.fire_mode, before);
-    }
-    g_b.fps.state = DG_FPS_ACTIVE;
-    InterlockedExchange(&g_b.armed, 1);
-    InterlockedExchange(&g_b.fire_mode, DG_FIRE_MODE_ON);
-
-    /* None: partial pull, full detent and release must leave the entire pad
-       untouched even in ON mode, including an unequip during an active aim. */
-    {
-        int j;
-        const double values[] = { 0.60, 0.95, 0.0 };
-        *(LONG *)(player.b + 0xB90) = 0;
-        for (j = 0; j < 3; ++j) {
-            pad_refill(base, 0, 0, 0, pidx, 0);
-            padwas = padmem;
-            cmd.value = values[j];
-            cmd.press_seq = 1;
-            cmd.release_seq = j == 2 ? 1 : 0;
-            dg_bridge_fire_now(&cmd);
-            fire_tick(1);
-            if (memcmp(&padmem, &padwas, sizeof padmem) != 0) bad++;
-            if (g_b.fire.state != DG_FIRE_IDLE) bad++;
-        }
-        g_b.fire.state = DG_FIRE_HOLD;
-        cmd.value = 0.95;
-        dg_bridge_fire_now(&cmd);
-        fire_tick(1);
-        if (memcmp(&padmem, &padwas, sizeof padmem) != 0) bad++;
-        if (g_b.fire.state != DG_FIRE_IDLE) bad++;
-        *(LONG *)(player.b + 0xB90) = 1;
-        cmd.value = 0.60;
-        cmd.release_seq = 0;
-        dg_fire_reset(&g_b.fire);
-    }
-
-    /* 1. The draw. The weapon bit into press and status, the analogue travel
-          into pressure[idx], and nothing else in the buffer moved. */
-    pad_refill(base, 0, 0, 0, pidx, 0);
-    padwas = padmem;
-    cmd.press_seq = 1;
-    dg_bridge_fire_now(&cmd);
-    fire_tick(1);
-    if ((*(LONG *)(base + DG_PAD_PRESS_OFFSET) & mask) != mask) bad++;
-    if ((*(LONG *)(base + DG_PAD_STATUS_OFFSET) & mask) != mask) bad++;
-    if (*(LONG *)(base + DG_PAD_RELEASE_OFFSET) != 0) bad++;
-    if (base[DG_PAD_PRESSURE_OFFSET + pidx] != (unsigned char)deep) bad++;
-    /* and never into the cancel window, whatever the trigger travel was */
-    if (base[DG_PAD_PRESSURE_OFFSET + pidx] < DG_FIRE_TH) bad++;
-    if (!pad_only_added(padmem.b, padwas.b, sizeof padmem)) bad++;
-
-    /* 2. Holding, with the player pressing other buttons at the same time.
-          Not one of their bits may go missing. */
-    pad_refill(base, mine, mine, mine, pidx, 0);
-    padwas = padmem;
-    dg_bridge_fire_now(&cmd);
-    fire_tick(1);
-    if ((*(LONG *)(base + DG_PAD_STATUS_OFFSET) & mine) != mine) bad++;
-    if ((*(LONG *)(base + DG_PAD_PRESS_OFFSET) & mine) != mine) bad++;
-    if ((*(LONG *)(base + DG_PAD_RELEASE_OFFSET) & mine) != mine) bad++;
-    if ((*(LONG *)(base + DG_PAD_STATUS_OFFSET) & mask) != mask) bad++;
-    if (!pad_only_added(padmem.b, padwas.b, sizeof padmem)) bad++;
-
-    /* 3. Pressure only ever goes up. The game's own byte is already deeper
-          than ours, so ours is dropped and said so in the log. */
-    pad_refill(base, 0, 0, 0, pidx, 250);
-    padwas = padmem;
-    n = g_b.c_fire_pressure_kept;
-    n2 = g_b.c_fire_wrote_pressure;
-    dg_bridge_fire_now(&cmd);
-    fire_tick(1);
-    if (base[DG_PAD_PRESSURE_OFFSET + pidx] != 250) bad++;
-    if (g_b.c_fire_pressure_kept != n + 1) bad++;
-    if (g_b.c_fire_wrote_pressure != n2) bad++;
-    if (!pad_only_added(padmem.b, padwas.b, sizeof padmem)) bad++;
-
-    /* 4. Crossing the firing detent. Status is withheld, not cleared - it is
-          the shot. The release bit is what tells the Bluepoint layer. */
-    pad_refill(base, 0, 0, 0, pidx, 0);
-    padwas = padmem;
-    cmd.value = 0.9;
-    n = g_b.c_fire_released;
-    dg_bridge_fire_now(&cmd);
-    fire_tick(1);
-    if (g_b.c_fire_released != n + 1) bad++;
-    if (*(LONG *)(base + DG_PAD_STATUS_OFFSET) != 0) bad++;
-    if ((*(LONG *)(base + DG_PAD_RELEASE_OFFSET) & mask) != mask) bad++;
-    if (base[DG_PAD_PRESSURE_OFFSET + pidx] != 0) bad++;
-    if (!pad_only_added(padmem.b, padwas.b, sizeof padmem)) bad++;
-
-    /* 5. The player's own weapon button. Not one byte, not even the fields we
-          would have OR-ed a bit we can see is already there: their input owns
-          the stance and our release would end an aim we did not start. */
-    dg_fire_reset(&g_b.fire);
-    pad_refill(base, mask, 0, 0, pidx, 0);
-    padwas = padmem;
-    cmd.press_seq = 2;
-    cmd.release_seq = 1;
-    n = g_b.c_fire_yielded;
-    dg_bridge_fire_now(&cmd);
-    fire_tick(1);
-    if (g_b.c_fire_yielded != n + 1) bad++;
-    if (memcmp(&padmem, &padwas, sizeof padmem) != 0) bad++;
-
-    /* 6. An index that is not an index into pressure[12]. The bits still go
-          in - they are what fires a pistol - and the array is not touched. */
-    dg_fire_reset(&g_b.fire);
-    pidx = 99;
-    pad_refill(base, 0, 0, 0, -1, 0);
-    padwas = padmem;
-    cmd.press_seq = 3;
-    n = g_b.c_fire_no_index;
-    dg_bridge_fire_now(&cmd);
-    fire_tick(1);
-    if (g_b.c_fire_no_index != n + 1) bad++;
-    if ((*(LONG *)(base + DG_PAD_STATUS_OFFSET) & mask) != mask) bad++;
-    if (memcmp(base + DG_PAD_PRESSURE_OFFSET, padwas.b + 4 +
-               DG_PAD_PRESSURE_OFFSET, DG_PAD_PRESSURE_COUNT) != 0) bad++;
-    if (!pad_only_added(padmem.b, padwas.b, sizeof padmem)) bad++;
-    pidx = 4;
-
-    /* 7. And the same tick in DRY, which is the whole claim about DRY: ON and
-          DRY differ by the write and by nothing else. */
-    dg_fire_reset(&g_b.fire);
-    InterlockedExchange(&g_b.fire_mode, DG_FIRE_MODE_DRY);
-    pad_refill(base, 0, 0, 0, pidx, 0);
-    padwas = padmem;
-    cmd.press_seq = 4;
-    n = g_b.c_fire_drawn;
-    dg_bridge_fire_now(&cmd);
-    fire_tick(1);
-    if (g_b.c_fire_drawn != n + 1) bad++;       /* it still decided to draw */
-    if (memcmp(&padmem, &padwas, sizeof padmem) != 0) bad++;   /* and wrote nothing */
-
-    g_b.a.gm_player_arm_body = saved_arm;
-    g_b.a.gm_player_status = saved_player_status;
-    g_b.a.player_pad = saved_pad;
-    g_b.a.pad_weapon = saved_mask;
-    g_b.a.pad_press_weapon = saved_idx;
-    g_b.fps.state = saved_state;
-    InterlockedExchange(&g_b.armed, 0);
-    InterlockedExchange(&g_b.fire_mode, DG_FIRE_MODE_OFF);
-    InterlockedExchange(&g_b.fire_valid, 0);
-    InterlockedExchange(&g_b.c_ticks, 0);
-    dg_fire_reset(&g_b.fire);
-
-    printf("  %-6s trigger only ever adds: a draw sets the weapon bit in press "
-           "and status and the travel in pressure[idx], a hold leaves every "
-           "other button the player is pressing intact, a deeper byte of "
-           "theirs survives ours, letting go withholds status rather than "
-           "clearing it, their own weapon button stands us down to not one "
-           "byte, a bad pressure index still fires a pistol, the same tick "
-           "in DRY writes nothing, and the mode the marker asked for is the "
-           "mode the writer honours\n",
-           bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-/* The kick, where it meets the bridge. dg_recoil already answers for the shape
-   of the envelope; what can only be checked here is that a shot reaches it,
-   that it advances exactly once per game tick, and that it comes home even
-   when everything else has been taken away. */
-static int t_the_kick_is_ours_and_comes_home(void)
-{
-    union { ULONGLONG align; unsigned char b[0x300]; } actor;
-    union { ULONGLONG align; unsigned char b[0xD20]; } player;
-    union { ULONGLONG align; unsigned char b[0x40]; } wp_set;
-    union { ULONGLONG align; unsigned char b[0x40]; } padmem;
-    ULONGLONG arm, arm_slot, pad;
-    ULONGLONG saved_arm = g_b.a.gm_player_arm_body;
-    ULONGLONG saved_pad = g_b.a.player_pad;
-    ULONGLONG saved_mask = g_b.a.pad_weapon;
-    ULONGLONG saved_idx = g_b.a.pad_press_weapon;
-    ULONGLONG saved_player_status = g_b.a.gm_player_status;
-    ULONGLONG native_status = 0x800ULL;
-    LONG saved_state = g_b.fps.state;
-    LONG mask = 0x0008, pidx = 4;
-    DG_BRIDGE_FIRE cmd;
-    unsigned char *base;
-    DG_RECOIL mirror;
-    LONG n, released;
-    int bad = 0, i;
-
-    memset(&actor, 0, sizeof actor);
-    memset(&player, 0, sizeof player);
-    memset(&wp_set, 0, sizeof wp_set);
-    memset(&padmem, 0, sizeof padmem);
-
-    arm = (ULONGLONG)(ULONG_PTR)(actor.b + 0x60);
-    arm_slot = arm;
-    *(ULONGLONG *)(actor.b + 0x228) = (ULONGLONG)(ULONG_PTR)(player.b + 0xCF4);
-    *(ULONGLONG *)(player.b + 0xBA8) = arm;
-    *(LONG *)(player.b + 0xBB0) = 6;
-    *(LONG *)(player.b + 0xB90) = 1;
-    *(ULONGLONG *)(player.b + 0xBA0) = (ULONGLONG)(ULONG_PTR)wp_set.b;
-    *(LONG *)(wp_set.b + 0x10) = (LONG)DG_FIRE_WP_PRESSURE;
-
-    base = padmem.b + 4;
-    pad = (ULONGLONG)(ULONG_PTR)base;
-    *(LONG *)(padmem.b + 0) = 1;
-
-    g_b.a.gm_player_arm_body = (ULONGLONG)(ULONG_PTR)&arm_slot;
-    g_b.a.gm_player_status = (ULONGLONG)(ULONG_PTR)&native_status;
-    *(LONG *)(player.b + 0xC84) = 8;
-    g_b.a.player_pad = pad;
-    g_b.a.pad_weapon = (ULONGLONG)(ULONG_PTR)&mask;
-    g_b.a.pad_press_weapon = (ULONGLONG)(ULONG_PTR)&pidx;
-    g_b.fps.state = DG_FPS_ACTIVE;
-    InterlockedExchange(&g_b.s_late_unsafe, 0);
-    InterlockedExchange(&g_b.armed, 1);
-    InterlockedExchange(&g_b.fire_mode, DG_FIRE_MODE_ON);
-    InterlockedExchange(&g_b.recoil_climb_mdeg, 6000);
-    InterlockedExchange(&g_b.recoil_push_um, 18000);
-    InterlockedExchange(&g_b.c_ticks, 500);
-    dg_fire_reset(&g_b.fire);
-    dg_recoil_reset(&g_b.recoil);
-    InterlockedExchange(&g_b.s_recoil_amp, 0);
-    InterlockedExchange(&g_b.fire_valid, 0);
-
-    memset(&cmd, 0, sizeof cmd);
-    cmd.click = 0.55;
-    cmd.value = 0.60;
-    cmd.valid = 1;
-    cmd.stream_id = 21;
-
-    /* 1. A shot reaches the spring, and exactly one impulse comes out of it.
-          Five camera-seam offers of the same pull are still one round. The
-          counters are session-wide and an earlier category has already fired
-          in ON mode, so every check below is a delta. */
-    pad_refill(base, 0, 0, 0, pidx, 0);
-    cmd.press_seq = 1;
-    n = g_b.c_recoil_kicks;
-    for (i = 0; i < 5; i++) dg_bridge_fire_now(&cmd);
-    fire_tick(1);                                   /* draws */
-    if (g_b.c_recoil_kicks != n) bad++;             /* aiming is not firing */
-    if (InterlockedCompareExchange(&g_b.s_recoil_amp, 0, 0) != 0) bad++;
-
-    pad_refill(base, 0, 0, 0, pidx, 0);
-    cmd.value = 0.9;
-    n = g_b.c_recoil_kicks;
-    for (i = 0; i < 5; i++) dg_bridge_fire_now(&cmd);
-    fire_tick(1);                                   /* the shot */
-    if (g_b.c_recoil_kicks != n + 1) bad++;
-
-    /* 2. And it advances exactly once per game tick. This is the whole reason
-          the spring lives on the tick seam: the camera seam runs about five
-          times a tick, and an envelope stepped there would run five times too
-          fast. Mirrored against dg_recoil itself, tick for tick. */
-    dg_recoil_reset(&mirror);
-    dg_recoil_fire(&mirror, 1.0);
-    dg_recoil_step(&mirror);
-    for (i = 0; i < 25; i++) {
-        LONG want = (LONG)(dg_recoil_amplitude(&mirror) * 1000.0 + 0.5);
-        if (InterlockedCompareExchange(&g_b.s_recoil_amp, 0, 0) != want) {
-            bad++;
-            break;
-        }
-        /* several camera-seam offers inside the one tick, exactly as the real
-           seam makes them - none of which may move the envelope */
-        dg_bridge_fire_now(&cmd);
-        dg_bridge_fire_now(&cmd);
-        dg_bridge_fire_now(&cmd);
-        pad_refill(base, 0, 0, 0, pidx, 0);
-        fire_tick(1);
-        dg_recoil_step(&mirror);
-    }
-
-    /* 3. It comes home even when everything else has been taken away. A hand
-          that is mid-recoil when first person ends still has to settle. */
-    dg_fire_reset(&g_b.fire);
-    dg_recoil_reset(&g_b.recoil);
-    dg_recoil_fire(&g_b.recoil, 1.0);
-    for (i = 0; i < 3; i++) dg_recoil_step(&g_b.recoil);
-    /* ...and the spring has to be genuinely moving before the gate shuts, or
-       "it came home" would be true of a spring that never left. */
-    if (!(dg_recoil_amplitude(&g_b.recoil) > 0.5)) bad++;
-    g_b.fps.state = DG_FPS_OFF;
-    for (i = 0; i < DG_RECOIL_SETTLE_TICKS; i++) fire_tick(0);
-    if (InterlockedCompareExchange(&g_b.s_recoil_amp, 0, 0) != 0) bad++;
-    if (dg_recoil_amplitude(&g_b.recoil) != 0.0) bad++;
-    g_b.fps.state = DG_FPS_ACTIVE;
-
-    /* 4. DRY does not kick. No round left the barrel, so a hand that jumped
-          would be this build lying about what happened. */
-    dg_fire_reset(&g_b.fire);
-    dg_recoil_reset(&g_b.recoil);
-    InterlockedExchange(&g_b.fire_mode, DG_FIRE_MODE_DRY);
-    n = g_b.c_recoil_kicks;
-    released = g_b.c_fire_released;
-    pad_refill(base, 0, 0, 0, pidx, 0);
-    cmd.press_seq = 2;
-    cmd.release_seq = 1;
-    dg_bridge_fire_now(&cmd);
-    fire_tick(1);
-    pad_refill(base, 0, 0, 0, pidx, 0);
-    cmd.value = 0.9;
-    dg_bridge_fire_now(&cmd);
-    fire_tick(1);
-    if (g_b.c_fire_released != released + 1) bad++;  /* it did release */
-    if (g_b.c_recoil_kicks != n) bad++;              /* and still did not kick */
-    if (InterlockedCompareExchange(&g_b.s_recoil_amp, 0, 0) != 0) bad++;
-
-    /* 5. OFF forgets a kick in flight rather than leaving it parked. */
-    dg_recoil_fire(&g_b.recoil, 1.0);
-    dg_recoil_step(&g_b.recoil);
-    InterlockedExchange(&g_b.fire_mode, DG_FIRE_MODE_OFF);
-    fire_tick(1);
-    if (dg_recoil_amplitude(&g_b.recoil) != 0.0) bad++;
-    if (InterlockedCompareExchange(&g_b.s_recoil_amp, 0, 0) != 0) bad++;
-
-    /* 6. And the marker cannot ask for a kick that points the wrong way or
-          folds the wrist. */
-    {
-        DG_BRIDGE_CONFIG cfg;
-        memset(&cfg, 0, sizeof cfg);
-        cfg.recoil_climb_mdeg = -5000;
-        cfg.recoil_push_um = -5000;
-        dg_bridge_configure(&cfg);
-        if (g_b.recoil_climb_mdeg != 0 || g_b.recoil_push_um != 0) bad++;
-        cfg.recoil_climb_mdeg = 999999;
-        cfg.recoil_push_um = 999999;
-        dg_bridge_configure(&cfg);
-        if (g_b.recoil_climb_mdeg > 30000) bad++;
-        if (g_b.recoil_push_um > 120000) bad++;
-        /* and turning it off drops a spring that is still moving */
-        dg_recoil_fire(&g_b.recoil, 1.0);
-        dg_recoil_step(&g_b.recoil);
-        cfg.recoil_climb_mdeg = 0;
-        cfg.recoil_push_um = 0;
-        dg_bridge_configure(&cfg);
-        if (dg_recoil_amplitude(&g_b.recoil) != 0.0) bad++;
-    }
-
-    g_b.a.gm_player_arm_body = saved_arm;
-    g_b.a.gm_player_status = saved_player_status;
-    g_b.a.player_pad = saved_pad;
-    g_b.a.pad_weapon = saved_mask;
-    g_b.a.pad_press_weapon = saved_idx;
-    g_b.fps.state = saved_state;
-    InterlockedExchange(&g_b.armed, 0);
-    InterlockedExchange(&g_b.fire_mode, DG_FIRE_MODE_OFF);
-    InterlockedExchange(&g_b.recoil_climb_mdeg, 0);
-    InterlockedExchange(&g_b.recoil_push_um, 0);
-    InterlockedExchange(&g_b.fire_valid, 0);
-    InterlockedExchange(&g_b.c_ticks, 0);
-    dg_fire_reset(&g_b.fire);
-    dg_recoil_reset(&g_b.recoil);
-    InterlockedExchange(&g_b.s_recoil_amp, 0);
-
-    printf("  %-6s the kick is ours and comes home: a shot is one impulse and "
-           "aiming is none, the envelope advances once per game tick however "
-           "many camera seams offer the same pull, it settles to exactly zero "
-           "after first person ends, DRY never kicks because nothing was "
-           "fired, and the marker cannot ask for a kick that points downward "
-           "or folds the wrist\n",
-           bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-static int t_hand_follows_the_controller(void)
-{
-    enum { STRIDE = 0x180, JOINTS = 7 };
-    static unsigned char blob[DG_OBJS_ARRAY + JOINTS * STRIDE];
-    static unsigned char obj[0x40], mc[0x70];
-    static float adjust[55 * 4];
-    ULONGLONG arm = (ULONGLONG)(ULONG_PTR)obj;
-    DG_BRIDGE_ARM_TARGET target;
-    float *hand_m;
-    double root_q[4], root_rows[3][3], anim[4], ctrl0[4], turn[4], ctrl1[4];
-    double delta_view[4], delta_world[4], expect[4], achieved[4];
-    double setpos_hand[4], pulled[3];
-    short command[3];
-    LONG command_tick, command_pair;
-    LONG written;
-    int j, k, r, bad = 0;
-
-    memset(blob, 0, sizeof blob);
-    memset(obj, 0, sizeof obj);
-    memset(mc, 0, sizeof mc);
-    memset(adjust, 0, sizeof adjust);
-    adjust[6 * 4 + 3] = 1.0f; /* SetPos ran and supplied identity. */
-    *(ULONGLONG *)(obj + 0x00) = (ULONGLONG)(ULONG_PTR)blob;
-    *(ULONGLONG *)(obj + 0x08) = (ULONGLONG)(ULONG_PTR)mc;
-    *(LONG *)(mc + 0x14) = 55;
-    *(ULONGLONG *)(mc + 0x48) = (ULONGLONG)(ULONG_PTR)adjust;
-    for (j = 0; j < JOINTS; j++) {
-        float *m = (float *)(blob + DG_OBJS_ARRAY + j * STRIDE);
-        m[0] = m[5] = m[10] = m[15] = 1.0f;
-    }
-
-    /* A rig root that is NOT the identity, because the whole question this
-       test exists for is whether the controller's rotation is carried into
-       the arm's frame rather than assumed to already be in it. */
-    th_axis(0.0, 1.0, 0.0, 37.0, root_q);
-    th_write_basis((float *)(blob + DG_OBJS_ARRAY), root_q);
-    ((float *)(blob + DG_OBJS_ARRAY))[12] = 40.0f;
-    ((float *)(blob + DG_OBJS_ARRAY))[13] = -10.0f;
-    ((float *)(blob + DG_OBJS_ARRAY))[14] = 25.0f;
-    for (r = 0; r < 3; r++)
-        for (k = 0; k < 3; k++)
-            root_rows[r][k] =
-                (double)((float *)(blob + DG_OBJS_ARRAY))[r * 4 + k];
-
-    /* The same 200/200 arm the lifecycle test uses, so the mapper and solver
-       have something legal to chew on; this test is only about joint 6. */
-    ((float *)(blob + DG_OBJS_ARRAY + 3 * STRIDE))[14] = 100.0f;
-    ((float *)(blob + DG_OBJS_ARRAY + 5 * STRIDE))[12] = 200.0f;
-    ((float *)(blob + DG_OBJS_ARRAY + 6 * STRIDE))[12] = 300.0f;
-    ((float *)(blob + DG_OBJS_ARRAY + 6 * STRIDE))[13] = 173.20508f;
-    hand_m = (float *)(blob + DG_OBJS_ARRAY + 6 * STRIDE);
-    th_axis(0.3, 0.2, -0.9, 64.0, anim);
-    th_write_basis(hand_m, anim);
-    hand_m[12] = 300.0f;
-    hand_m[13] = 173.20508f;
-    hand_m[14] = 0.0f;
-
-    InterlockedExchange(&g_b.skel_stride, STRIDE);
-    InterlockedExchange(&g_b.skel_parents_read, JOINTS);
-    InterlockedExchange(&g_b.skel_region_end, (LONG)sizeof blob);
-    for (j = 0; j < JOINTS; j++) InterlockedExchange(&g_b.skel_parents[j], 0);
-    InterlockedExchange(&g_b.skel_parents[3], 2);
-    InterlockedExchange(&g_b.skel_parents[4], 3);
-    InterlockedExchange(&g_b.skel_parents[5], 4);
-    InterlockedExchange(&g_b.skel_parents[6], 5);
-    g_b.a.gm_player_arm_body = (ULONGLONG)(ULONG_PTR)&arm;
-    InterlockedExchange(&g_b.ik_active, 0);
-    InterlockedExchange(&g_b.c_ticks, 0);
-    InterlockedExchange(&g_b.c_arm_hand_written, 0);
-    InterlockedExchange(&g_b.c_arm_hand_refused, 0);
-    InterlockedExchange(&g_b.c_arm_hand_measured, 0);
-    InterlockedExchange(&g_b.s_arm_hand_worst, f2l(0.0f));
-    arm_map_forget();
-
-    /* The basis read has to survive the round trip through a float matrix,
-       or every angle below is measuring the wrong thing. */
-    {
-        double read_back[4];
-        if (!dg_ik_basis_quat((const double (*)[3])root_rows, read_back)) bad++;
-        if (th_angle_between(read_back, root_q) > 1e-3) bad++;
-    }
-
-    th_axis(0.5, -0.4, 0.76, 23.0, ctrl0);
-    memset(&target, 0, sizeof target);
-    target.write = 1;
-    target.hand_write = 1;
-    target.weight = 1.0;
-    target.stream_id = 9;
-    target.pair_id = 300;
-    target.wrist_view[0] = 770.0;
-    /* A view facing, so the DGREC4 facing record has something to hold. */
-    target.head_yaw_valid = 1;
-    target.head_yaw_rad = 0.25;
-    for (k = 0; k < 4; k++) target.hand_quat[k] = ctrl0[k];
-
-    /* Acquisition, two settle ticks, then the calibration pair. */
-    arm_ik_now(arm, &target);
-    InterlockedExchange(&g_b.c_ticks, DG_ADJ_SETTLE_TICKS + 1);
-    target.pair_id++;
-    arm_ik_now(arm, &target);
-    if (!g_b.hand_have_rest) bad++;
-    if (*(ULONGLONG *)(mc + 0x38) != 0) bad++;
-
-    /* The rest pose is stored in the ROOT frame, so it must not be the world
-       rotation it was read as - otherwise the rebase is a no-op and this test
-       would pass on a build that never converted anything. */
-    if (th_angle_between(g_b.hand_rest_view, anim) < 1.0) bad++;
-
-    /* Now turn the controller by a known amount and let one pair write. */
-    th_axis(0.0, 0.0, 1.0, 50.0, turn);
-    dg_ik_quat_mul(turn, ctrl0, ctrl1);
-    for (k = 0; k < 4; k++) target.hand_quat[k] = ctrl1[k];
-    written = g_b.c_arm_hand_written;
-    InterlockedIncrement(&g_b.c_ticks);
-    target.pair_id++;
-    arm_ik_now(arm, &target);
-    if (g_b.c_arm_hand_written != written + 1) bad++;
-    if (g_b.c_arm_hand_refused != 0) bad++;
-    /* The recorder's arm half (DGREC4, 2026-09-03): the pass that published
-       this pair left the joints it solved on, the target it chased, the
-       adjusts it wrote and the envelope's axis in the pair record - the
-       fields whose absence kept the run-14 wrist question at the headset.
-       The clean forearm keeps the rig's 200 mm whatever the adjusts did,
-       the target is the one the meter published, the axis and the adjusts
-       are unit, and a 50 degree ask fits the channel whole. */
-    {
-        const DG_REC_PAIRSTATE *pp = &g_b.rec_pair;
-        double fl, n;
-        float tf;
-        LONG tv;
-        if (!(pp->flags & DG_REC_PAIR_F_ARM)) bad++;
-        if (!(pp->flags & DG_REC_PAIR_F_ENVELOPE)) bad++;
-        if (!(pp->flags & DG_REC_PAIR_F_FACING)) bad++;
-        fl = sqrt(((double)pp->joint_world[3][0] - pp->joint_world[2][0]) *
-                  ((double)pp->joint_world[3][0] - pp->joint_world[2][0]) +
-                  ((double)pp->joint_world[3][1] - pp->joint_world[2][1]) *
-                  ((double)pp->joint_world[3][1] - pp->joint_world[2][1]) +
-                  ((double)pp->joint_world[3][2] - pp->joint_world[2][2]) *
-                  ((double)pp->joint_world[3][2] - pp->joint_world[2][2]));
-        if (fabs(fl - 200.0) > 0.05) bad++;
-        for (k = 0; k < 3; k++) {
-            tv = g_b.s_arm_ik_target[k];
-            memcpy(&tf, &tv, sizeof tf);
-            if (tf != pp->ik_target[k]) bad++;
-        }
-        n = sqrt((double)pp->fore_axis[0] * pp->fore_axis[0] +
-                 (double)pp->fore_axis[1] * pp->fore_axis[1] +
-                 (double)pp->fore_axis[2] * pp->fore_axis[2]);
-        if (fabs(n - 1.0) > 1e-4) bad++;
-        n = sqrt((double)pp->q4_world[0] * pp->q4_world[0] +
-                 (double)pp->q4_world[1] * pp->q4_world[1] +
-                 (double)pp->q4_world[2] * pp->q4_world[2] +
-                 (double)pp->q4_world[3] * pp->q4_world[3]);
-        if (fabs(n - 1.0) > 1e-4) bad++;
-        if (pp->fit_frac != 1.0f) bad++;
-        if (fabs((double)pp->head_yaw_deg - 0.25 * 180.0 /
-                 3.14159265358979323846) > 1e-3) bad++;
-        /* The solver's wrist is where the IK put it: within the rig's reach
-           of the shoulder (joint 4) and no further than the target. */
-        n = sqrt(((double)pp->ik_wrist[0] - pp->joint_world[1][0]) *
-                 ((double)pp->ik_wrist[0] - pp->joint_world[1][0]) +
-                 ((double)pp->ik_wrist[1] - pp->joint_world[1][1]) *
-                 ((double)pp->ik_wrist[1] - pp->joint_world[1][1]) +
-                 ((double)pp->ik_wrist[2] - pp->joint_world[1][2]) *
-                 ((double)pp->ik_wrist[2] - pp->joint_world[1][2]));
-        if (!(n > 0.0 && n <= 400.0 * 0.99 + 1e-6)) bad++;
-    }
-    if (*(ULONGLONG *)(mc + 0x38) != ((1ULL << 4) | (1ULL << 5))) bad++;
-    if (g_b.ik_owned_mask != ((1ULL << 4) | (1ULL << 5))) bad++;
-    /* Joint 6 remains byte-for-byte SetPos's; the result crossed seams as an
-       SVECTOR command instead. */
-    if (adjust[6 * 4 + 0] != 0.0f || adjust[6 * 4 + 1] != 0.0f ||
-        adjust[6 * 4 + 2] != 0.0f || adjust[6 * 4 + 3] != 1.0f) bad++;
-    if (!hand_command_read(command, &command_tick, &command_pair)) bad++;
-    if (command_pair != (LONG)target.pair_id) bad++;
-    for (k = 0; k < 3; k++) pulled[k] = (double)th_engine_pull((int)command[k]);
-    set_pos_quat(pulled, setpos_hand);
-    if (fabs(setpos_hand[0]) + fabs(setpos_hand[1]) + fabs(setpos_hand[2]) <
-        1.0e-4) bad++;
-
-    /* The previous hand adjustment comes from SetPos's live slot, not our
-       q4/q5 cache. If this input is ignored, the two solves below collapse to
-       the same answer and the test catches the old feedback bug. */
-    {
-        double aq4[4], aq5[4], id[4] = { 0.0, 0.0, 0.0, 1.0 };
-        double world_fb[4], adjust_fb[4], h0[4], h1[4], d0[4], d1[4];
-        for (k = 0; k < 4; k++) {
-            aq4[k] = (double)g_b.arm_map_cached_adjust[k];
-            aq5[k] = (double)g_b.arm_map_cached_adjust[4 + k];
-        }
-        th_axis(1.0, 0.0, 0.0, 20.0, world_fb);
-        world_quat_to_adjust(&ADJ_FRAME_LEGACY, world_fb, adjust_fb);
-        if (!arm_hand_solve(root_q, root_q, anim, aq4, aq5, id, ctrl1, 1, 1.0,
-                            h0, d0, NULL) ||
-            !arm_hand_solve(root_q, root_q, anim, aq4, aq5, adjust_fb, ctrl1, 1, 1.0,
-                            h1, d1, NULL) || th_angle_between(h0, h1) < 10.0) bad++;
-        {
-            double saved_ctrl[4], saved_rest[4], absolute[4];
-            memcpy(saved_ctrl,g_b.hand_ctrl_rest,sizeof saved_ctrl);
-            memcpy(saved_rest,g_b.hand_rest_view,sizeof saved_rest);
-            th_axis(0.0,1.0,0.0,35.0,absolute);
-            if (!arm_hand_solve(root_q,root_q,anim,aq4,aq5,id,ctrl1,1,1.0,h0,d0,absolute)) bad++;
-            th_axis(1.0,0.0,0.0,75.0,g_b.hand_ctrl_rest);
-            th_axis(0.0,0.0,1.0,-60.0,g_b.hand_rest_view);
-            if (!arm_hand_solve(root_q,root_q,anim,aq4,aq5,id,ctrl1,1,1.0,h1,d1,absolute) ||
-                th_angle_between(h0,h1)>1e-4 || th_angle_between(d0,absolute)>1e-4 ||
-                th_angle_between(d1,absolute)>1e-4) bad++;
-            memcpy(g_b.hand_ctrl_rest,saved_ctrl,sizeof saved_ctrl);
-            memcpy(g_b.hand_rest_view,saved_rest,sizeof saved_rest);
-        }
-    }
-
-    /* The independent expectation: the controller's turn since calibration,
-       carried into the arm's frame, applied on top of the pose the hand was
-       animated into at calibration. Nothing here goes through the solver. */
-    dg_ik_quat_conj(ctrl0, delta_view);
-    dg_ik_quat_mul(ctrl1, delta_view, delta_view);
-    quat_rebase(root_q, delta_view, delta_world);
-    if (!dg_ik_quat_normalize(delta_world)) bad++;
-    dg_ik_quat_mul(delta_world, anim, expect);
-    if (!th_next_hand(anim, setpos_hand, achieved)) bad++;
-    /* The command crosses the independently tested PS2-angle quantiser and
-       is now split over two float joints. Its measured worst round-trip floor
-       is 0.0962 degrees, so 0.10 is the smallest honest integration bound. */
-    if (th_angle_between(achieved, expect) > 0.10) bad++;
-
-    /* A 50 degree turn of the controller has to be a 50 degree turn of the
-       hand: a rebase that silently dropped the rotation would still satisfy
-       the line above if `expect` were computed the same wrong way. */
-    if (fabs(th_angle_between(achieved, anim) - 50.0) > 0.10) bad++;
-
-    /* Play that pass into the matrices and let the next pair measure itself.
-       The residual is the number the live run will be judged on. */
-    th_write_basis(hand_m, achieved);
-    hand_m[12] = 300.0f;
-    hand_m[13] = 173.20508f;
-    hand_m[14] = 0.0f;
-    for (k = 0; k < 4; k++) adjust[6 * 4 + k] = (float)setpos_hand[k];
-    InterlockedIncrement(&g_b.c_ticks);
-    target.pair_id++;
-    arm_ik_now(arm, &target);
-    if (g_b.c_arm_hand_measured < 1) bad++;
-    {
-        LONG v = g_b.s_arm_hand_residual;
-        float miss;
-        memcpy(&miss, &v, sizeof miss);
-        if (!(miss >= 0.0f) || miss > 0.10f) bad++;
-    }
-
-    /* And a residual that cannot tell a hit from a miss is not a measurement.
-       Put the hand somewhere it was never asked to be and require the next
-       pair to say so. */
-    {
-        double wrong[4], off[4];
-        th_axis(0.0, 1.0, 0.0, 20.0, off);
-        dg_ik_quat_mul(off, achieved, wrong);
-        for (k = 0; k < 4; k++) g_b.hand_desired[k] = achieved[k];
-        g_b.hand_have_desired = 1;
-        th_write_basis(hand_m, wrong);
-        hand_m[12] = 300.0f;
-        hand_m[13] = 173.20508f;
-        hand_m[14] = 0.0f;
-        InterlockedIncrement(&g_b.c_ticks);
-        target.pair_id++;
-        arm_ik_now(arm, &target);
-        {
-            LONG v = g_b.s_arm_hand_residual;
-            float miss;
-            memcpy(&miss, &v, sizeof miss);
-            if (fabs((double)miss - 20.0) > 0.05) bad++;
-        }
-
-        /* The offset-drift discriminator on that same wrong pose: the same
-           wrong offset on two consecutive measured pairs is a CONSTANT frame
-           error and must read near-zero drift; a changed offset must read as
-           exactly the angle between the two offsets. This is the number that
-           picks between a per-weapon hand frame and a composition error. */
-        {
-            double wrong2[4], off2[4], offq1[4], offq2[4], inv[4];
-            double expected;
-            LONG v2;
-            float d;
-            for (k = 0; k < 4; k++) g_b.hand_desired[k] = achieved[k];
-            g_b.hand_have_desired = 1;
-            InterlockedIncrement(&g_b.c_ticks);
-            target.pair_id++;
-            arm_ik_now(arm, &target);
-            v2 = g_b.s_arm_hand_off_drift;
-            memcpy(&d, &v2, sizeof d);
-            if (!(d >= 0.0f) || d > 0.05f) bad++;
-
-            th_axis(1.0, 0.0, 0.0, 20.0, off2);
-            dg_ik_quat_mul(off2, achieved, wrong2);
-            th_write_basis(hand_m, wrong2);
-            hand_m[12] = 300.0f;
-            hand_m[13] = 173.20508f;
-            hand_m[14] = 0.0f;
-            for (k = 0; k < 4; k++) g_b.hand_desired[k] = achieved[k];
-            g_b.hand_have_desired = 1;
-            InterlockedIncrement(&g_b.c_ticks);
-            target.pair_id++;
-            arm_ik_now(arm, &target);
-            dg_ik_quat_conj(achieved, inv);
-            dg_ik_quat_mul(wrong, inv, offq1);
-            dg_ik_quat_mul(wrong2, inv, offq2);
-            expected = th_angle_between(offq1, offq2);
-            if (expected < 10.0) bad++;
-            v2 = g_b.s_arm_hand_off_drift;
-            memcpy(&d, &v2, sizeof d);
-            if (fabs((double)d - expected) > 0.05) bad++;
-            v2 = g_b.s_arm_hand_off_drift_worst;
-            memcpy(&d, &v2, sizeof d);
-            if ((double)d < expected - 0.05) bad++;
-        }
-        th_write_basis(hand_m, achieved);
-        hand_m[12] = 300.0f;
-        hand_m[13] = 173.20508f;
-        hand_m[14] = 0.0f;
-    }
-
-    /* Four zero floats are the instrument's "SetPos did not run" sentinel,
-       not a quaternion and not a 0.98 conversion miss. It must suppress the
-       publication while joints 4/5 remain legal. */
-    {
-        LONG no_setpos = g_b.c_arm_hand_no_setpos;
-        for (k = 0; k < 4; k++) adjust[6 * 4 + k] = 0.0f;
-        InterlockedIncrement(&g_b.c_ticks);
-        target.pair_id++;
-        arm_ik_now(arm, &target);
-        if (g_b.c_arm_hand_no_setpos != no_setpos + 1) bad++;
-        if (hand_command_read(command, NULL, NULL)) bad++;
-        if (*(ULONGLONG *)(mc + 0x38) != ((1ULL << 4) | (1ULL << 5))) bad++;
-        for (k = 0; k < 4; k++) adjust[6 * 4 + k] = (float)setpos_hand[k];
-    }
-
-    /* The removal witness: a pair that arrives with any of our adjust_flag
-       bits gone means the hierarchy is pure animation and the removal would
-       un-rotate a rotation that was never applied. It must be counted - one
-       missing bit is enough - and the pair's own write puts the bits back,
-       so the very next pair counts nothing. */
-    {
-        LONG lost = g_b.c_arm_adjust_bits_lost;
-        *(ULONGLONG *)(mc + 0x38) = (1ULL << 4);
-        InterlockedIncrement(&g_b.c_ticks);
-        target.pair_id++;
-        arm_ik_now(arm, &target);
-        if (g_b.c_arm_adjust_bits_lost != lost + 1) bad++;
-        if (*(ULONGLONG *)(mc + 0x38) != ((1ULL << 4) | (1ULL << 5))) bad++;
-        InterlockedIncrement(&g_b.c_ticks);
-        target.pair_id++;
-        arm_ik_now(arm, &target);
-        if (g_b.c_arm_adjust_bits_lost != lost + 1) bad++;
-    }
-
-    /* The slot echo: the residual's measurement cut at SetPos's slot. This
-       simplified rig does not carry the full joint-4/5 inheritance the live
-       hierarchy has, so consecutive commands here legitimately differ by a
-       few degrees and no absolute smallness is asserted after choreography.
-       What IS the instrument's contract: a slot that echoes the previous
-       command exactly must read clean, and a slot holding something the
-       previous pair never published must be measured at its true angle and
-       counted - or the live discriminator cannot tell a conversion the game
-       refused from a hierarchy that misapplied it. */
-    {
-        LONG dirty0;
-        LONG v;
-        float e;
-        double off[4], poison[4];
-
-        for (k = 0; k < 4; k++)
-            adjust[6 * 4 + k] = (float)g_b.hand_last_cmd[k];
-        InterlockedIncrement(&g_b.c_ticks);
-        target.pair_id++;
-        arm_ik_now(arm, &target);
-        dirty0 = g_b.c_arm_hand_slot_dirty;
-        v = g_b.s_arm_hand_slot_echo;
-        memcpy(&e, &v, sizeof e);
-        if (!(e >= 0.0f) || e > 0.01f) bad++;
-
-        /* And through the game's own reconstruction: read the command just
-           published, put it through the modeled pull and conversion, and the
-           echo must be the angle grid and nothing more. This is the case
-           that pins WHAT was stored - only the adjust quaternion whose
-           angles actually left can echo clean through the real path. */
-        {
-            short cx[3];
-            double pulled2[3], slot2[4];
-            if (!hand_command_read(cx, NULL, NULL)) bad++;
-            for (k = 0; k < 3; k++)
-                pulled2[k] = (double)th_engine_pull((int)cx[k]);
-            set_pos_quat(pulled2, slot2);
-            for (k = 0; k < 4; k++) adjust[6 * 4 + k] = (float)slot2[k];
-            InterlockedIncrement(&g_b.c_ticks);
-            target.pair_id++;
-            arm_ik_now(arm, &target);
-            v = g_b.s_arm_hand_slot_echo;
-            memcpy(&e, &v, sizeof e);
-            /* 0.0962 is the measured quantiser round-trip floor; a command
-               whose vy rounds to zero is pushed one unit off it (0.088 deg,
-               the branch-pinning clamp) on top. 0.20 covers both and is
-               still 25 times under the dirty threshold. */
-            if (!(e >= 0.0f) || e > 0.20f) bad++;
-            if (g_b.c_arm_hand_slot_dirty != dirty0) bad++;
-        }
-
-        th_axis(0.0, 0.0, 1.0, 90.0, off);
-        dg_ik_quat_mul(off, g_b.hand_last_cmd, poison);
-        for (k = 0; k < 4; k++) adjust[6 * 4 + k] = (float)poison[k];
-        InterlockedIncrement(&g_b.c_ticks);
-        target.pair_id++;
-        arm_ik_now(arm, &target);
-        v = g_b.s_arm_hand_slot_echo;
-        memcpy(&e, &v, sizeof e);
-        if (fabs((double)e - 90.0) > 0.1) bad++;
-        if (g_b.c_arm_hand_slot_dirty != dirty0 + 1) bad++;
-        v = g_b.s_arm_hand_slot_echo_worst;
-        memcpy(&e, &v, sizeof e);
-        if (e < 89.9f) bad++;
-        for (k = 0; k < 4; k++) adjust[6 * 4 + k] = (float)setpos_hand[k];
-    }
-
-    /* The automatic B-press. The threshold first, as arithmetic: a boundary
-       gap is still a blip, one tick past it is a scene change. */
-    if (rest_stale_after_gap(0, DG_HAND_REST_STALE_TICKS)) bad++;
-    if (!rest_stale_after_gap(0, DG_HAND_REST_STALE_TICKS + 1)) bad++;
-
-    /* Then the machinery end to end: a pair-stream gap exactly AT the
-       threshold re-anchors nothing; one past it raises the flag, which
-       PENDS across a pair that cannot recapture (SetPos absent) and fires
-       on the next one that can, replacing BOTH halves of the rest pair -
-       the controller side must become what the player holds NOW, not the
-       calibration-day pose - and re-anchoring the body-yaw zero. */
-    {
-        LONG recaptured = g_b.c_arm_rest_recaptured;
-        double old_rest[4];
-        float cache_at_capture[8];
-        for (k = 0; k < 4; k++) old_rest[k] = g_b.hand_ctrl_rest[k];
-        if (th_angle_between(old_rest, ctrl1) < 1.0) bad++;
-        /* Boundary gap: the +1 below makes now - last == the threshold. */
-        InterlockedExchangeAdd(&g_b.c_ticks, DG_HAND_REST_STALE_TICKS - 1);
-        InterlockedIncrement(&g_b.c_ticks);
-        target.pair_id++;
-        arm_ik_now(arm, &target);
-        if (g_b.c_arm_rest_recaptured != recaptured) bad++;
-        if (InterlockedCompareExchange(&g_b.hand_rest_stale, 0, 0)) bad++;
-        /* One past the threshold, against an absent SetPos: detected AND
-           pended, in one pair. */
-        for (k = 0; k < 4; k++) adjust[6 * 4 + k] = 0.0f;
-        InterlockedExchangeAdd(&g_b.c_ticks, DG_HAND_REST_STALE_TICKS);
-        InterlockedIncrement(&g_b.c_ticks);
-        target.pair_id++;
-        arm_ik_now(arm, &target);
-        if (g_b.c_arm_rest_recaptured != recaptured) bad++;
-        if (!InterlockedCompareExchange(&g_b.hand_rest_stale, 0, 0)) bad++;
-        for (k = 0; k < 4; k++) adjust[6 * 4 + k] = (float)setpos_hand[k];
-        /* Dropped on purpose so the assert below can only be satisfied by
-           the recapture actually re-anchoring the body-yaw zero. */
-        g_b.arm_root_have_q0 = 0;
-        /* The capture strips with the cache AS THE PAIR FINDS IT - the
-           previous pair's, the one the hierarchy carries - so the
-           replication below has to read it BEFORE the pair overwrites it
-           with its own solve. */
-        for (k = 0; k < 8; k++)
-            cache_at_capture[k] = g_b.arm_map_cached_adjust[k];
-        InterlockedIncrement(&g_b.c_ticks);
-        target.pair_id++;
-        arm_ik_now(arm, &target);
-        if (g_b.c_arm_rest_recaptured != recaptured + 1) bad++;
-        if (InterlockedCompareExchange(&g_b.hand_rest_stale, 0, 0)) bad++;
-        if (th_angle_between(g_b.hand_ctrl_rest, ctrl1) > 1e-6) bad++;
-        if (!g_b.arm_root_have_q0) bad++;
-        if (!g_b.hand_have_desired) bad++;
-        /* The recaptured rest must BE the current animation base: live with
-           the three cached adjusts stripped back off, carried into the root
-           frame - replicated here from the same inputs the pair had. (This
-           rig never bakes the adjusts into its matrices, so that base is
-           NOT `anim` here - the real hierarchy's is, as adjust-bits-lost
-           witnesses live - and asserting the strip rather than anim tests
-           the code's contract instead of the rig's shortcut.) */
-        {
-            double aq2[4], pu2[4], pf2[4], ph3[4], ch2[4], iv2[4], an2[4];
-            double rinv[4], expect_rest[4];
-            for (k = 0; k < 4; k++)
-                aq2[k] = (double)cache_at_capture[k];
-            if (!adjust_quat_to_world(&ADJ_FRAME_LEGACY, aq2, pu2)) bad++;
-            for (k = 0; k < 4; k++)
-                aq2[k] = (double)cache_at_capture[4 + k];
-            if (!adjust_quat_to_world(&ADJ_FRAME_LEGACY, aq2, pf2)) bad++;
-            if (!adjust_quat_to_world(&ADJ_FRAME_LEGACY, setpos_hand, ph3)) bad++;
-            dg_ik_quat_mul(ph3, pf2, ch2);
-            dg_ik_quat_mul(ch2, pu2, ch2);
-            dg_ik_quat_conj(ch2, iv2);
-            dg_ik_quat_mul(iv2, achieved, an2);
-            dg_ik_quat_conj(root_q, rinv);
-            quat_rebase(rinv, an2, expect_rest);
-            if (!dg_ik_quat_normalize(expect_rest)) bad++;
-            /* 1e-4 degrees: the cached adjusts round-trip through floats
-               between the capture and this replication. */
-            if (th_angle_between(g_b.hand_rest_view, expect_rest) > 1e-4)
-                bad++;
-        }
-    }
-
-    /* The recoil, seen from the seam that consumes it rather than the one
-       that steps it. Two things can only be checked here.
-
-       That the climb reaches the hand at all: with a kick standing in the
-       spring the published SVECTOR has to differ from the one the same pose
-       produced without it, or the whole feature is a counter that moves and
-       nothing else.
-
-       And - the one that matters more - that the camera seam only READS the
-       envelope. This seam runs about five times per game tick. If anything on
-       this path stepped the spring, recoil would run five times too fast and
-       decay five times too soon, and the only symptom would be that it felt
-       slightly wrong. So: the amplitude before, several full seam passes, the
-       amplitude after, and they must be the same number. */
-    {
-        short plain[3], kicked[3];
-        double spring_before, spring_after;
-        LONG amp_before, amp_after;
-        int moved = 0;
-
-        target.hand_write = 1;
-        InterlockedExchange(&g_b.recoil_climb_mdeg, 0);
-        InterlockedExchange(&g_b.recoil_push_um, 0);
-        InterlockedExchange(&g_b.s_recoil_amp, 0);
-        InterlockedIncrement(&g_b.c_ticks);
-        target.pair_id++;
-        arm_ik_now(arm, &target);
-        if (!hand_command_read(plain, NULL, NULL)) bad++;
-
-        /* A kick standing at full amplitude, as the tick seam would leave it. */
-        InterlockedExchange(&g_b.recoil_climb_mdeg, 6000);
-        InterlockedExchange(&g_b.recoil_push_um, 18000);
-        InterlockedExchange(&g_b.s_recoil_amp, 1000);
-        dg_recoil_reset(&g_b.recoil);
-        dg_recoil_fire(&g_b.recoil, 1.0);
-        dg_recoil_step(&g_b.recoil);
-        amp_before = InterlockedCompareExchange(&g_b.s_recoil_amp, 0, 0);
-        /* The spring itself, not just the LONG the tick seam publishes from
-           it: only the tick seam ever writes that LONG, so watching it could
-           not see a camera seam quietly stepping the envelope underneath. */
-        spring_before = dg_recoil_amplitude(&g_b.recoil);
-        if (!(spring_before > 0.0)) bad++;
-
-        for (r = 0; r < 5; r++) {          /* one tick's worth of camera seams */
-            target.pair_id++;
-            arm_ik_now(arm, &target);
-        }
-        if (hand_command_read(kicked, NULL, NULL)) {
-            for (k = 0; k < 3; k++) if (kicked[k] != plain[k]) moved = 1;
-        } else {
-            bad++;
-        }
-        if (!moved) bad++;                 /* the climb never reached the hand */
-
-        amp_after = InterlockedCompareExchange(&g_b.s_recoil_amp, 0, 0);
-        spring_after = dg_recoil_amplitude(&g_b.recoil);
-        if (amp_after != amp_before) bad++;
-        if (spring_after != spring_before) bad++;  /* a seam stepped it */
-        if (g_b.c_recoil_climb_writes <= 0) bad++;
-
-        InterlockedExchange(&g_b.recoil_climb_mdeg, 0);
-        InterlockedExchange(&g_b.recoil_push_um, 0);
-        InterlockedExchange(&g_b.s_recoil_amp, 0);
-        dg_recoil_reset(&g_b.recoil);
-    }
-
-    /* The channel's reach (run 13, 2026-09-03). A hand asked 175 degrees
-       from its calibration - the swing cap opened to its 180 limit the way
-       the marker can - wants a joint-6 adjust the SVECTOR cannot carry: past
-       1536 units in a component the engine folds the precompensated short
-       and lands three quarters of a turn away. The bridge must shorten the
-       adjust along its own axis, store the SHORTENED rotation as the command
-       echo and publish it as the desired hand, and the engine's own
-       reconstruction - fold, pull, convert, compose onto the rig - must then
-       land on it: a clean echo and a clean residual where the naive write
-       measured 90 degrees on every pair of the episode. */
-    {
-        double turn_big[4], ctrl_big[4], slot_big[4], next_hand[4];
-        double pulled_big[3], base_big[4];
-        short cmd_big[3];
-        LONG scaled0 = g_b.c_arm_hand_scaled;
-        LONG dirty_big, v_big;
-        float e_big, fr_big;
-        InterlockedExchange(&g_b.hand_wrist_swing_mdeg, 180000);
-        th_axis(0.0, 0.0, 1.0, 175.0, turn_big);
-        dg_ik_quat_mul(turn_big, ctrl0, ctrl_big);
-        for (k = 0; k < 4; k++) target.hand_quat[k] = ctrl_big[k];
-        InterlockedIncrement(&g_b.c_ticks);
-        target.pair_id++;
-        arm_ik_now(arm, &target);
-        /* The ask really was past the reach and was shortened - or this leg
-           tests nothing. A fraction inside (0.5, 1): the run-13 data needed
-           0.81 at worst. */
-        if (g_b.c_arm_hand_scaled != scaled0 + 1) bad++;
-        v_big = g_b.s_arm_hand_fit;
-        memcpy(&fr_big, &v_big, sizeof fr_big);
-        if (!(fr_big > 0.5f && fr_big < 1.0f)) bad++;
-        v_big = g_b.s_arm_hand_shortfall_worst;
-        memcpy(&e_big, &v_big, sizeof e_big);
-        if (fabs((double)e_big - (1.0 - (double)fr_big)) > 1e-6) bad++;
-        if (!hand_command_read(cmd_big, NULL, NULL)) bad++;
-        for (k = 0; k < 3; k++)
-            pulled_big[k] = (double)th_engine_pull((int)cmd_big[k]);
-        set_pos_quat(pulled_big, slot_big);
-        /* What the channel delivers is what was stored as the command. */
-        if (th_angle_between(slot_big, g_b.hand_last_cmd) > 0.20) bad++;
-        /* The game runs it: the slot holds the reconstruction, the hierarchy
-           composes it onto the animation, the next pair measures both. */
-        for (k = 0; k < 4; k++) adjust[6 * 4 + k] = (float)slot_big[k];
-        /* Composed onto the animation base the bridge recovered for this
-           pair (live with our own adjusts stripped), which is the pose the
-           earlier legs left in the rig - not the calibration animation. */
-        if (!g_b.hand_have_prev_base) bad++;
-        for (k = 0; k < 4; k++) base_big[k] = g_b.hand_prev_base[k];
-        if (!th_next_hand(base_big, slot_big, next_hand)) bad++;
-        th_write_basis(hand_m, next_hand);
-        hand_m[12] = 300.0f;
-        hand_m[13] = 173.20508f;
-        hand_m[14] = 0.0f;
-        dirty_big = g_b.c_arm_hand_slot_dirty;
-        InterlockedIncrement(&g_b.c_ticks);
-        target.pair_id++;
-        arm_ik_now(arm, &target);
-        v_big = g_b.s_arm_hand_residual;
-        memcpy(&e_big, &v_big, sizeof e_big);
-        if (!(e_big >= 0.0f) || e_big > 0.20f) bad++;
-        v_big = g_b.s_arm_hand_slot_echo;
-        memcpy(&e_big, &v_big, sizeof e_big);
-        if (!(e_big >= 0.0f) || e_big > 0.20f) bad++;
-        if (g_b.c_arm_hand_slot_dirty != dirty_big) bad++;
-        /* Back to the rig the closing checks expect. */
-        InterlockedExchange(&g_b.hand_wrist_swing_mdeg, 0);
-        for (k = 0; k < 4; k++) target.hand_quat[k] = ctrl1[k];
-        for (k = 0; k < 4; k++) adjust[6 * 4 + k] = (float)setpos_hand[k];
-    }
-
-    /* Absolute-aim refusal must invalidate an already published command even
-       when arm processing takes a duplicate or constant-cache early return.
-       Keep caller hand_write=1: only the absolute validity guard may refuse
-       these commands. Invalid metadata short-circuits before retail reads. */
-    {
-        DG_BRIDGE_ARM_TARGET rejected = target;
-        short old_command[3] = {72, 8, -32}, read_command[3];
-        LONG replay0 = g_b.c_arm_pair_replays;
-        LONG frozen0 = g_b.c_arm_pairs_frozen;
-        LONG written0 = g_b.c_arm_hand_written;
-        LONG saved_freeze = InterlockedCompareExchange(&g_b.arm_freeze, 0, 0);
-        int guard_bad = 0;
-        if (!g_b.arm_map_cache_valid || !g_b.ik_active ||
-            target.pair_id != g_b.arm_map_last_pair) guard_bad++;
-        rejected.absolute_aim = 1;
-        rejected.hand_write = 1;
-        rejected.aim_write = 0;
-        InterlockedExchange(&g_b.hand_command_requested, 1);
-        if (!hand_command_publish(old_command, rejected.pair_id) ||
-            !hand_command_read(read_command, NULL, NULL)) guard_bad++;
-        arm_ik_now(arm, &rejected);
-        if (g_b.c_arm_pair_replays != replay0 + 1 ||
-            !g_b.arm_map_cache_valid || g_b.c_arm_hand_written != written0 ||
-            InterlockedCompareExchange(&g_b.hand_command_valid, 0, 0) ||
-            InterlockedCompareExchange(&g_b.hand_command_requested, 0, 0) ||
-            hand_command_read(read_command, NULL, NULL)) guard_bad++;
-
-        /* Fresh pair, valid-looking payload, deliberately wrong aim pair ID:
-           this must still refuse before the constant replay branch. */
-        rejected.pair_id++;
-        rejected.aim_write = 1;
-        rejected.aim_pair_id = rejected.pair_id - 1;
-        rejected.aim_stream_id = rejected.stream_id;
-        rejected.aim_sample_seq = 1;
-        rejected.aim_sample_time = 1;
-        InterlockedExchange(&g_b.arm_freeze, 1);
-        InterlockedExchange(&g_b.hand_command_requested, 1);
-        if (!hand_command_publish(old_command, rejected.pair_id) ||
-            !hand_command_read(read_command, NULL, NULL)) guard_bad++;
-        arm_ik_now(arm, &rejected);
-        if (g_b.c_arm_pairs_frozen != frozen0 + 1 ||
-            !g_b.arm_map_cache_valid || g_b.c_arm_hand_written != written0 ||
-            InterlockedCompareExchange(&g_b.hand_command_valid, 0, 0) ||
-            InterlockedCompareExchange(&g_b.hand_command_requested, 0, 0) ||
-            hand_command_read(read_command, NULL, NULL)) guard_bad++;
-        InterlockedExchange(&g_b.arm_freeze, saved_freeze);
-        target.pair_id = rejected.pair_id;
-        if (guard_bad) printf("    FAIL absolute aim invalidation before duplicate/constant replay (%d)\n", guard_bad);
-        bad += guard_bad;
-    }
-
-    /* Turning the hand off leaves SetPos's joint 6 intact and the arm working. */
-    target.hand_write = 0;
-    InterlockedIncrement(&g_b.c_ticks);
-    target.pair_id++;
-    arm_ik_now(arm, &target);
-    if (*(ULONGLONG *)(mc + 0x38) != ((1ULL << 4) | (1ULL << 5))) bad++;
-    if (g_b.ik_owned_mask != ((1ULL << 4) | (1ULL << 5))) bad++;
-    for (k = 0; k < 4; k++)
-        if (adjust[6 * 4 + k] != (float)setpos_hand[k]) bad++;
-    if (g_b.c_arm_pairs_accepted <= 0) bad++;
-
-    arm_map_forget();
-    if (*(ULONGLONG *)(mc + 0x38) != 0) bad++;
-    g_b.a.gm_player_arm_body = 0;
-    InterlockedExchange(&g_b.skel_stride, 0);
-    InterlockedExchange(&g_b.skel_parents_read, 0);
-    InterlockedExchange(&g_b.skel_region_end, 0);
-    InterlockedExchange(&g_b.c_ticks, 0);
-
-    printf("  %-6s hand drive: a non-identity rig root, a 50 degree controller "
-           "turn published across seams as a precompensated SVECTOR, SetPos's "
-           "joint 6 left intact, achieved rotation measured as residual, and a "
-           "standing recoil kick that changes the published hand while five "
-           "camera seams in one tick leave the envelope exactly where it "
-           "was, a 150 degree ask past the channel's reach shortened "
-           "along its axis and landing clean through the folded pull, and "
-           "the pair record carrying the solved joints, target, adjusts and "
-           "envelope axis (DGREC4)\n",
-           bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-/* The arm must not orbit a turning body. The published camera never follows
-   body yaw, so the player's input arrives in a world-fixed frame while the
-   arm root turns with the character - the tolling-arm videos, one revolution
-   of accumulated body yaw at a time. Three legs. A body YAW about its own up
-   axis leaves the shoulder-relative world offset and the desired hand
-   orientation exactly where the player holds them, and reads out in the
-   drift telemetry. A body PITCH is carried: the view input is left alone and
-   arm and hand pitch with the torso - a compensation built from the full
-   relative rotation instead of its yaw twist fails this leg. And a pair with
-   no captured calibration root runs uncompensated and is counted, never
-   guessed. The calibration root deliberately contains pitch as well as yaw:
-   pure-yaw roots commute with body yaws, and under commuting rotations a
-   relative rotation composed in the wrong order would be invisible. */
-static int t_the_arm_ignores_the_bodys_yaw(void)
-{
-    enum { STRIDE = 0x180, JOINTS = 7 };
-    static unsigned char blob[DG_OBJS_ARRAY + JOINTS * STRIDE];
-    static unsigned char rig0[DG_OBJS_ARRAY + JOINTS * STRIDE];
-    static unsigned char obj[0x40], mc[0x70];
-    static float adjust[55 * 4];
-    ULONGLONG arm = (ULONGLONG)(ULONG_PTR)obj;
-    DG_BRIDGE_ARM_TARGET target;
-    float *hand_m;
-    double y37[4], x20[4], root_q[4], anim[4], ctrl0[4];
-    double spin[4], turn[4], live_root[4], expect_desired[4];
-    double ytw[4], ytw_inv[4], swing[4], yw[4], yw_ctrl[4];
-    double root_pos[3] = { 40.0, -10.0, 25.0 };
-    LONG saved_basis = InterlockedCompareExchange(&g_b.arm_hand_basis, 0, 0);
-    double sv[3], wv[3], tmp[3];
-    double base_offset[3], offset_now[3], expect_offset[3];
-    double base_desired[4], base_view[3], view_now[3];
-    double scale;
-    LONG uncomp, saved_anchor, v;
-    float f;
-    int j, k, bad = 0;
-
-    memset(blob, 0, sizeof blob);
-    memset(obj, 0, sizeof obj);
-    memset(mc, 0, sizeof mc);
-    memset(adjust, 0, sizeof adjust);
-    adjust[6 * 4 + 3] = 1.0f; /* SetPos ran and supplied identity. */
-    *(ULONGLONG *)(obj + 0x00) = (ULONGLONG)(ULONG_PTR)blob;
-    *(ULONGLONG *)(obj + 0x08) = (ULONGLONG)(ULONG_PTR)mc;
-    *(LONG *)(mc + 0x14) = 55;
-    *(ULONGLONG *)(mc + 0x48) = (ULONGLONG)(ULONG_PTR)adjust;
-    for (j = 0; j < JOINTS; j++) {
-        float *m = (float *)(blob + DG_OBJS_ARRAY + j * STRIDE);
-        m[0] = m[5] = m[10] = m[15] = 1.0f;
-    }
-    th_axis(0.0, 1.0, 0.0, 37.0, y37);
-    th_axis(1.0, 0.0, 0.0, 8.0, x20);
-    dg_ik_quat_mul(y37, x20, root_q);
-    th_write_basis((float *)(blob + DG_OBJS_ARRAY), root_q);
-    for (k = 0; k < 3; k++)
-        ((float *)(blob + DG_OBJS_ARRAY))[12 + k] = (float)root_pos[k];
-    ((float *)(blob + DG_OBJS_ARRAY + 3 * STRIDE))[14] = 100.0f;
-    ((float *)(blob + DG_OBJS_ARRAY + 5 * STRIDE))[12] = 200.0f;
-    hand_m = (float *)(blob + DG_OBJS_ARRAY + 6 * STRIDE);
-    th_axis(0.3, 0.2, -0.9, 64.0, anim);
-    th_write_basis(hand_m, anim);
-    hand_m[12] = 300.0f;
-    hand_m[13] = 173.20508f;
-    hand_m[14] = 0.0f;
-    memcpy(rig0, blob, sizeof blob);
-
-    InterlockedExchange(&g_b.skel_stride, STRIDE);
-    InterlockedExchange(&g_b.skel_parents_read, JOINTS);
-    InterlockedExchange(&g_b.skel_region_end, (LONG)sizeof blob);
-    for (j = 0; j < JOINTS; j++) InterlockedExchange(&g_b.skel_parents[j], 0);
-    InterlockedExchange(&g_b.skel_parents[3], 2);
-    InterlockedExchange(&g_b.skel_parents[4], 3);
-    InterlockedExchange(&g_b.skel_parents[5], 4);
-    InterlockedExchange(&g_b.skel_parents[6], 5);
-    g_b.a.gm_player_arm_body = (ULONGLONG)(ULONG_PTR)&arm;
-    saved_anchor = InterlockedCompareExchange(&g_b.arm_anchor, 0, 0);
-    InterlockedExchange(&g_b.arm_anchor, 1);
-    InterlockedExchange(&g_b.ik_active, 0);
-    InterlockedExchange(&g_b.c_ticks, 0);
-    InterlockedExchange(&g_b.arm_hand_basis, 1);
-    arm_map_forget();
-
-    /* The player: shoulder anchored, controller held along the direction of
-       the character's own animated wrist, so the mapped target stays close
-       to the animation and every leg below is read far from any clamp. */
-    for (k = 0; k < 3; k++) tmp[k] = 0.0 - root_pos[k];
-    arm_quat_unrotate(root_q, tmp, sv);
-    tmp[0] = 300.0 - root_pos[0];
-    tmp[1] = 173.20508 - root_pos[1];
-    tmp[2] = 0.0 - root_pos[2];
-    arm_quat_unrotate(root_q, tmp, wv);
-
-    th_axis(0.5, -0.4, 0.76, 23.0, ctrl0);
-    memset(&target, 0, sizeof target);
-    target.write = 1;
-    target.hand_write = 1;
-    target.weight = 1.0;
-    target.stream_id = 11;
-    target.pair_id = 500;
-    target.player_reach_view = 600.0;
-    target.player_shoulder_view[0] = 60.0;
-    target.player_shoulder_view[1] = -80.0;
-    target.player_shoulder_view[2] = 30.0;
-    for (k = 0; k < 3; k++)
-        target.wrist_view[k] = target.player_shoulder_view[k] +
-                               (wv[k] - sv[k]);
-    for (k = 0; k < 4; k++) target.hand_quat[k] = ctrl0[k];
-    /* The stick term rides along from calibration on, so the organic leg
-       below has a zero to measure against. */
-    target.stick_yaw_valid = 1;
-    target.stick_yaw_rad = 0.0;
-    InterlockedExchange(&g_b.arm_comp, 0);
-
-    /* Acquisition, settle, calibration - which must capture the root. */
-    arm_ik_now(arm, &target);
-    InterlockedExchange(&g_b.c_ticks, DG_ADJ_SETTLE_TICKS + 1);
-    target.pair_id++;
-    arm_ik_now(arm, &target);
-    if (!g_b.arm_root_have_q0) bad++;
-    if (!g_b.hand_have_rest) bad++;
-    uncomp = g_b.c_arm_body_uncompensated;
-
-    /* One probe pair to read the mapper's scale, so the real baseline can
-       put the target at 80 percent of the way to the animated wrist without
-       hard-coding the scale formula here. */
-    InterlockedIncrement(&g_b.c_ticks);
-    target.pair_id++;
-    arm_ik_now(arm, &target);
-    v = InterlockedCompareExchange(&g_b.s_arm_map_scale, 0, 0);
-    memcpy(&f, &v, sizeof f);
-    scale = (double)f;
-    if (!(scale > 0.2) || !(scale < 1.5)) { bad++; scale = 0.5716; }
-    for (k = 0; k < 3; k++)
-        target.wrist_view[k] = target.player_shoulder_view[k] +
-                               (wv[k] - sv[k]) * (0.95 / scale);
-
-    /* The baseline pair: an unturned body. The controller has not turned
-       since calibration, so the desired hand pose must be the animated one -
-       the fact the yaw leg stands on. */
-    InterlockedIncrement(&g_b.c_ticks);
-    target.pair_id++;
-    arm_ik_now(arm, &target);
-    if (!g_b.hand_have_desired) bad++;
-    th_pair_offset(root_q, root_pos, base_offset);
-    for (k = 0; k < 4; k++) base_desired[k] = g_b.hand_desired[k];
-    for (k = 0; k < 3; k++) {
-        v = InterlockedCompareExchange(&g_b.s_arm_map_target[k], 0, 0);
-        memcpy(&f, &v, sizeof f);
-        base_view[k] = (double)f;
-    }
-    if (th_angle_between(base_desired, anim) > 0.01) bad++;
-    if (sqrt(base_offset[0] * base_offset[0] +
-             base_offset[1] * base_offset[1] +
-             base_offset[2] * base_offset[2]) < 100.0) bad++;
-    v = InterlockedCompareExchange(&g_b.s_arm_body_drift, 0, 0);
-    memcpy(&f, &v, sizeof f);
-    if (fabs((double)f) > 0.01) bad++;
-    if (g_b.c_arm_body_uncompensated != uncomp) bad++;
-
-    /* Leg 1: the body yaws 25 degrees about its own up axis - and the
-       stick term says the player turned 25 too. Under vr_arm_comp=full
-       (default) that makes no difference: every degree of body yaw is
-       compensated and the hand stays world-fixed. */
-    th_axis(0.0, 1.0, 0.0, 25.0, spin);
-    quat_rebase(root_q, spin, turn);
-    memcpy(blob, rig0, sizeof blob);
-    th_turn_rig(blob + DG_OBJS_ARRAY, STRIDE, JOINTS, turn);
-    dg_ik_quat_mul(turn, root_q, live_root);
-    target.stick_yaw_rad = 25.0 * 3.14159265358979323846 / 180.0;
-    InterlockedIncrement(&g_b.c_ticks);
-    target.pair_id++;
-    arm_ik_now(arm, &target);
-    if (!g_b.hand_have_desired) bad++;
-    th_pair_offset(live_root, root_pos, offset_now);
-    for (k = 0; k < 3; k++)
-        if (fabs(offset_now[k] - base_offset[k]) > 0.5) bad++;
-    /* The hand: world-fixed against the yaw. This rig's body yaws about
-       its OWN (8-degree-canted) up axis, so the turn has a 3.5-degree
-       swing beside its world yaw, and the swing is carried, as a crouch
-       is: expected = swing(turn) * anim. The live body yaws about world
-       up (run 9: swing 0.65 deg mean), where this is anim itself. */
-    quat_ytwist(turn, ytw);
-    dg_ik_quat_conj(ytw, ytw_inv);
-    dg_ik_quat_mul(turn, ytw_inv, swing);
-    dg_ik_quat_mul(swing, anim, expect_desired);
-    if (th_angle_between(g_b.hand_desired, expect_desired) > 0.1) bad++;
-    if (!(th_angle_between(g_b.hand_desired, base_desired) < 5.0)) bad++;
-    v = InterlockedCompareExchange(&g_b.s_arm_body_drift, 0, 0);
-    memcpy(&f, &v, sizeof f);
-    if (fabs((double)f - 25.0) > 0.05) bad++;
-    if (g_b.c_arm_body_uncompensated != uncomp) bad++;
-
-    /* Leg 1b: the same body yaw and the same stick term under
-       vr_arm_comp=organic: the body merely followed the stick, so nothing
-       is compensated - the offset and the hand turn WITH the body, the
-       drift telemetry still reads the full 25, and the no-stick counter
-       stays put. Then, with the stick zero gone, organic falls back to the
-       full compensation and says so. */
-    {
-        LONG ns0 = g_b.c_arm_comp_no_stick;
-        InterlockedExchange(&g_b.arm_comp, 1);
-        /* The ROOM frame advances the controller by the stick turn, so
-           the controller quat carries the 25 too. */
-        th_axis(0.0, 1.0, 0.0, 25.0, yw);
-        dg_ik_quat_mul(yw, ctrl0, yw_ctrl);
-        for (k = 0; k < 4; k++) target.hand_quat[k] = yw_ctrl[k];
-        InterlockedIncrement(&g_b.c_ticks);
-        target.pair_id++;
-        arm_ik_now(arm, &target);
-        th_pair_offset(live_root, root_pos, offset_now);
-        arm_quat_rotate(turn, base_offset, expect_offset);
-        for (k = 0; k < 3; k++)
-            if (fabs(offset_now[k] - expect_offset[k]) > 0.5) bad++;
-        /* The hand turned WITH the controller: yaw(25) * anim from the
-           left, plus the rig's own-axis swing. The conjugation
-           turn * anim * turn^-1 that stood here until 2026-09-02 was the
-           defect itself: a cant about the hand's own axis. */
-        dg_ik_quat_mul(yw, anim, expect_desired);
-        dg_ik_quat_mul(swing, expect_desired, expect_desired);
-        if (th_angle_between(g_b.hand_desired, expect_desired) > 0.1) bad++;
-        v = InterlockedCompareExchange(&g_b.s_arm_body_drift, 0, 0);
-        memcpy(&f, &v, sizeof f);
-        if (fabs((double)f - 25.0) > 0.05) bad++;
-        if (g_b.c_arm_comp_no_stick != ns0) bad++;
-        g_b.stick_yaw0_have = 0;
-        InterlockedIncrement(&g_b.c_ticks);
-        target.pair_id++;
-        arm_ik_now(arm, &target);
-        if (g_b.c_arm_comp_no_stick != ns0 + 1) bad++;
-        th_pair_offset(live_root, root_pos, offset_now);
-        for (k = 0; k < 3; k++)
-            if (fabs(offset_now[k] - base_offset[k]) > 0.5) bad++;
-        g_b.stick_yaw0_have = 1;
-        for (k = 0; k < 4; k++) target.hand_quat[k] = ctrl0[k];
-        InterlockedExchange(&g_b.arm_comp, 0);
-        target.stick_yaw_rad = 0.0;
-    }
-
-    /* Leg 1c: the live case, hand-computed. The body yaws 25 about WORLD
-       up (run 9: the root's rotation since calibration is a world-up yaw
-       to 0.65 deg), the stick says 25, organic comp, the controller
-       carries the 25: the hand is exactly yaw(25) * anim =
-       [0.053615, 0.290274, -0.515743, 0.804286] (Hamilton product of
-       axis(0,1,0) 25 deg and axis(0.3,0.2,-0.9) 64 deg, computed by hand
-       outside this code). The old basis missed it by 23.6 degrees. Then
-       the same at 180/180, where the old basis missed by 113. */
-    {
-        static const double want25[4] =
-            { 0.053615, 0.290274, -0.515743, 0.804286 };
-        static const double deg[2] = { 25.0, 180.0 };
-        int i;
-        InterlockedExchange(&g_b.arm_comp, 1);
-        for (i = 0; i < 2; i++) {
-            th_axis(0.0, 1.0, 0.0, deg[i], yw);
-            memcpy(blob, rig0, sizeof blob);
-            th_turn_rig(blob + DG_OBJS_ARRAY, STRIDE, JOINTS, yw);
-            dg_ik_quat_mul(yw, ctrl0, yw_ctrl);
-            for (k = 0; k < 4; k++) target.hand_quat[k] = yw_ctrl[k];
-            target.stick_yaw_rad = deg[i] * 3.14159265358979323846 / 180.0;
-            InterlockedIncrement(&g_b.c_ticks);
-            target.pair_id++;
-            arm_ik_now(arm, &target);
-            if (!g_b.hand_have_desired) bad++;
-            dg_ik_quat_mul(yw, anim, expect_desired);
-            if (th_angle_between(g_b.hand_desired, expect_desired) > 0.1) bad++;
-            if (i == 0 && th_angle_between(g_b.hand_desired, want25) > 0.05)
-                bad++;
-        }
-        for (k = 0; k < 4; k++) target.hand_quat[k] = ctrl0[k];
-        target.stick_yaw_rad = 0.0;
-        InterlockedExchange(&g_b.arm_comp, 0);
-    }
-
-    /* Leg 2: the body pitches 15 degrees about its own side axis - a
-       crouch. Pitch is CARRIED, not compensated: the view input stays
-       untouched, the offset and the hand pitch with the torso, the drift
-       telemetry stays zero. */
-    th_axis(1.0, 0.0, 0.0, 15.0, spin);
-    quat_rebase(root_q, spin, turn);
-    memcpy(blob, rig0, sizeof blob);
-    th_turn_rig(blob + DG_OBJS_ARRAY, STRIDE, JOINTS, turn);
-    dg_ik_quat_mul(turn, root_q, live_root);
-    InterlockedIncrement(&g_b.c_ticks);
-    target.pair_id++;
-    arm_ik_now(arm, &target);
-    for (k = 0; k < 3; k++) {
-        v = InterlockedCompareExchange(&g_b.s_arm_map_target[k], 0, 0);
-        memcpy(&f, &v, sizeof f);
-        view_now[k] = (double)f;
-    }
-    for (k = 0; k < 3; k++)
-        if (fabs(view_now[k] - base_view[k]) > 0.05) bad++;
-    th_pair_offset(live_root, root_pos, offset_now);
-    arm_quat_rotate(turn, base_offset, expect_offset);
-    for (k = 0; k < 3; k++)
-        if (fabs(offset_now[k] - expect_offset[k]) > 0.5) bad++;
-    /* The hand pitches with the torso: turn * anim, where the rig's own
-       hand went (th_turn_rig turns every bone from the left). */
-    dg_ik_quat_mul(turn, anim, expect_desired);
-    if (th_angle_between(g_b.hand_desired, expect_desired) > 0.1) bad++;
-    v = InterlockedCompareExchange(&g_b.s_arm_body_drift, 0, 0);
-    memcpy(&f, &v, sizeof f);
-    if (fabs((double)f) > 0.05) bad++;
-    if (g_b.c_arm_body_uncompensated != uncomp) bad++;
-
-    /* Leg 3: no captured root. Fail open, loudly: the pair still runs - the
-       arm was usable for twenty hours before any of this existed - but the
-       input goes through unrotated and the counter says so. */
-    th_axis(0.0, 1.0, 0.0, 25.0, spin);
-    quat_rebase(root_q, spin, turn);
-    memcpy(blob, rig0, sizeof blob);
-    th_turn_rig(blob + DG_OBJS_ARRAY, STRIDE, JOINTS, turn);
-    dg_ik_quat_mul(turn, root_q, live_root);
-    g_b.arm_root_have_q0 = 0;
-    InterlockedIncrement(&g_b.c_ticks);
-    target.pair_id++;
-    arm_ik_now(arm, &target);
-    if (g_b.c_arm_body_uncompensated != uncomp + 1) bad++;
-    th_pair_offset(live_root, root_pos, offset_now);
-    tmp[0] = 0.0;
-    for (k = 0; k < 3; k++)
-        tmp[0] += (offset_now[k] - base_offset[k]) *
-                  (offset_now[k] - base_offset[k]);
-    if (!(sqrt(tmp[0]) > 50.0)) bad++;
-    g_b.arm_root_have_q0 = 1;
-
-    /* Leg 4: a rest recapture after a gap (the body turned 25, the stick
-       says 25, organic). The root zero moves to the turned body, and the
-       stick/head zeros must move with it: the pair after the recapture
-       then compensates nothing and leaves the offset where the turned body
-       put it, with the drift telemetry reading 0. A recapture that
-       re-zeroed the root alone would read drift 0 against software 25 and
-       turn the input the wrong way by 25. */
-    {
-        LONG rc0 = g_b.c_arm_rest_recaptured, ns0 = g_b.c_arm_comp_no_stick;
-        InterlockedExchange(&g_b.arm_comp, 1);
-        target.stick_yaw_rad = 25.0 * 3.14159265358979323846 / 180.0;
-        target.head_yaw_valid = 1;
-        target.head_yaw_rad = 25.0 * 3.14159265358979323846 / 180.0;
-        InterlockedExchange(&g_b.hand_rest_stale, 1);
-        InterlockedIncrement(&g_b.c_ticks);
-        target.pair_id++;
-        arm_ik_now(arm, &target);
-        if (g_b.c_arm_rest_recaptured != rc0 + 1) bad++;
-        if (!g_b.stick_yaw0_have || fabs(g_b.stick_yaw0_deg - 25.0) > 0.01)
-            bad++;
-        if (!g_b.head_yaw0_have || fabs(g_b.head_yaw0_deg - 25.0) > 0.01)
-            bad++;
-        InterlockedIncrement(&g_b.c_ticks);
-        target.pair_id++;
-        arm_ik_now(arm, &target);
-        v = InterlockedCompareExchange(&g_b.s_arm_body_drift, 0, 0);
-        memcpy(&f, &v, sizeof f);
-        if (fabs((double)f) > 0.05) bad++;
-        if (g_b.c_arm_comp_no_stick != ns0) bad++;
-        th_pair_offset(live_root, root_pos, offset_now);
-        arm_quat_rotate(turn, base_offset, expect_offset);
-        for (k = 0; k < 3; k++)
-            if (fabs(offset_now[k] - expect_offset[k]) > 0.5) bad++;
-        InterlockedExchange(&g_b.arm_comp, 0);
-        target.stick_yaw_rad = 0.0;
-        target.head_yaw_valid = 0;
-    }
-
-    arm_map_forget();
-    InterlockedExchange(&g_b.arm_hand_basis, saved_basis);
-    if (*(ULONGLONG *)(mc + 0x38) != 0) bad++;
-    g_b.a.gm_player_arm_body = 0;
-    InterlockedExchange(&g_b.arm_anchor, saved_anchor);
-    InterlockedExchange(&g_b.skel_stride, 0);
-    InterlockedExchange(&g_b.skel_parents_read, 0);
-    InterlockedExchange(&g_b.skel_region_end, 0);
-    InterlockedExchange(&g_b.c_ticks, 0);
-    InterlockedExchange(&g_b.s_arm_body_drift, f2l(0.0f));
-
-    printf("  %-6s body-yaw compensation: a 25 degree body yaw leaves the "
-           "player's shoulder offset and hand orientation world-fixed and "
-           "reads 25.0 in the drift telemetry, under organic the hand turns "
-           "WITH the stick from the left (hand-computed yaw(25)*anim, and "
-           "180/180), a 15 degree body pitch carries arm and hand and "
-           "leaves the input untouched, a pair with no calibration root "
-           "runs uncompensated and is counted, and a rest recapture moves "
-           "the stick/head zeros with the root zero\n",
-           bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-/* The walking turn, reproduced at the desk. The three quasi-static legs
-   above pass, yet the 2026-08-20 headset runs lock the residual near 180
-   with a wandering offset exactly while the body turns during vr_move
-   locomotion. So: the same rig, the same frozen player, but the body now
-   turns a few degrees EVERY pair while the harness game faithfully applies
-   the previous pair's published command (pull, conversion, composition onto
-   the turned animation) - the loop the static legs never close. Diagnostic
-   first: it prints what it measures, and the assertion is only that the
-   instruments produced numbers at all. */
-static int t_probe_the_walking_turn(void)
-{
-    enum { STRIDE = 0x180, JOINTS = 7, TURN_PAIRS = 60 };
-    static unsigned char blob[DG_OBJS_ARRAY + JOINTS * STRIDE];
-    static unsigned char rig0[DG_OBJS_ARRAY + JOINTS * STRIDE];
-    static unsigned char obj[0x40], mc[0x70];
-    static float adjust[55 * 4];
-    ULONGLONG arm = (ULONGLONG)(ULONG_PTR)obj;
-    DG_BRIDGE_ARM_TARGET target;
-    float *hand_m;
-    double y37[4], x20[4], root_q[4], anim[4], ctrl0[4];
-    double spin[4], turn[4], anim_now[4], achieved[4];
-    double setpos_prev[4], pulled[3];
-    double root_pos[3] = { 40.0, -10.0, 25.0 };
-    double sv[3], wv[3], tmp[3];
-    double scale;
-    double res_max = 0.0, drift_max = 0.0, res_late = 0.0, drift_late = 0.0;
-    double probe_q4[4], probe_q5[4], dq_max = 0.0, base_max = 0.0;
-    double cmd_max = 0.0;
-    int late_n = 0, measured0, published0, lim_frozen = -1;
-    short cmd[3];
-    LONG saved_anchor, v;
-    float f;
-    int j, k, p, bad = 0;
-
-    memset(blob, 0, sizeof blob);
-    memset(obj, 0, sizeof obj);
-    memset(mc, 0, sizeof mc);
-    memset(adjust, 0, sizeof adjust);
-    adjust[6 * 4 + 3] = 1.0f;
-    *(ULONGLONG *)(obj + 0x00) = (ULONGLONG)(ULONG_PTR)blob;
-    *(ULONGLONG *)(obj + 0x08) = (ULONGLONG)(ULONG_PTR)mc;
-    *(LONG *)(mc + 0x14) = 55;
-    *(ULONGLONG *)(mc + 0x48) = (ULONGLONG)(ULONG_PTR)adjust;
-    for (j = 0; j < JOINTS; j++) {
-        float *m = (float *)(blob + DG_OBJS_ARRAY + j * STRIDE);
-        m[0] = m[5] = m[10] = m[15] = 1.0f;
-    }
-    th_axis(0.0, 1.0, 0.0, 37.0, y37);
-    th_axis(1.0, 0.0, 0.0, 8.0, x20);
-    dg_ik_quat_mul(y37, x20, root_q);
-    th_write_basis((float *)(blob + DG_OBJS_ARRAY), root_q);
-    for (k = 0; k < 3; k++)
-        ((float *)(blob + DG_OBJS_ARRAY))[12 + k] = (float)root_pos[k];
-    ((float *)(blob + DG_OBJS_ARRAY + 3 * STRIDE))[14] = 100.0f;
-    ((float *)(blob + DG_OBJS_ARRAY + 5 * STRIDE))[12] = 200.0f;
-    hand_m = (float *)(blob + DG_OBJS_ARRAY + 6 * STRIDE);
-    th_axis(0.3, 0.2, -0.9, 64.0, anim);
-    th_write_basis(hand_m, anim);
-    hand_m[12] = 300.0f;
-    hand_m[13] = 173.20508f;
-    hand_m[14] = 0.0f;
-    memcpy(rig0, blob, sizeof blob);
-
-    InterlockedExchange(&g_b.skel_stride, STRIDE);
-    InterlockedExchange(&g_b.skel_parents_read, JOINTS);
-    InterlockedExchange(&g_b.skel_region_end, (LONG)sizeof blob);
-    for (j = 0; j < JOINTS; j++) InterlockedExchange(&g_b.skel_parents[j], 0);
-    InterlockedExchange(&g_b.skel_parents[3], 2);
-    InterlockedExchange(&g_b.skel_parents[4], 3);
-    InterlockedExchange(&g_b.skel_parents[5], 4);
-    InterlockedExchange(&g_b.skel_parents[6], 5);
-    g_b.a.gm_player_arm_body = (ULONGLONG)(ULONG_PTR)&arm;
-    saved_anchor = InterlockedCompareExchange(&g_b.arm_anchor, 0, 0);
-    InterlockedExchange(&g_b.arm_anchor, 1);
-    InterlockedExchange(&g_b.ik_active, 0);
-    InterlockedExchange(&g_b.c_ticks, 0);
-    arm_map_forget();
-
-    for (k = 0; k < 3; k++) tmp[k] = 0.0 - root_pos[k];
-    arm_quat_unrotate(root_q, tmp, sv);
-    tmp[0] = 300.0 - root_pos[0];
-    tmp[1] = 173.20508 - root_pos[1];
-    tmp[2] = 0.0 - root_pos[2];
-    arm_quat_unrotate(root_q, tmp, wv);
-
-    th_axis(0.5, -0.4, 0.76, 23.0, ctrl0);
-    memset(&target, 0, sizeof target);
-    target.write = 1;
-    target.hand_write = 1;
-    target.weight = 1.0;
-    target.stream_id = 12;
-    target.pair_id = 900;
-    target.player_reach_view = 600.0;
-    target.player_shoulder_view[0] = 60.0;
-    target.player_shoulder_view[1] = -80.0;
-    target.player_shoulder_view[2] = 30.0;
-    for (k = 0; k < 3; k++)
-        target.wrist_view[k] = target.player_shoulder_view[k] +
-                               (wv[k] - sv[k]);
-    for (k = 0; k < 4; k++) target.hand_quat[k] = ctrl0[k];
-
-    arm_ik_now(arm, &target);
-    InterlockedExchange(&g_b.c_ticks, DG_ADJ_SETTLE_TICKS + 1);
-    target.pair_id++;
-    arm_ik_now(arm, &target);
-    if (!g_b.arm_root_have_q0 || !g_b.hand_have_rest) bad++;
-
-    InterlockedIncrement(&g_b.c_ticks);
-    target.pair_id++;
-    arm_ik_now(arm, &target);
-    v = InterlockedCompareExchange(&g_b.s_arm_map_scale, 0, 0);
-    memcpy(&f, &v, sizeof f);
-    scale = (double)f;
-    if (!(scale > 0.2) || !(scale < 1.5)) { bad++; scale = 0.5716; }
-    for (k = 0; k < 3; k++)
-        target.wrist_view[k] = target.player_shoulder_view[k] +
-                               (wv[k] - sv[k]) * (0.95 / scale);
-
-    /* Baseline pair, unturned, and its command becomes the first thing the
-       game's SetPos holds during the turn. */
-    InterlockedIncrement(&g_b.c_ticks);
-    target.pair_id++;
-    arm_ik_now(arm, &target);
-    if (!hand_command_read(cmd, NULL, NULL)) bad++;
-    for (k = 0; k < 3; k++) pulled[k] = (double)th_engine_pull((int)cmd[k]);
-    set_pos_quat(pulled, setpos_prev);
-    measured0 = (int)g_b.c_arm_hand_measured;
-    published0 = (int)g_b.c_arm_hand_written;
-    /* Earlier categories leave their own stats behind; the base-drift
-       assertions below need a clean slate to be deterministic. */
-    InterlockedExchange(&g_b.s_arm_base_drift, f2l(0.0f));
-    InterlockedExchange(&g_b.s_arm_base_drift_worst, f2l(0.0f));
-    InterlockedExchange(&g_b.s_arm_cmd_drift, f2l(0.0f));
-    InterlockedExchange(&g_b.s_arm_cmd_drift_worst, f2l(0.0f));
-
-    /* The turn: 3 degrees of body yaw per pair, the player frozen in world,
-       the game applying last pair's command onto the freshly turned
-       animation exactly as SetPos would. The one extra pair at the end
-       holds the turn still and rotates the WRITTEN hand basis alone by 20
-       degrees - the base-drift instrument must read back exactly that. */
-    for (p = 1; p <= TURN_PAIRS + 1; p++) {
-        double yawdeg = 3.0 * (double)((p <= TURN_PAIRS) ? p : TURN_PAIRS);
-        th_axis(0.0, 1.0, 0.0, yawdeg, spin);
-        quat_rebase(root_q, spin, turn);
-        memcpy(blob, rig0, sizeof blob);
-        th_turn_rig(blob + DG_OBJS_ARRAY, STRIDE, JOINTS, turn);
-        dg_ik_quat_mul(turn, anim, anim_now);
-        /* The game's hierarchy carries last pair's q4/q5 in its MATRICES,
-           and the pair path removes them again to recover the animation.
-           A rig without them makes that removal rotate the recovered rest
-           by the inverse of our own adjusts - a feedback that is pure
-           harness artifact. So apply them, positions and hand basis both,
-           exactly as the engine would. */
-        {
-            double aq[4], a4w[4], a5w[4], rel3[3], rot3[3];
-            float *m4 = (float *)(blob + DG_OBJS_ARRAY + 4 * STRIDE);
-            float *m5 = (float *)(blob + DG_OBJS_ARRAY + 5 * STRIDE);
-            double p4[3], p5[3], p6[3];
-            for (k = 0; k < 4; k++)
-                aq[k] = (double)g_b.arm_map_cached_adjust[k];
-            if (!adjust_quat_to_world(&ADJ_FRAME_LEGACY, aq, a4w)) { bad++; break; }
-            for (k = 0; k < 4; k++)
-                aq[k] = (double)g_b.arm_map_cached_adjust[4 + k];
-            if (!adjust_quat_to_world(&ADJ_FRAME_LEGACY, aq, a5w)) { bad++; break; }
-            for (k = 0; k < 3; k++) {
-                p4[k] = (double)m4[12 + k];
-                p5[k] = (double)m5[12 + k];
-                p6[k] = (double)hand_m[12 + k];
-            }
-            for (k = 0; k < 3; k++) rel3[k] = p5[k] - p4[k];
-            arm_quat_rotate(a4w, rel3, rot3);
-            for (k = 0; k < 3; k++) p5[k] = p4[k] + rot3[k];
-            for (k = 0; k < 3; k++) rel3[k] = p6[k] - p4[k];
-            arm_quat_rotate(a4w, rel3, rot3);
-            for (k = 0; k < 3; k++) p6[k] = p4[k] + rot3[k];
-            for (k = 0; k < 3; k++) rel3[k] = p6[k] - p5[k];
-            arm_quat_rotate(a5w, rel3, rot3);
-            for (k = 0; k < 3; k++) p6[k] = p5[k] + rot3[k];
-            for (k = 0; k < 3; k++) {
-                m5[12 + k] = (float)p5[k];
-                hand_m[12 + k] = (float)p6[k];
-            }
-        }
-        if (!th_next_hand(anim_now, setpos_prev, achieved)) { bad++; break; }
-        if (p == TURN_PAIRS + 1) {
-            double extra[4];
-            th_axis(0.0, 1.0, 0.0, 20.0, extra);
-            dg_ik_quat_mul(extra, achieved, achieved);
-        }
-        th_write_basis(hand_m, achieved);
-        for (k = 0; k < 4; k++) adjust[6 * 4 + k] = (float)setpos_prev[k];
-        InterlockedIncrement(&g_b.c_ticks);
-        target.pair_id++;
-        arm_ik_now(arm, &target);
-        if (hand_command_read(cmd, NULL, NULL)) {
-            for (k = 0; k < 3; k++)
-                pulled[k] = (double)th_engine_pull((int)cmd[k]);
-            set_pos_quat(pulled, setpos_prev);
-        }
-        /* The onset pair still measures against a pre-turn prediction, so
-           the discontinuity of STARTING the turn is excluded; from pair 3 on
-           everything must move at turn rate. Joint deltas are tracked in
-           adjust space - the thing the hierarchy actually inherits. */
-        {
-            double q4n[4], q5n[4], d;
-            for (k = 0; k < 4; k++) {
-                q4n[k] = (double)g_b.arm_map_cached_adjust[k];
-                q5n[k] = (double)g_b.arm_map_cached_adjust[4 + k];
-            }
-            if (p >= 3 && p <= TURN_PAIRS) {
-                d = th_angle_between(q4n, probe_q4);
-                if (d > dq_max) dq_max = d;
-                d = th_angle_between(q5n, probe_q5);
-                if (d > dq_max) dq_max = d;
-                v = g_b.s_arm_hand_residual;
-                memcpy(&f, &v, sizeof f);
-                if ((double)f > res_max) res_max = (double)f;
-                v = g_b.s_arm_hand_off_drift;
-                memcpy(&f, &v, sizeof f);
-                if ((double)f > drift_max) drift_max = (double)f;
-                v = g_b.s_arm_base_drift;
-                memcpy(&f, &v, sizeof f);
-                if ((double)f > base_max) base_max = (double)f;
-                v = g_b.s_arm_cmd_drift;
-                memcpy(&f, &v, sizeof f);
-                if ((double)f > cmd_max) cmd_max = (double)f;
-            }
-            if (p == 2) lim_frozen = (int)g_b.c_arm_hand_limited;
-            for (k = 0; k < 4; k++) {
-                probe_q4[k] = q4n[k];
-                probe_q5[k] = q5n[k];
-            }
-        }
-        if (p > TURN_PAIRS - 10 && p <= TURN_PAIRS) {
-            LONG rv = g_b.s_arm_hand_residual;
-            float rf;
-            memcpy(&rf, &rv, sizeof rf);
-            res_late += (double)rf;
-            rv = g_b.s_arm_hand_off_drift;
-            memcpy(&rf, &rv, sizeof rf);
-            drift_late += (double)rf;
-            late_n++;
-        }
-    }
-    if (late_n > 0) { res_late /= late_n; drift_late /= late_n; }
-    if ((int)g_b.c_arm_hand_measured - measured0 < TURN_PAIRS - 2) bad++;
-    if ((int)g_b.c_arm_hand_written - published0 < TURN_PAIRS - 2) bad++;
-    /* The teeth. Residual = the one-pair lag, nothing more; the offset walks
-       at far below the turn rate; no joint ever jumps faster than a few
-       times the turn per pair - the pre-fix probe measured 175 here - and
-       the envelope never saturates once the loop is closed faithfully. */
-    if (!(res_max < 6.0)) bad++;
-    if (!(drift_max < 2.0)) bad++;
-    if (!(dq_max < 20.0)) bad++;
-    if (!(base_max < 8.0)) bad++;
-    if (lim_frozen < 0 || (int)g_b.c_arm_hand_limited != lim_frozen) bad++;
-    if (!g_b.arm_orient_have_prev) bad++;
-    if (!g_b.hand_have_prev_twist) bad++;
-    /* The swing branch memory must be standing after a driven run, and its
-       reference must BE the applied (cap-bounded) angle - an unbounded
-       reference is the runaway class all over again. */
-    if (!g_b.hand_have_prev_swing) bad++;
-    if (fabs(g_b.hand_prev_swing_rad) > DG_HAND_WRIST_SWING_RAD + 1e-9)
-        bad++;
-    /* The controlled jump: the last pair turned the written basis alone by
-       20 degrees, and both the current reading and the run's worst must say
-       so - the loop itself never exceeded the turn-rate scale. The command
-       stream compensates that same jump, so its drift instrument must see
-       it too, and must have been calm through the plain turn. */
-    {
-        float bd;
-        v = g_b.s_arm_base_drift;
-        memcpy(&bd, &v, sizeof bd);
-        if (fabs((double)bd - 20.0) > 1.5) bad++;
-        v = g_b.s_arm_base_drift_worst;
-        memcpy(&bd, &v, sizeof bd);
-        if (bd < 19.0f) bad++;
-        if (!(cmd_max < 15.0)) bad++;
-        v = g_b.s_arm_cmd_drift;
-        memcpy(&bd, &v, sizeof bd);
-        /* The command answers a 20-degree basis jump partly through the
-           wrist split, so ~10 is what actually leaves; the window pins
-           that it reacts at all and not wildly. */
-        if ((double)bd < 5.0 || (double)bd > 30.0) bad++;
-        v = g_b.s_arm_cmd_drift_worst;
-        memcpy(&bd, &v, sizeof bd);
-        if ((double)bd < 5.0) bad++;
-    }
-
-    /* The remembered twist must BE the last APPLIED one - fore plus wrist,
-       bounded by the caps - or the unwrap is anchored to garbage: a raw
-       reference winds up whole turns and pins the clamps forever. */
-    {
-        float ft, wt;
-        v = g_b.s_arm_hand_fore_twist;
-        memcpy(&ft, &v, sizeof ft);
-        v = g_b.s_arm_hand_wrist_twist;
-        memcpy(&wt, &v, sizeof wt);
-        if (fabs(g_b.hand_prev_twist_rad * 180.0 / 3.14159265358979323846 -
-                 ((double)ft + (double)wt)) > 0.01) bad++;
-    }
-
-    /* One deliberately CLAMPED stabilize, straight in: a 190-degree twist
-       demand applies as the capped 145, and the branch memory must hold
-       the APPLIED sum - a raw reference here reads 170 and is the runaway
-       that latched the clamps on 2026-08-20. Runs AFTER the stats
-       consistency check above: this direct call bypasses arm_ik_now, so
-       the fore/wrist stat slots deliberately stay at the loop's values. */
-    {
-        double cl[5][3];
-        double a4i[4] = { 0.0, 0.0, 0.0, 1.0 };
-        double a5i[4] = { 0.0, 0.0, 0.0, 1.0 };
-        double twq[4], swq[4], wq[4], handl[4], achl[4], stored_deg;
-        DG_IK_HAND_STABILIZE_OUT rep;
-        memset(cl, 0, sizeof cl);
-        cl[3][0] = 200.0;
-        cl[4][0] = 400.0;                    /* forearm along +X */
-        spin[0] = sin(0.5 * 190.0 * 3.14159265358979323846 / 180.0);
-        spin[1] = 0.0;
-        spin[2] = 0.0;
-        spin[3] = cos(0.5 * 190.0 * 3.14159265358979323846 / 180.0);
-        for (k = 0; k < 4; k++) twq[k] = spin[k];
-        th_axis(0.0, 1.0, 0.0, 10.0, swq);
-        dg_ik_quat_mul(twq, swq, wq);
-        world_quat_to_adjust(&ADJ_FRAME_LEGACY, wq, handl);
-        for (k = 0; k < 4; k++) achl[k] = wq[k];
-        g_b.hand_have_prev_twist = 0;
-        g_b.hand_have_prev_swing = 0;
-        if (!arm_hand_stabilize(cl, a4i, a5i, handl, achl, 0.0, &rep))
-            bad++;
-        stored_deg = g_b.hand_prev_twist_rad * 180.0 /
-                     3.14159265358979323846;
-        if (fabs(fabs(stored_deg) - 145.0) > 0.01) bad++;
-    }
-
-    /* And the swing seam, straight in like the twist above: a pure swing
-       walked 170 -> 190 about the same axis must keep the clamped wrist on
-       that axis (memoryless, the short arc flips to -Y at 180 and the
-       applied 70 teleports 140 degrees - the 2026-08-21 body-turn flap),
-       and a demand home at -30 must fold straight back through the bounded
-       applied reference instead of latching at the cap. */
-    {
-        double cl[5][3];
-        double a4s[4], a5s[4], swq[4], handl[4], achl[4];
-        DG_IK_HAND_STABILIZE_OUT rep;
-        int leg;
-        /* After the fold-back at -30 the walk climbs again, past the cap
-           and across the seam: 200 is a name 40 longer than its short arc
-           -160 and outside the 70 cap, so it is renamed (2026-09-03) and
-           the applied crosses to -70; 260 is then -100 on that branch and
-           the applied stays -70 - the raw reference is wired through and
-           walks the renamed branch. */
-        double legs_deg[7] = { 170.0, 190.0, -30.0, 40.0, 120.0, 200.0,
-                               260.0 };
-        memset(cl, 0, sizeof cl);
-        cl[3][0] = 200.0;
-        cl[4][0] = 400.0;                    /* forearm along +X */
-        g_b.hand_have_prev_twist = 0;
-        g_b.hand_have_prev_swing = 0;
-        for (leg = 0; leg < 7; leg++) {
-            a4s[0] = 0.0; a4s[1] = 0.0; a4s[2] = 0.0; a4s[3] = 1.0;
-            a5s[0] = 0.0; a5s[1] = 0.0; a5s[2] = 0.0; a5s[3] = 1.0;
-            th_axis(0.0, 1.0, 0.0, legs_deg[leg], swq);
-            world_quat_to_adjust(&ADJ_FRAME_LEGACY, swq, handl);
-            for (k = 0; k < 4; k++) achl[k] = swq[k];
-            if (!arm_hand_stabilize(cl, a4s, a5s, handl, achl, 0.0, &rep))
-                bad++;
-            if (leg == 0 &&
-                fabs(rep.wrist_swing_rad * 180.0 /
-                     3.14159265358979323846 - 70.0) > 0.01) bad++;
-            if (leg == 1) {
-                if (fabs(rep.raw_swing_rad * 180.0 /
-                         3.14159265358979323846 - 190.0) > 0.01) bad++;
-                if (rep.wrist_swing_axis[1] < 0.999) bad++;
-            }
-            if (leg == 2 &&
-                fabs(rep.wrist_swing_rad * 180.0 /
-                     3.14159265358979323846 + 30.0) > 0.01) bad++;
-            if (leg == 5) {
-                if (fabs(rep.raw_swing_rad * 180.0 /
-                         3.14159265358979323846 + 160.0) > 0.01) bad++;
-                if (fabs(rep.wrist_swing_rad * 180.0 /
-                         3.14159265358979323846 + 70.0) > 0.01) bad++;
-            }
-            if (leg == 6) {
-                if (fabs(rep.raw_swing_rad * 180.0 /
-                         3.14159265358979323846 + 100.0) > 0.01) bad++;
-                if (fabs(rep.wrist_swing_rad * 180.0 /
-                         3.14159265358979323846 + 70.0) > 0.01) bad++;
-                if (fabs(g_b.hand_prev_swing_raw_rad * 180.0 /
-                         3.14159265358979323846 + 100.0) > 0.01) bad++;
-            }
-        }
-    }
-
-    /* The envelope is a KNOB, and the whole point of the knob is that a
-       raised cap actually reaches the solver: the same 190-degree demand
-       that applies as 145 by default must apply as 190 when the marker
-       says 135,55. The arm's entire roll authority runs through here, so
-       a knob that silently kept the default would be the defect it exists
-       to fix. Restored to the defaults before the legs below. */
-    {
-        double cl[5][3];
-        double a4s[4], a5s[4], twq[4], swq[4], wq[4], handl[4], achl[4];
-        DG_IK_HAND_STABILIZE_OUT rep;
-        double half = 0.5 * 190.0 * 3.14159265358979323846 / 180.0;
-        memset(cl, 0, sizeof cl);
-        cl[3][0] = 200.0;
-        cl[4][0] = 400.0;
-        a4s[0] = 0.0; a4s[1] = 0.0; a4s[2] = 0.0; a4s[3] = 1.0;
-        a5s[0] = 0.0; a5s[1] = 0.0; a5s[2] = 0.0; a5s[3] = 1.0;
-        twq[0] = sin(half); twq[1] = 0.0; twq[2] = 0.0; twq[3] = cos(half);
-        th_axis(0.0, 1.0, 0.0, 10.0, swq);
-        dg_ik_quat_mul(twq, swq, wq);
-        world_quat_to_adjust(&ADJ_FRAME_LEGACY, wq, handl);
-        for (k = 0; k < 4; k++) achl[k] = wq[k];
-        InterlockedExchange(&g_b.hand_fore_twist_mdeg, 135000);
-        InterlockedExchange(&g_b.hand_wrist_twist_mdeg, 55000);
-        g_b.hand_have_prev_twist = 0;
-        g_b.hand_have_prev_swing = 0;
-        if (!arm_hand_stabilize(cl, a4s, a5s, handl, achl, 0.0, &rep))
-            bad++;
-        /* Memoryless, so the short arc names this -170: the raised cap
-           takes 135 of it and the wrist the remaining 35. */
-        if (fabs(rep.fore_twist_rad * 180.0 /
-                 3.14159265358979323846 + 135.0) > 0.01) bad++;
-        if (fabs(rep.wrist_twist_rad * 180.0 /
-                 3.14159265358979323846 + 35.0) > 0.01) bad++;
-        /* And a zero slot is the built-in default, never a zero envelope:
-           a configure that never ran must not pin every hand at nothing.
-           The inputs are rebuilt because arm_hand_stabilize writes its
-           arguments back - feeding the first call's outputs in again would
-           ask a different question and quietly pass. */
-        a4s[0] = 0.0; a4s[1] = 0.0; a4s[2] = 0.0; a4s[3] = 1.0;
-        a5s[0] = 0.0; a5s[1] = 0.0; a5s[2] = 0.0; a5s[3] = 1.0;
-        world_quat_to_adjust(&ADJ_FRAME_LEGACY, wq, handl);
-        for (k = 0; k < 4; k++) achl[k] = wq[k];
-        InterlockedExchange(&g_b.hand_fore_twist_mdeg, 0);
-        InterlockedExchange(&g_b.hand_wrist_twist_mdeg, 0);
-        g_b.hand_have_prev_twist = 0;
-        g_b.hand_have_prev_swing = 0;
-        if (!arm_hand_stabilize(cl, a4s, a5s, handl, achl, 0.0, &rep))
-            bad++;
-        if (fabs(rep.fore_twist_rad * 180.0 /
-                 3.14159265358979323846 + 90.0) > 0.01) bad++;
-        if (fabs(rep.wrist_twist_rad * 180.0 /
-                 3.14159265358979323846 + 55.0) > 0.01) bad++;
-    }
-
-    /* And the twist rename through the same wrapper: a demand walking
-       -100, -150 keeps its names (the second is outside the 145 cap but
-       IS the short arc); -200 is outside the cap and 40 longer than its
-       short arc 160, so it is renamed and the applied crosses to +145;
-       from there -250, -300, -326 are 110, 60, 34 and apply exactly - the
-       branch this leaves in the raw reference is 34, never the wound -326
-       that pinned the run-11 hand (2026-09-03). A demand of -60 then
-       applies exactly. */
-    {
-        double cl[5][3];
-        double a4s[4], a5s[4], twq[4], swq[4], wq[4], handl[4], achl[4];
-        DG_IK_HAND_STABILIZE_OUT rep;
-        int leg;
-        double legs_deg[7] = { -100.0, -150.0, -200.0, -250.0, -300.0,
-                               -326.0, -60.0 };
-        memset(cl, 0, sizeof cl);
-        cl[3][0] = 200.0;
-        cl[4][0] = 400.0;                    /* forearm along +X */
-        g_b.hand_have_prev_twist = 0;
-        g_b.hand_have_prev_swing = 0;
-        for (leg = 0; leg < 7; leg++) {
-            double half = 0.5 * legs_deg[leg] *
-                          3.14159265358979323846 / 180.0;
-            a4s[0] = 0.0; a4s[1] = 0.0; a4s[2] = 0.0; a4s[3] = 1.0;
-            a5s[0] = 0.0; a5s[1] = 0.0; a5s[2] = 0.0; a5s[3] = 1.0;
-            twq[0] = sin(half); twq[1] = 0.0; twq[2] = 0.0;
-            twq[3] = cos(half);
-            th_axis(0.0, 1.0, 0.0, 10.0, swq);
-            dg_ik_quat_mul(twq, swq, wq);
-            world_quat_to_adjust(&ADJ_FRAME_LEGACY, wq, handl);
-            for (k = 0; k < 4; k++) achl[k] = wq[k];
-            if (!arm_hand_stabilize(cl, a4s, a5s, handl, achl, 0.0, &rep))
-                bad++;
-            if (leg == 1 &&
-                fabs(rep.raw_twist_rad * 180.0 /
-                     3.14159265358979323846 + 150.0) > 0.01) bad++;
-            if (leg == 2) {
-                if (fabs(rep.raw_twist_rad * 180.0 /
-                         3.14159265358979323846 - 160.0) > 0.01) bad++;
-                if (fabs(g_b.hand_prev_twist_rad * 180.0 /
-                         3.14159265358979323846 - 145.0) > 0.01) bad++;
-            }
-            if (leg == 5) {
-                if (fabs(rep.raw_twist_rad * 180.0 /
-                         3.14159265358979323846 - 34.0) > 0.01) bad++;
-                if (fabs(g_b.hand_prev_twist_rad * 180.0 /
-                         3.14159265358979323846 - 34.0) > 0.01) bad++;
-                if (fabs(g_b.hand_prev_twist_raw_rad * 180.0 /
-                         3.14159265358979323846 - 34.0) > 0.01) bad++;
-            }
-            if (leg == 6 &&
-                fabs(g_b.hand_prev_twist_rad * 180.0 /
-                     3.14159265358979323846 + 60.0) > 0.01) bad++;
-        }
-    }
-
-    arm_map_forget();
-    g_b.a.gm_player_arm_body = 0;
-    InterlockedExchange(&g_b.arm_anchor, saved_anchor);
-    InterlockedExchange(&g_b.skel_stride, 0);
-    InterlockedExchange(&g_b.skel_parents_read, 0);
-    InterlockedExchange(&g_b.skel_region_end, 0);
-    InterlockedExchange(&g_b.c_ticks, 0);
-    InterlockedExchange(&g_b.s_arm_body_drift, f2l(0.0f));
-
-    printf("  %-6s walking turn: 3 deg of body yaw per pair for %d pairs "
-           "with the game loop closed faithfully - residual stays the "
-           "one-pair lag (max %.2f), the offset walks at %.2f deg max, no "
-           "joint jumps past %.2f deg per pair (the memoryless solve "
-           "measured 175 here), and the wrist envelope never saturates\n",
-           bad ? "FAIL" : "ok", TURN_PAIRS, res_max, drift_max, dq_max);
-    return bad ? 1 : 0;
-}
-
-static int t_arm_mapping_is_once_per_pair(void)
-{
-    enum { STRIDE = 0x180, JOINTS = 7, FEEDBACK_PAIRS = 256 };
-    static unsigned char blob[DG_OBJS_ARRAY + JOINTS * STRIDE];
-    static unsigned char obj[0x40], mc[0x70];
-    static float adjust[55 * 4];
-    ULONGLONG arm = (ULONGLONG)(ULONG_PTR)obj;
-    DG_BRIDGE_ARM_TARGET target;
-    float feedback_ref[8];
-    const double clean_upper[3] = { 200.0, 0.0, 0.0 };
-    const double clean_fore[3] = { 100.0, 173.20508, 0.0 };
-    double a4[4], a5[4], wq4[4], wq5[4];
-    double live_upper[3], inherited_fore[3], live_fore[3];
-    int j, k, bad = 0;
-
-    memset(blob, 0, sizeof blob);
-    memset(obj, 0, sizeof obj);
-    memset(mc, 0, sizeof mc);
-    memset(adjust, 0, sizeof adjust);
-    *(ULONGLONG *)(obj + 0x00) = (ULONGLONG)(ULONG_PTR)blob;
-    *(ULONGLONG *)(obj + 0x08) = (ULONGLONG)(ULONG_PTR)mc;
-    *(LONG *)(mc + 0x14) = 55;
-    *(ULONGLONG *)(mc + 0x48) = (ULONGLONG)(ULONG_PTR)adjust;
-    for (j = 0; j < JOINTS; j++) {
-        float *m = (float *)(blob + DG_OBJS_ARRAY + j * STRIDE);
-        m[0] = m[5] = m[10] = m[15] = 1.0f;
-    }
-    /* 2->3 is the outward pole basis; 4->5->6 is a 200/200 arm whose
-       animated wrist is bent inside the mapper's deliberate 99% ceiling. */
-    ((float *)(blob + DG_OBJS_ARRAY + 3 * STRIDE))[14] = 100.0f;
-    ((float *)(blob + DG_OBJS_ARRAY + 5 * STRIDE))[12] = 200.0f;
-    ((float *)(blob + DG_OBJS_ARRAY + 6 * STRIDE))[12] = 300.0f;
-    ((float *)(blob + DG_OBJS_ARRAY + 6 * STRIDE))[13] = 173.20508f;
-
-    InterlockedExchange(&g_b.skel_stride, STRIDE);
-    InterlockedExchange(&g_b.skel_parents_read, JOINTS);
-    InterlockedExchange(&g_b.skel_region_end, (LONG)sizeof blob);
-    for (j = 0; j < JOINTS; j++) InterlockedExchange(&g_b.skel_parents[j], 0);
-    InterlockedExchange(&g_b.skel_parents[3], 2);
-    InterlockedExchange(&g_b.skel_parents[4], 3);
-    InterlockedExchange(&g_b.skel_parents[5], 4);
-    InterlockedExchange(&g_b.skel_parents[6], 5);
-    g_b.a.gm_player_arm_body = (ULONGLONG)(ULONG_PTR)&arm;
-    InterlockedExchange(&g_b.ik_active, 0);
-    InterlockedExchange(&g_b.c_ticks, 0);
-    InterlockedExchange(&g_b.c_arm_pairs_seen, 0);
-    InterlockedExchange(&g_b.c_arm_pairs_eligible, 0);
-    InterlockedExchange(&g_b.c_arm_pairs_accepted, 0);
-    InterlockedExchange(&g_b.c_arm_pairs_refused, 0);
-    InterlockedExchange(&g_b.c_arm_pairs_calibration, 0);
-    InterlockedExchange(&g_b.c_arm_pair_replays, 0);
-    arm_map_forget();
-
-    memset(&target, 0, sizeof target);
-    target.write = 1;
-    target.weight = 1.0;
-    target.stream_id = 7;
-    target.pair_id = 100;
-    target.wrist_view[0] = 770.0;
-    target.hand_quat[3] = 1.0;
-
-    /* Identity acquisition and all extra seams of that first pair are blank. */
-    arm_ik_now(arm, &target);
-    arm_ik_now(arm, &target);
-    if (*(ULONGLONG *)(mc + 0x38) != 0) bad++;
-
-    InterlockedExchange(&g_b.c_ticks, 1);
-    target.pair_id++;
-    arm_ik_now(arm, &target);
-    if (*(ULONGLONG *)(mc + 0x38) != 0) bad++;
-
-    /* After two clean ticks, one whole pair captures calibration and remains
-       blank. Only the following pair may write. */
-    InterlockedExchange(&g_b.c_ticks, DG_ADJ_SETTLE_TICKS + 1);
-    target.pair_id++;
-    arm_ik_now(arm, &target);
-    arm_ik_now(arm, &target);
-    if (*(ULONGLONG *)(mc + 0x38) != 0) bad++;
-    target.pair_id++;
-    arm_ik_now(arm, &target);
-    if (*(ULONGLONG *)(mc + 0x38) != ((1ULL << 4) | (1ULL << 5))) bad++;
-    if (g_b.c_arm_pairs_seen != 4 || g_b.c_arm_pairs_eligible != 1 ||
-        g_b.c_arm_pairs_accepted != 1 || g_b.c_arm_pairs_refused != 0 ||
-        g_b.c_arm_pairs_calibration != 3) bad++;
-
-    /* Model the next hierarchy pass exactly as the runtime seam sees it: the
-       fixed animation directions inherit q4, and the child forearm then q5.
-       Across 256 fresh pair ids a fixed controller must keep producing the
-       same float quaternions. Reading those adjusted matrices as a new rest
-       pose makes the old implementation roll a little farther every pair. */
-    for (j = 0; j < FEEDBACK_PAIRS; j++) {
-        float *elbow = (float *)(blob + DG_OBJS_ARRAY + 5 * STRIDE);
-        float *wrist = (float *)(blob + DG_OBJS_ARRAY + 6 * STRIDE);
-        for (k = 0; k < 4; k++) {
-            a4[k] = (double)g_b.arm_map_cached_adjust[k];
-            a5[k] = (double)g_b.arm_map_cached_adjust[4 + k];
-        }
-        if (!adjust_quat_to_world(&ADJ_FRAME_LEGACY, a4, wq4) ||
-            !adjust_quat_to_world(&ADJ_FRAME_LEGACY, a5, wq5)) {
-            bad++;
-            break;
-        }
-        arm_quat_rotate(wq4, clean_upper, live_upper);
-        arm_quat_rotate(wq4, clean_fore, inherited_fore);
-        arm_quat_rotate(wq5, inherited_fore, live_fore);
-        for (k = 0; k < 3; k++) {
-            elbow[12 + k] = (float)live_upper[k];
-            wrist[12 + k] = (float)(live_upper[k] + live_fore[k]);
-        }
-        InterlockedIncrement(&g_b.c_ticks);
-        target.pair_id++;
-        arm_ik_now(arm, &target);
-        if (!g_b.arm_map_cache_valid) {
-            bad++;
-            break;
-        }
-        if (j == 0) {
-            memcpy(feedback_ref, g_b.arm_map_cached_adjust,
-                   sizeof feedback_ref);
-        } else {
-            for (k = 0; k < 8; k++)
-                if (fabs((double)g_b.arm_map_cached_adjust[k] -
-                         (double)feedback_ref[k]) > 1e-5) bad++;
-        }
-    }
-
-    /* Destroy the output and move the live wrist. A repeat of the same pair
-       must replay the cached quaternions byte-for-byte, not solve again from
-       the now different hierarchy. */
-    memset(adjust + 4 * 4, 0, 8 * sizeof(float));
-    ((float *)(blob + DG_OBJS_ARRAY + 6 * STRIDE))[12] = -900.0f;
-    arm_ik_now(arm, &target);
-    for (j = 0; j < 2; j++)
-        for (k = 0; k < 4; k++)
-            if (adjust[(j + 4) * 4 + k] !=
-                g_b.arm_map_cached_adjust[j * 4 + k]) bad++;
-    if (g_b.c_arm_pairs_seen != 4 + FEEDBACK_PAIRS ||
-        g_b.c_arm_pairs_accepted != 1 + FEEDBACK_PAIRS ||
-        g_b.c_arm_pair_replays != 3) bad++;
-
-    /* Restore the owner identity before release; the moved joint is never read
-       on this path, and release clears only the exact object we wrote. */
-    arm_map_forget();
-    if (*(ULONGLONG *)(mc + 0x38) != 0) bad++;
-    g_b.a.gm_player_arm_body = 0;
-    InterlockedExchange(&g_b.skel_stride, 0);
-    InterlockedExchange(&g_b.skel_parents_read, 0);
-    InterlockedExchange(&g_b.skel_region_end, 0);
-    InterlockedExchange(&g_b.c_ticks, 0);
-
-    printf("  %-6s arm map lifecycle: two-tick settle and calibration suppress "
-           "whole pairs, one solve is replayed byte-identically across three "
-           "extra seams, and 256 adjusted hierarchy passes do not roll\n",
-           bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-static int t_arm_freeze_replays_one_pair_and_never_solves(void)
-{
-    enum { STRIDE = 0x180, JOINTS = 7, FREEZE_PAIRS = 256 };
-    static unsigned char blob[DG_OBJS_ARRAY + JOINTS * STRIDE];
-    static unsigned char obj[0x40], mc[0x70];
-    static float adjust[55 * 4];
-    ULONGLONG arm = (ULONGLONG)(ULONG_PTR)obj;
-    DG_BRIDGE_ARM_TARGET target;
-    float frozen[8];
-    LONG accepted_at_freeze;
-    int j, k, bad = 0;
-
-    /* The same synthetic hierarchy the mapping test uses: a 200/200 arm on
-       a 7-joint skeleton with an outward pole. */
-    memset(blob, 0, sizeof blob);
-    memset(obj, 0, sizeof obj);
-    memset(mc, 0, sizeof mc);
-    memset(adjust, 0, sizeof adjust);
-    *(ULONGLONG *)(obj + 0x00) = (ULONGLONG)(ULONG_PTR)blob;
-    *(ULONGLONG *)(obj + 0x08) = (ULONGLONG)(ULONG_PTR)mc;
-    *(LONG *)(mc + 0x14) = 55;
-    *(ULONGLONG *)(mc + 0x48) = (ULONGLONG)(ULONG_PTR)adjust;
-    for (j = 0; j < JOINTS; j++) {
-        float *m = (float *)(blob + DG_OBJS_ARRAY + j * STRIDE);
-        m[0] = m[5] = m[10] = m[15] = 1.0f;
-    }
-    ((float *)(blob + DG_OBJS_ARRAY + 3 * STRIDE))[14] = 100.0f;
-    ((float *)(blob + DG_OBJS_ARRAY + 5 * STRIDE))[12] = 200.0f;
-    ((float *)(blob + DG_OBJS_ARRAY + 6 * STRIDE))[12] = 300.0f;
-    ((float *)(blob + DG_OBJS_ARRAY + 6 * STRIDE))[13] = 173.20508f;
-
-    InterlockedExchange(&g_b.skel_stride, STRIDE);
-    InterlockedExchange(&g_b.skel_parents_read, JOINTS);
-    InterlockedExchange(&g_b.skel_region_end, (LONG)sizeof blob);
-    for (j = 0; j < JOINTS; j++) InterlockedExchange(&g_b.skel_parents[j], 0);
-    InterlockedExchange(&g_b.skel_parents[3], 2);
-    InterlockedExchange(&g_b.skel_parents[4], 3);
-    InterlockedExchange(&g_b.skel_parents[5], 4);
-    InterlockedExchange(&g_b.skel_parents[6], 5);
-    g_b.a.gm_player_arm_body = (ULONGLONG)(ULONG_PTR)&arm;
-    InterlockedExchange(&g_b.ik_active, 0);
-    InterlockedExchange(&g_b.c_ticks, 0);
-    InterlockedExchange(&g_b.c_arm_pairs_accepted, 0);
-    InterlockedExchange(&g_b.c_arm_pairs_frozen, 0);
-    InterlockedExchange(&g_b.arm_freeze, 0);
-    arm_map_forget();
-
-    memset(&target, 0, sizeof target);
-    target.write = 1;
-    target.weight = 1.0;
-    target.stream_id = 7;
-    target.pair_id = 100;
-    target.wrist_view[0] = 770.0;
-    target.hand_quat[3] = 1.0;
-
-    /* The marker is on from the very first pair, deliberately: a freeze
-       that swallowed acquisition would leave the arm dead and look like a
-       success. Settle and calibration still have to run to completion, so
-       drive pairs until one is accepted rather than hard-coding how many
-       that takes - that count belongs to the mapping test, not this one. */
-    InterlockedExchange(&g_b.arm_freeze, 1);
-    for (j = 0; j < 16 && !g_b.c_arm_pairs_accepted; j++) {
-        InterlockedExchange(&g_b.c_ticks,
-                            (LONG)(DG_ADJ_SETTLE_TICKS + 1 + j));
-        arm_ik_now(arm, &target);
-        target.pair_id++;
-    }
-    if (*(ULONGLONG *)(mc + 0x38) != ((1ULL << 4) | (1ULL << 5))) bad++;
-    if (g_b.c_arm_pairs_accepted != 1) bad++;
-    if (g_b.c_arm_pairs_frozen != 0) bad++;   /* nothing to replay yet */
-    memcpy(frozen, g_b.arm_map_cached_adjust, sizeof frozen);
-    accepted_at_freeze = g_b.c_arm_pairs_accepted;
-
-    /* Now the experiment. The controller MOVES - a new wrist target every
-       pair, sweeping the whole reachable arc - and the hierarchy is
-       rewritten under us the way the runtime rewrites it. A frozen arm
-       must ignore all of it: identical bytes, no further solve. If this
-       test can be made to pass by a freeze that quietly re-solves, the
-       live experiment proves nothing, so the accepted counter is checked
-       as strictly as the bytes. */
-    for (j = 0; j < FREEZE_PAIRS; j++) {
-        double a = (double)j * 0.05;
-        float *wrist = (float *)(blob + DG_OBJS_ARRAY + 6 * STRIDE);
-        target.wrist_view[0] = 300.0 + 400.0 * cos(a);
-        target.wrist_view[1] = 400.0 * sin(a);
-        target.wrist_view[2] = 100.0 * sin(a * 0.5);
-        wrist[12] = (float)(300.0 + 50.0 * cos(a));
-        wrist[13] = (float)(173.0 + 50.0 * sin(a));
-        InterlockedIncrement(&g_b.c_ticks);
-        target.pair_id++;
-        arm_ik_now(arm, &target);
-        for (k = 0; k < 8; k++)
-            if (g_b.arm_map_cached_adjust[k] != frozen[k]) { bad++; break; }
-        for (k = 0; k < 4; k++) {
-            if (adjust[4 * 4 + k] != frozen[k]) { bad++; break; }
-            if (adjust[5 * 4 + k] != frozen[4 + k]) { bad++; break; }
-        }
-    }
-    if (g_b.c_arm_pairs_accepted != accepted_at_freeze) bad++;
-    if (g_b.c_arm_pairs_frozen != FREEZE_PAIRS) bad++;
-    if (*(ULONGLONG *)(mc + 0x38) != ((1ULL << 4) | (1ULL << 5))) bad++;
-
-    /* And it must not be a trapdoor: switching the marker back off returns
-       the next pair to the solver, or an evening ends with a frozen arm
-       and no idea why. */
-    ((float *)(blob + DG_OBJS_ARRAY + 5 * STRIDE))[12] = 200.0f;
-    ((float *)(blob + DG_OBJS_ARRAY + 6 * STRIDE))[12] = 300.0f;
-    ((float *)(blob + DG_OBJS_ARRAY + 6 * STRIDE))[13] = 173.20508f;
-    InterlockedExchange(&g_b.arm_freeze, 0);
-    target.wrist_view[0] = 770.0;
-    target.wrist_view[1] = 0.0;
-    target.wrist_view[2] = 0.0;
-    for (j = 0; j < 8 &&
-                g_b.c_arm_pairs_accepted == accepted_at_freeze; j++) {
-        InterlockedIncrement(&g_b.c_ticks);
-        target.pair_id++;
-        arm_ik_now(arm, &target);
-    }
-    if (g_b.c_arm_pairs_accepted != accepted_at_freeze + 1) bad++;
-
-    arm_map_forget();
-    g_b.a.gm_player_arm_body = 0;
-    InterlockedExchange(&g_b.skel_stride, 0);
-    InterlockedExchange(&g_b.skel_parents_read, 0);
-    InterlockedExchange(&g_b.skel_region_end, 0);
-    InterlockedExchange(&g_b.c_ticks, 0);
-    InterlockedExchange(&g_b.c_arm_pairs_frozen, 0);
-
-    printf("  %-6s arm freeze (constant-replay): one accepted pair is written "
-           "byte-identically across %d pairs while the controller sweeps and "
-           "the hierarchy moves, no further solve runs, and clearing the "
-           "marker hands the very next pair back to the solver\n",
-           bad ? "FAIL" : "ok", FREEZE_PAIRS);
-    return bad ? 1 : 0;
-}
-
-/* The instrument the freeze experiment will be read through, so it gets a
-   test of its own. The accumulator beside it sums absolute per-frame steps
-   and therefore cannot tell a hand that WINDS from a hand that merely
-   shakes - and winding is the whole symptom: fifteen revolutions in
-   sixty-seven seconds arrived at well under a degree per frame, invisible
-   to every jump-hunting number in this file. A meter that cannot separate
-   those two would send the next evening the same way as the last five. */
-static int t_hand_net_meter_separates_winding_from_shaking(void)
-{
-    enum { STRIDE = 0x180, JOINTS = 7, TURN_STEPS = 36, SHAKE_STEPS = 72 };
-    static unsigned char blob[DG_OBJS_ARRAY + JOINTS * STRIDE];
-    static unsigned char obj[0x40], mc[0x70];
-    ULONGLONG arm = (ULONGLONG)(ULONG_PTR)obj;
-    ULONGLONG objs = (ULONGLONG)(ULONG_PTR)blob;
-    float *hand = (float *)(blob + DG_OBJS_ARRAY + 6 * STRIDE);
-    double wind_total, wind_max, wind_end, shake_total, shake_max;
-    int j, bad = 0;
-
-    memset(blob, 0, sizeof blob);
-    memset(obj, 0, sizeof obj);
-    memset(mc, 0, sizeof mc);
-    *(ULONGLONG *)(obj + 0x00) = objs;
-    *(ULONGLONG *)(obj + 0x08) = (ULONGLONG)(ULONG_PTR)mc;
-    for (j = 0; j < JOINTS; j++) {
-        float *m = (float *)(blob + DG_OBJS_ARRAY + j * STRIDE);
-        m[0] = m[5] = m[10] = m[15] = 1.0f;
-    }
-
-    /* Discovery is not what is on trial: hand the probe a measured object
-       so it goes straight to the live-pose read, with joint 6 - the hand -
-       at the head of the chain, exactly where the runtime walk leaves it. */
-    InterlockedExchange(&g_b.skel_for_lo, (LONG)(DWORD)objs);
-    InterlockedExchange(&g_b.skel_for_hi, (LONG)(DWORD)(objs >> 32));
-    InterlockedExchange(&g_b.skel_stride, STRIDE);
-    InterlockedExchange(&g_b.skel_region_end, (LONG)sizeof blob);
-    InterlockedExchange(&g_b.skel_parents_read, JOINTS);
-    InterlockedExchange(&g_b.skel_chain_len, 1);
-    InterlockedExchange(&g_b.skel_chain[0], 6);
-    InterlockedExchange(&g_b.s_skel_hand_turned, f2l(0.0f));
-    InterlockedExchange(&g_b.c_skel_hand_samples, 0);
-    g_b.skel_hand_have_prev = 0;
-    g_b.skel_hand_have_ref = 0;
-
-    /* One full turn, ten degrees at a time. */
-    for (j = 0; j <= TURN_STEPS; j++) {
-        double a = (double)j * 10.0 * 3.14159265358979323846 / 180.0;
-        hand[0] = (float)cos(a);  hand[1] = (float)-sin(a);
-        hand[4] = (float)sin(a);  hand[5] = (float)cos(a);
-        hand[10] = 1.0f; hand[15] = 1.0f;
-        skel_probe_now(arm, 1);
-    }
-    {
-        LONG v = g_b.s_skel_hand_turned;   float f;
-        memcpy(&f, &v, sizeof f); wind_total = (double)f;
-        v = g_b.s_skel_hand_net_max; memcpy(&f, &v, sizeof f);
-        wind_max = (double)f;
-        v = g_b.s_skel_hand_net; memcpy(&f, &v, sizeof f);
-        wind_end = (double)f;
-    }
-    /* A full revolution: 360 degrees of travel, the net angle sweeps out to
-       a half turn and comes home. Folded into 0..180, so the tell is the
-       MAX, not the endpoint - which is back at the reference and would read
-       as perfect stillness on its own. */
-    if (fabs(wind_total - 360.0) > 2.0) bad++;
-    if (wind_max < 178.0) bad++;
-    if (wind_end > 2.0) bad++;
-
-    /* The same amount of travel, none of it net: five degrees each way,
-       twice as many steps. The accumulator cannot tell this apart from the
-       revolution above; the net meter must. */
-    InterlockedExchange(&g_b.s_skel_hand_turned, f2l(0.0f));
-    g_b.skel_hand_have_prev = 0;
-    g_b.skel_hand_have_ref = 0;
-    for (j = 0; j <= SHAKE_STEPS; j++) {
-        double a = ((j & 1) ? 5.0 : 0.0) * 3.14159265358979323846 / 180.0;
-        hand[0] = (float)cos(a);  hand[1] = (float)-sin(a);
-        hand[4] = (float)sin(a);  hand[5] = (float)cos(a);
-        hand[10] = 1.0f; hand[15] = 1.0f;
-        skel_probe_now(arm, 1);
-    }
-    {
-        LONG v = g_b.s_skel_hand_turned;   float f;
-        memcpy(&f, &v, sizeof f); shake_total = (double)f;
-        v = g_b.s_skel_hand_net_max; memcpy(&f, &v, sizeof f);
-        shake_max = (double)f;
-    }
-    if (fabs(shake_total - 360.0) > 5.0) bad++;   /* same total variation */
-    if (shake_max > 6.0) bad++;                   /* and no net rotation */
-
-    InterlockedExchange(&g_b.skel_for_lo, 0);
-    InterlockedExchange(&g_b.skel_for_hi, 0);
-    InterlockedExchange(&g_b.skel_stride, 0);
-    InterlockedExchange(&g_b.skel_region_end, 0);
-    InterlockedExchange(&g_b.skel_parents_read, 0);
-    InterlockedExchange(&g_b.skel_chain_len, 0);
-    InterlockedExchange(&g_b.s_skel_hand_turned, f2l(0.0f));
-    InterlockedExchange(&g_b.c_skel_hand_samples, 0);
-    g_b.skel_hand_have_prev = 0;
-    g_b.skel_hand_have_ref = 0;
-
-    printf("  %-6s hand net meter: one revolution and %d shakes travel the "
-           "same %.0f/%.0f degrees, and only the revolution shows it - net "
-           "max %.0f against %.0f, with the wound hand back at %.0f from its "
-           "reference so the endpoint alone would have called it still\n",
-           bad ? "FAIL" : "ok", SHAKE_STEPS / 2, wind_total, shake_total,
-           wind_max, shake_max, wind_end);
-    return bad ? 1 : 0;
-}
-
-/* The live findings, in order: solving every pair = fifteen revolutions a
-   minute; replaying one constant pair = dead still (831 pairs, 2026-08-22).
-   So the winding is made by the solve loop, and the named suspect was its
-   REST REFERENCE, recovered each pair from the live matrices by stripping
-   our own previous write back out of them. This test builds that loop with
-   a deliberately imperfect strip - a constant 2-degree roll residue about
-   the upper arm every hierarchy pass, in exactly the degree of freedom
-   joints 4/5 cannot see - and it DISPROVED the simple version of the
-   theory at the desk: the anchored solver absorbs a constant residue once
-   and sits still, a fixed point, not a spiral (walk over 90 passes: ~0).
-   That is locked in below as a regression bar, because an anchor that
-   starts winding under this rig has lost the property that makes it an
-   anchor. What the rest freeze still settles LIVE: the live loop has
-   moving animation, a moving controller and body compensation that this
-   rig does not - if freezing the reference stops the live tumble, the
-   recovered-reference channel is implicated under those live conditions;
-   if not, that channel is acquitted entirely. Either way the freeze must
-   provably (1) keep aiming alive - it is not the constant-replay of step
-   1 - (2) actually substitute the reference, visible as the solutions
-   parting from the recovered-reference run by about the residue, and
-   (3) read the residue on its drift meter. */
-static int t_rest_freeze_breaks_the_strip_feedback_loop(void)
-{
-    enum { STRIDE = 0x180, JOINTS = 7, PASSES = 90 };
-    static unsigned char blob[DG_OBJS_ARRAY + JOINTS * STRIDE];
-    static unsigned char obj[0x40], mc[0x70];
-    static float adjust[55 * 4];
-    ULONGLONG arm = (ULONGLONG)(ULONG_PTR)obj;
-    DG_BRIDGE_ARM_TARGET target;
-    const double clean_upper[3] = { 200.0, 0.0, 0.0 };
-    const double clean_fore[3] = { 100.0, 173.20508, 0.0 };
-    double first45[8], steady45[2][8], walk_deg[2], aim_deg[2], split_deg;
-    float drift_max;
-    int mode, j, k, bad = 0;
-
-    memset(obj, 0, sizeof obj);
-    memset(mc, 0, sizeof mc);
-    *(ULONGLONG *)(obj + 0x00) = (ULONGLONG)(ULONG_PTR)blob;
-    *(ULONGLONG *)(obj + 0x08) = (ULONGLONG)(ULONG_PTR)mc;
-    *(LONG *)(mc + 0x14) = 55;
-    *(ULONGLONG *)(mc + 0x48) = (ULONGLONG)(ULONG_PTR)adjust;
-
-    g_b.a.gm_player_arm_body = (ULONGLONG)(ULONG_PTR)&arm;
-    InterlockedExchange(&g_b.skel_stride, STRIDE);
-    InterlockedExchange(&g_b.skel_parents_read, JOINTS);
-    InterlockedExchange(&g_b.skel_region_end, (LONG)sizeof blob);
-    for (j = 0; j < JOINTS; j++) InterlockedExchange(&g_b.skel_parents[j], 0);
-    InterlockedExchange(&g_b.skel_parents[3], 2);
-    InterlockedExchange(&g_b.skel_parents[4], 3);
-    InterlockedExchange(&g_b.skel_parents[5], 4);
-    InterlockedExchange(&g_b.skel_parents[6], 5);
-
-    /* Once with the recovered reference, once with the frozen one; the same
-       residue both times. */
-    for (mode = 0; mode < 2; mode++) {
-        int have_first = 0;
-        memset(blob, 0, sizeof blob);
-        memset(adjust, 0, sizeof adjust);
-        for (j = 0; j < JOINTS; j++) {
-            float *m = (float *)(blob + DG_OBJS_ARRAY + j * STRIDE);
-            m[0] = m[5] = m[10] = m[15] = 1.0f;
-        }
-        ((float *)(blob + DG_OBJS_ARRAY + 3 * STRIDE))[14] = 100.0f;
-        ((float *)(blob + DG_OBJS_ARRAY + 5 * STRIDE))[12] = 200.0f;
-        ((float *)(blob + DG_OBJS_ARRAY + 6 * STRIDE))[12] = 300.0f;
-        ((float *)(blob + DG_OBJS_ARRAY + 6 * STRIDE))[13] = 173.20508f;
-
-        InterlockedExchange(&g_b.ik_active, 0);
-        InterlockedExchange(&g_b.arm_freeze, mode ? 2 : 0);
-        InterlockedExchange(&g_b.s_rest_drift, f2l(0.0f));
-        InterlockedExchange(&g_b.s_rest_drift_max, f2l(0.0f));
-        InterlockedExchange(&g_b.c_ticks, 0);
-        arm_map_forget();
-        g_b.arm_map_phase = 0;
-        g_b.rest_ref_have = 0;
-
-        memset(&target, 0, sizeof target);
-        target.write = 1;
-        target.weight = 1.0;
-        target.stream_id = 7;
-        target.pair_id = 100 + mode * 1000;
-        target.wrist_view[0] = 770.0;
-        target.hand_quat[3] = 1.0;
-
-        for (j = 0; j < 16 && !g_b.arm_map_cache_valid; j++) {
-            InterlockedExchange(&g_b.c_ticks,
-                                (LONG)(DG_ADJ_SETTLE_TICKS + 1 + j));
-            arm_ik_now(arm, &target);
-            target.pair_id++;
-        }
-        if (!g_b.arm_map_cache_valid) { bad++; break; }
-        if (mode == 1 && !g_b.rest_ref_have) bad++;
-
-        /* The hierarchy pass, as the runtime performs it, PLUS the
-           residue: after inheriting our adjusts the wrist is rolled two
-           degrees about the upper arm. Perfect strips were proven
-           byte-stable for 256 passes elsewhere; this is the imperfect
-           one. */
-        for (j = 0; j < PASSES; j++) {
-            float *elbow = (float *)(blob + DG_OBJS_ARRAY + 5 * STRIDE);
-            float *wrist = (float *)(blob + DG_OBJS_ARRAY + 6 * STRIDE);
-            double a4[4], a5[4], wq4[4], wq5[4];
-            double live_upper[3], inherited[3], live_fore[3], axis[3];
-            double eps[4], rolled[3], half, n;
-            for (k = 0; k < 4; k++) {
-                a4[k] = (double)g_b.arm_map_cached_adjust[k];
-                a5[k] = (double)g_b.arm_map_cached_adjust[4 + k];
-            }
-            if (!adjust_quat_to_world(&ADJ_FRAME_LEGACY, a4, wq4) ||
-                !adjust_quat_to_world(&ADJ_FRAME_LEGACY, a5, wq5)) { bad++; break; }
-            arm_quat_rotate(wq4, clean_upper, live_upper);
-            arm_quat_rotate(wq4, clean_fore, inherited);
-            arm_quat_rotate(wq5, inherited, live_fore);
-            n = sqrt(live_upper[0] * live_upper[0] +
-                     live_upper[1] * live_upper[1] +
-                     live_upper[2] * live_upper[2]);
-            if (!(n > 1e-9)) { bad++; break; }
-            for (k = 0; k < 3; k++) axis[k] = live_upper[k] / n;
-            half = 0.5 * 2.0 * 3.14159265358979323846 / 180.0;
-            eps[0] = axis[0] * sin(half);
-            eps[1] = axis[1] * sin(half);
-            eps[2] = axis[2] * sin(half);
-            eps[3] = cos(half);
-            arm_quat_rotate(eps, live_fore, rolled);
-            for (k = 0; k < 3; k++) {
-                elbow[12 + k] = (float)live_upper[k];
-                wrist[12 + k] = (float)(live_upper[k] + rolled[k]);
-            }
-            InterlockedIncrement(&g_b.c_ticks);
-            target.pair_id++;
-            arm_ik_now(arm, &target);
-            if (!g_b.arm_map_cache_valid) { bad++; break; }
-            if (!have_first) {
-                for (k = 0; k < 8; k++)
-                    first45[k] = (double)g_b.arm_map_cached_adjust[k];
-                have_first = 1;
-            }
-        }
-        for (k = 0; k < 8; k++)
-            steady45[mode][k] = (double)g_b.arm_map_cached_adjust[k];
-        if (have_first) {
-            double w4 = dg_ik_quat_angle(first45, steady45[mode]) *
-                        180.0 / 3.14159265358979323846;
-            double w5 = dg_ik_quat_angle(first45 + 4, steady45[mode] + 4) *
-                        180.0 / 3.14159265358979323846;
-            walk_deg[mode] = (w4 > w5) ? w4 : w5;
-        } else {
-            walk_deg[mode] = -1.0;
-        }
-
-        /* Aiming must stay alive in BOTH runs - the rest freeze is not the
-           constant-replay of step 1, and this is also the assert that
-           catches a freeze-mode gate regressed back to "any non-zero
-           freezes everything". */
-        {
-            double before[4], after[4];
-            for (k = 0; k < 4; k++)
-                before[k] = (double)g_b.arm_map_cached_adjust[4 + k];
-            target.wrist_view[1] = 300.0;
-            InterlockedIncrement(&g_b.c_ticks);
-            target.pair_id++;
-            arm_ik_now(arm, &target);
-            for (k = 0; k < 4; k++)
-                after[k] = (double)g_b.arm_map_cached_adjust[4 + k];
-            aim_deg[mode] = g_b.arm_map_cache_valid
-                ? dg_ik_quat_angle(before, after) *
-                  180.0 / 3.14159265358979323846
-                : -1.0;
-        }
-    }
-    /* A faded pair with the animation thrown 90 degrees off the frozen
-       reference: the maximum must not take it. The runtime's own blends
-       (weapon down, 108-111 degrees in the 2026-09-02 runs) otherwise hide
-       the strip number this meter exists for. */
-    {
-        float *elbow = (float *)(blob + DG_OBJS_ARRAY + 5 * STRIDE);
-        float *wrist = (float *)(blob + DG_OBJS_ARRAY + 6 * STRIDE);
-        elbow[12] = 0.0f; elbow[13] = 200.0f; elbow[14] = 0.0f;
-        wrist[12] = 0.0f; wrist[13] = 200.0f; wrist[14] = 200.0f;
-        target.weight = 0.5;
-        InterlockedIncrement(&g_b.c_ticks);
-        target.pair_id++;
-        arm_ik_now(arm, &target);
-        target.weight = 1.0;
-    }
-    {
-        LONG v = g_b.s_rest_drift_max;
-        memcpy(&drift_max, &v, sizeof drift_max);
-    }
-    {
-        double s4 = dg_ik_quat_angle(steady45[0], steady45[1]) *
-                    180.0 / 3.14159265358979323846;
-        double s5 = dg_ik_quat_angle(steady45[0] + 4, steady45[1] + 4) *
-                    180.0 / 3.14159265358979323846;
-        split_deg = (s4 > s5) ? s4 : s5;
-    }
-
-    /* The regression bar for the desk finding: the anchored solver holds a
-       constant residue at a fixed point. If either run walks, the anchor
-       has stopped anchoring. */
-    if (!(walk_deg[0] >= 0.0 && walk_deg[0] < 5.0)) bad++;
-    if (!(walk_deg[1] >= 0.0 && walk_deg[1] < 5.0)) bad++;
-    /* The substitution is real: the two steady states differ by about the
-       residue - the recovered run absorbed it, the frozen run refused it.
-       A rest freeze that quietly kept using the recovered reference makes
-       this zero. */
-    if (!(split_deg > 0.5 && split_deg < 6.0)) bad++;
-    /* Aiming lives in both modes. */
-    if (!(aim_deg[0] > 5.0 && aim_deg[1] > 5.0)) bad++;
-    /* And the drift meter read the residue it refused to follow. */
-    if (!((double)drift_max > 1.0 && (double)drift_max < 6.0)) bad++;
-
-    arm_map_forget();
-    InterlockedExchange(&g_b.arm_freeze, 0);
-    g_b.rest_ref_have = 0;
-    g_b.a.gm_player_arm_body = 0;
-    InterlockedExchange(&g_b.skel_stride, 0);
-    InterlockedExchange(&g_b.skel_parents_read, 0);
-    InterlockedExchange(&g_b.skel_region_end, 0);
-    InterlockedExchange(&g_b.c_ticks, 0);
-    InterlockedExchange(&g_b.s_rest_drift, f2l(0.0f));
-    InterlockedExchange(&g_b.s_rest_drift_max, f2l(0.0f));
-
-    printf("  %-6s rest freeze vs strip residue: a constant 2-degree strip "
-           "error does NOT wind the anchored solver (walks %.2f/%.2f deg in "
-           "%d passes - the live tumble needs more than this), the frozen "
-           "reference visibly parts from the recovered one by %.1f deg, "
-           "aiming stays alive in both (%.0f/%.0f deg on a target step), "
-           "and the drift meter read the %.1f-degree residue\n",
-           bad ? "FAIL" : "ok", walk_deg[0], walk_deg[1], PASSES, split_deg,
-           aim_deg[0], aim_deg[1], (double)drift_max);
-    return bad ? 1 : 0;
-}
-
-/* The aim gap is what turns Snake's body toward where the player FACES.
-   Two publishers died before this one. The hand-path publisher starved
-   with vr_arm_hand=off. The position-path publisher read the controller-
-   versus-head geometry, which does not change when the player turns on
-   their feet: a live session (2026-08-23) measured the gap pinned at 0.0
-   through eleven manual recalibrations, while a sideways hand swing spun
-   the body after the CONTROLLER, gap co-moving with drift at +127/+128.
-   This publisher reads the mapped head yaw minus the published body
-   drift, so this test pins the four properties the consumer steers by:
-   the gap is zero at calibration, it follows the FACING one-for-one, it
-   ignores the controller entirely, and a body turn moves it by exactly
-   MINUS the published drift ("d gap = -d drift", tail-chase impossible).
-   Plus the escape hatch: vr_follow_head_sign flips the head term only. */
-static int t_the_gap_reads_the_facing_minus_the_body(void)
-{
-    enum { STRIDE = 0x180, JOINTS = 7 };
-    static unsigned char blob[DG_OBJS_ARRAY + JOINTS * STRIDE];
-    static unsigned char obj[0x40], mc[0x70];
-    static float adjust[55 * 4];
-    ULONGLONG arm = (ULONGLONG)(ULONG_PTR)obj;
-    DG_BRIDGE_ARM_TARGET target;
-    float gap0, gap_head, gap_hand, gap_body, drift_body, gap_flip;
-    float gap_src_hand, gap_src_glance, gap_src_stick, gap_src_stick2;
-    LONG gv;
-    int j, k, bad = 0;
-
-    memset(blob, 0, sizeof blob);
-    memset(obj, 0, sizeof obj);
-    memset(mc, 0, sizeof mc);
-    memset(adjust, 0, sizeof adjust);
-    *(ULONGLONG *)(obj + 0x00) = (ULONGLONG)(ULONG_PTR)blob;
-    *(ULONGLONG *)(obj + 0x08) = (ULONGLONG)(ULONG_PTR)mc;
-    *(LONG *)(mc + 0x14) = 55;
-    *(ULONGLONG *)(mc + 0x48) = (ULONGLONG)(ULONG_PTR)adjust;
-    for (j = 0; j < JOINTS; j++) {
-        float *m = (float *)(blob + DG_OBJS_ARRAY + j * STRIDE);
-        m[0] = m[5] = m[10] = m[15] = 1.0f;
-    }
-    ((float *)(blob + DG_OBJS_ARRAY + 3 * STRIDE))[14] = 100.0f;
-    ((float *)(blob + DG_OBJS_ARRAY + 5 * STRIDE))[12] = 200.0f;
-    ((float *)(blob + DG_OBJS_ARRAY + 6 * STRIDE))[12] = 300.0f;
-    ((float *)(blob + DG_OBJS_ARRAY + 6 * STRIDE))[13] = 173.20508f;
-
-    g_b.a.gm_player_arm_body = (ULONGLONG)(ULONG_PTR)&arm;
-    InterlockedExchange(&g_b.skel_stride, STRIDE);
-    InterlockedExchange(&g_b.skel_parents_read, JOINTS);
-    InterlockedExchange(&g_b.skel_region_end, (LONG)sizeof blob);
-    for (j = 0; j < JOINTS; j++) InterlockedExchange(&g_b.skel_parents[j], 0);
-    InterlockedExchange(&g_b.skel_parents[3], 2);
-    InterlockedExchange(&g_b.skel_parents[4], 3);
-    InterlockedExchange(&g_b.skel_parents[5], 4);
-    InterlockedExchange(&g_b.skel_parents[6], 5);
-    InterlockedExchange(&g_b.ik_active, 0);
-    InterlockedExchange(&g_b.arm_freeze, 0);
-    InterlockedExchange(&g_b.c_ticks, 0);
-    InterlockedExchange(&g_b.s_arm_aim_gap, f2l(0.0f));
-    InterlockedExchange(&g_b.arm_aim_gap_tick, 0);
-    arm_map_forget();
-    g_b.arm_map_phase = 0;
-
-    memset(&target, 0, sizeof target);
-    target.write = 1;
-    target.weight = 1.0;
-    target.stream_id = 7;
-    target.pair_id = 100;
-    target.wrist_view[0] = 770.0;
-    target.hand_quat[3] = 1.0;
-    target.head_yaw_valid = 1;
-    target.head_yaw_rad = 0.0;
-    InterlockedExchange(&g_b.follow_head_sign, 1);
-    InterlockedExchange(&g_b.follow_src, 0);
-    g_b.hand_yaw0_have = 0;
-    g_b.stick_yaw0_have = 0;
-
-    for (j = 0; j < 16 && !g_b.arm_map_cache_valid; j++) {
-        InterlockedExchange(&g_b.c_ticks,
-                            (LONG)(DG_ADJ_SETTLE_TICKS + 1 + j));
-        arm_ik_now(arm, &target);
-        target.pair_id++;
-    }
-    if (!g_b.arm_map_cache_valid) bad++;
-    if (!g_b.head_yaw0_have) bad++;
-    gv = InterlockedCompareExchange(&g_b.s_arm_aim_gap, 0, 0);
-    memcpy(&gap0, &gv, sizeof gap0);
-    if (fabs((double)gap0) > 0.5) bad++;
-    if (InterlockedCompareExchange(&g_b.arm_aim_gap_tick, 0, 0) !=
-        InterlockedCompareExchange(&g_b.c_ticks, 0, 0)) bad++;
-
-    /* The player turns their FACING 30 degrees - by stick or on their
-       feet, upstream makes those the same motion. The controller and the
-       body stay. */
-    target.head_yaw_rad = 30.0 * 3.14159265358979323846 / 180.0;
-    InterlockedIncrement(&g_b.c_ticks);
-    target.pair_id++;
-    arm_ik_now(arm, &target);
-    gv = InterlockedCompareExchange(&g_b.s_arm_aim_gap, 0, 0);
-    memcpy(&gap_head, &gv, sizeof gap_head);
-    if (fabs((double)gap_head - 30.0) > 0.5) bad++;
-
-    /* The controller swings 30 degrees; the facing holds. The gap must
-       not move at all - the body steering after the HAND is the measured
-       live defect this publisher replaced. */
-    target.head_yaw_rad = 0.0;
-    InterlockedIncrement(&g_b.c_ticks);
-    target.pair_id++;
-    arm_ik_now(arm, &target);
-    {
-        double a = (90.0 + 30.0) * 3.14159265358979323846 / 180.0;
-        target.wrist_view[0] = 770.0 * sin(a);
-        target.wrist_view[2] = 770.0 * cos(a);
-    }
-    InterlockedIncrement(&g_b.c_ticks);
-    target.pair_id++;
-    arm_ik_now(arm, &target);
-    gv = InterlockedCompareExchange(&g_b.s_arm_aim_gap, 0, 0);
-    memcpy(&gap_hand, &gv, sizeof gap_hand);
-    if (fabs((double)gap_hand) > 0.5) bad++;
-
-    /* The body turns; facing and controller hold. The published drift
-       names the body's turn in whatever sign the basis convention
-       produces - the contract is not the sign itself but the SUM: with
-       the facing at zero, gap + drift = 0, which is exactly the
-       "d gap = -d drift" the follow's stability rests on. */
-    target.wrist_view[0] = 770.0;
-    target.wrist_view[2] = 0.0;
-    {
-        float *root = (float *)(blob + DG_OBJS_ARRAY);
-        double a = 30.0 * 3.14159265358979323846 / 180.0;
-        root[0] = (float)cos(a);  root[2] = (float)sin(a);
-        root[8] = (float)-sin(a); root[10] = (float)cos(a);
-    }
-    InterlockedIncrement(&g_b.c_ticks);
-    target.pair_id++;
-    arm_ik_now(arm, &target);
-    gv = InterlockedCompareExchange(&g_b.s_arm_aim_gap, 0, 0);
-    memcpy(&gap_body, &gv, sizeof gap_body);
-    gv = InterlockedCompareExchange(&g_b.s_arm_body_drift, 0, 0);
-    memcpy(&drift_body, &gv, sizeof drift_body);
-    if (!(fabs((double)drift_body) > 25.0)) bad++;
-    if (!(fabs((double)gap_body + (double)drift_body) < 1.0)) bad++;
-
-    /* The marker's escape hatch flips the head term and nothing else:
-       facing +30 under sign -1 reads as -30, the drift term unmoved. */
-    InterlockedExchange(&g_b.follow_head_sign, -1);
-    target.head_yaw_rad = 30.0 * 3.14159265358979323846 / 180.0;
-    InterlockedIncrement(&g_b.c_ticks);
-    target.pair_id++;
-    arm_ik_now(arm, &target);
-    gv = InterlockedCompareExchange(&g_b.s_arm_aim_gap, 0, 0);
-    memcpy(&gap_flip, &gv, sizeof gap_flip);
-    if (fabs((double)gap_flip - (-30.0 - (double)drift_body)) > 1.0) bad++;
-    InterlockedExchange(&g_b.follow_head_sign, 1);
-
-    InterlockedExchange(&g_b.follow_src, 1);
-    target.head_yaw_rad = 0.0;
-    target.hand_yaw_valid = 0;
-    {
-        LONG t0 = InterlockedCompareExchange(&g_b.arm_aim_gap_tick, 0, 0);
-        InterlockedIncrement(&g_b.c_ticks);
-        target.pair_id++;
-        arm_ik_now(arm, &target);
-        if (InterlockedCompareExchange(&g_b.arm_aim_gap_tick, 0, 0) != t0)
-            bad++;
-    }
-
-    arm_map_forget();
-    g_b.arm_map_phase = 0;
-    target.hand_yaw_valid = 1;
-    target.hand_yaw_rad = 10.0 * 3.14159265358979323846 / 180.0;
-    for (j = 0; j < 16 && !g_b.arm_map_cache_valid; j++) {
-        InterlockedIncrement(&g_b.c_ticks);
-        arm_ik_now(arm, &target);
-        target.pair_id++;
-    }
-    if (!g_b.hand_yaw0_have) bad++;
-    gv = InterlockedCompareExchange(&g_b.s_arm_aim_gap, 0, 0);
-    memcpy(&gap0, &gv, sizeof gap0);
-    if (fabs((double)gap0) > 0.5) bad++;
-    /* The gun swings 30 degrees past its epoch: the gap follows the gun. */
-    target.hand_yaw_rad = 40.0 * 3.14159265358979323846 / 180.0;
-    InterlockedIncrement(&g_b.c_ticks);
-    target.pair_id++;
-    arm_ik_now(arm, &target);
-    gv = InterlockedCompareExchange(&g_b.s_arm_aim_gap, 0, 0);
-    memcpy(&gap_src_hand, &gv, sizeof gap_src_hand);
-    if (fabs((double)gap_src_hand - 30.0) > 0.5) bad++;
-
-    target.head_yaw_rad = 30.0 * 3.14159265358979323846 / 180.0;
-    InterlockedIncrement(&g_b.c_ticks);
-    target.pair_id++;
-    arm_ik_now(arm, &target);
-    gv = InterlockedCompareExchange(&g_b.s_arm_aim_gap, 0, 0);
-    memcpy(&gap_src_glance, &gv, sizeof gap_src_glance);
-    if (fabs((double)gap_src_glance - 30.0) > 0.5) bad++;
-
-    target.hand_yaw_valid = 0;
-    {
-        LONG t0 = InterlockedCompareExchange(&g_b.arm_aim_gap_tick, 0, 0);
-        InterlockedIncrement(&g_b.c_ticks);
-        target.pair_id++;
-        arm_ik_now(arm, &target);
-        if (InterlockedCompareExchange(&g_b.arm_aim_gap_tick, 0, 0) != t0)
-            bad++;
-    }
-    InterlockedExchange(&g_b.follow_src, 0);
-    target.head_yaw_rad = 0.0;
-
-    /* vr_turn_follow_src=stick: only the software turn is a facing. Its
-       zero is captured at calibration like the others; a stick turn of 30
-       degrees publishes 30, and neither a 30-degree glance nor a 30-degree
-       hand swing moves it. */
-    InterlockedExchange(&g_b.follow_src, 2);
-    arm_map_forget();
-    g_b.arm_map_phase = 0;
-    target.hand_yaw_valid = 1;
-    target.hand_yaw_rad = 0.0;
-    target.stick_yaw_valid = 1;
-    target.stick_yaw_rad = -20.0 * 3.14159265358979323846 / 180.0;
-    for (j = 0; j < 16 && !g_b.arm_map_cache_valid; j++) {
-        InterlockedIncrement(&g_b.c_ticks);
-        arm_ik_now(arm, &target);
-        target.pair_id++;
-    }
-    if (!g_b.stick_yaw0_have) bad++;
-    gv = InterlockedCompareExchange(&g_b.s_arm_aim_gap, 0, 0);
-    memcpy(&gap0, &gv, sizeof gap0);
-    if (fabs((double)gap0) > 0.5) bad++;
-    target.stick_yaw_rad = 10.0 * 3.14159265358979323846 / 180.0;
-    InterlockedIncrement(&g_b.c_ticks);
-    target.pair_id++;
-    arm_ik_now(arm, &target);
-    gv = InterlockedCompareExchange(&g_b.s_arm_aim_gap, 0, 0);
-    memcpy(&gap_src_stick, &gv, sizeof gap_src_stick);
-    if (fabs((double)gap_src_stick - 30.0) > 0.5) bad++;
-    target.head_yaw_rad = 30.0 * 3.14159265358979323846 / 180.0;
-    target.hand_yaw_rad = 30.0 * 3.14159265358979323846 / 180.0;
-    InterlockedIncrement(&g_b.c_ticks);
-    target.pair_id++;
-    arm_ik_now(arm, &target);
-    gv = InterlockedCompareExchange(&g_b.s_arm_aim_gap, 0, 0);
-    memcpy(&gap_src_stick2, &gv, sizeof gap_src_stick2);
-    if (fabs((double)gap_src_stick2 - 30.0) > 0.5) bad++;
-    InterlockedExchange(&g_b.follow_src, 0);
-    target.head_yaw_rad = 0.0;
-    target.hand_yaw_rad = 0.0;
-    target.stick_yaw_valid = 0;
-
-    arm_map_forget();
-    g_b.a.gm_player_arm_body = 0;
-    InterlockedExchange(&g_b.skel_stride, 0);
-    InterlockedExchange(&g_b.skel_parents_read, 0);
-    InterlockedExchange(&g_b.skel_region_end, 0);
-    InterlockedExchange(&g_b.c_ticks, 0);
-    InterlockedExchange(&g_b.s_arm_aim_gap, f2l(0.0f));
-    InterlockedExchange(&g_b.arm_aim_gap_tick, 0);
-    g_b.head_yaw0_have = 0;
-
-    printf("  %-6s the gap reads the facing minus the body: zero at "
-           "calibration, a 30-degree facing turn publishes %+.1f, a "
-           "30-degree CONTROLLER swing publishes %+.1f (the body no "
-           "longer chases the hand), a body turn publishes drift %+.1f "
-           "and moves the gap to %+.1f (summing to zero - the tail-chase "
-           "is structurally dead), the head-sign hatch flips the "
-           "facing term to %+.1f, and the hand source is mute without a "
-           "tracked epoch, follows the gun to %+.1f, ignores a glance "
-           "(%+.1f) and goes mute again when tracking drops; the stick "
-           "source follows a 30-degree software turn to %+.1f and holds "
-           "it (%+.1f) through a glance and a hand swing\n",
-           bad ? "FAIL" : "ok", (double)gap_head, (double)gap_hand,
-           (double)drift_body, (double)gap_body, (double)gap_flip,
-           (double)gap_src_hand, (double)gap_src_glance,
-           (double)gap_src_stick, (double)gap_src_stick2);
-    return bad ? 1 : 0;
-}
-
-static int t_theater_mask_is_narrower_than_the_gate(void)
-{
-    int bad = 0;
-
-    /* Each mask bit alone must trip the judgment... */
-    if (!dg_theater_masked(0x10000000u, 0)) bad++;      /* STATE_DEMO */
-    if (!dg_theater_masked(0x08000000u, 0)) bad++;      /* STATE_SCN_DEMO */
-    if (!dg_theater_masked(0x40000000u, 0)) bad++;      /* STATE_PAD_DEMO */
-    if (!dg_theater_masked(0, 0x00000400u)) bad++;      /* MENU_RADIO_ON */
-
-    if (dg_theater_masked(0x20000000u, 0)) bad++;       /* STATE_PRG_DEMO */
-    if (dg_theater_masked(0x00000040u, 0)) bad++;       /* STATE_CUT_IN */
-    if (!dg_theater_masked(0x80000000u, 0)) bad++;      /* STATE_GAMEOVER */
-    if (!dg_theater_masked(0x00004000u, 0)) bad++;      /* DISP_GAMEOVER */
-    if (dg_theater_masked(0x00000001u, 0)) bad++;       /* STATE_DETECT */
-
-    /* The theater mask is a strict SUBSET of the safety gate: everything the
-       theater switches on, the writers were already standing down for. If
-       someone ever narrows the gate to match the theater, this fails. */
-    if ((DG_THEATER_GAME_MASK & ~DG_GAME_UNSAFE_MASK) != 0) bad++;
-    if ((DG_THEATER_MENU_MASK & ~DG_MENU_UNSAFE_MASK) != 0) bad++;
-    /* ...and the gate keeps the two bits the theater refuses. */
-    if (!(DG_GAME_UNSAFE_MASK & 0x20000000u)) bad++;
-    if (!(DG_GAME_UNSAFE_MASK & 0x00000040u)) bad++;
-
-    /* The measured session words of 2026-08-17: the camera seam saw a real
-       cutscene (0x18000240 also carries CUT_IN and PAUSE_DISABLE - the mask
-       must trip on the demo bits, not on those) and a codec-bearing menu
-       word; the tick seam's words must trip nothing. */
-    if (!dg_theater_masked(0x18000240u, 0x00145803u)) bad++;
-    if (!dg_theater_masked(0, 0x00345C0Fu)) bad++;
-    if (dg_theater_masked(0x00000000u, 0x00005800u)) bad++;
-
-    /* The panel judgment: full menus only, and the codec is not its bit. */
-    if (!dg_ui_panel_masked(0x00000100u)) bad++;        /* WEAPON_OPEN */
-    if (!dg_ui_panel_masked(0x00000200u)) bad++;        /* ITEM_OPEN */
-    if (dg_ui_panel_masked(0x00000400u)) bad++;         /* RADIO: theater's */
-    if (dg_ui_panel_masked(0x00001800u)) bad++;         /* RADAR/GAGE_ON */
-
-    /* The game's own hide-command bits must trip neither judgment - they are
-       what vr_hud writes, and a HUD hide that opened the theater would be a
-       feedback loop. And the hide set is exactly the four visibility
-       commands, captions excluded. */
-    if (dg_theater_masked(0, DG_HUD_HIDE_BITS)) bad++;
-    if (dg_ui_panel_masked(DG_HUD_HIDE_BITS)) bad++;
-    if (DG_HUD_HIDE_BITS != 0x0000000Fu) bad++;
-    if (DG_HUD_HIDE_BITS & 0x00000010u) bad++;          /* MENU_CAPTION_OFF */
-
-    printf("  %-6s theater mask: the three demo bits and the codec bit trip "
-           "it, gameover also enters; boss immortality (PRG_DEMO) and cut-ins "
-           "do not, it stays a subset of the safety gate, and the panel "
-           "judgment is the two full menus and nothing else\n",
-           bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-static int t_theater_hysteresis_holds_both_flanks(void)
-{
-    DG_THEATER_HYST h;
-    int i, bad = 0;
-
-    /* Enter needs N CONSECUTIVE masked samples. N-1 then one clean sample
-       starts the count over - a blinking bit can never accumulate in. */
-    memset(&h, 0, sizeof h);
-    for (i = 0; i < DG_THEATER_ENTER_SAMPLES - 1; i++)
-        if (dg_theater_hyst_step(&h, 1, DG_THEATER_ENTER_SAMPLES,
-                                 DG_THEATER_EXIT_SAMPLES)) bad++;
-    if (dg_theater_hyst_step(&h, 0, DG_THEATER_ENTER_SAMPLES,
-                             DG_THEATER_EXIT_SAMPLES)) bad++;
-    for (i = 0; i < DG_THEATER_ENTER_SAMPLES - 1; i++)
-        if (dg_theater_hyst_step(&h, 1, DG_THEATER_ENTER_SAMPLES,
-                                 DG_THEATER_EXIT_SAMPLES)) bad++;
-    if (!dg_theater_hyst_step(&h, 1, DG_THEATER_ENTER_SAMPLES,
-                              DG_THEATER_EXIT_SAMPLES)) bad++;
-
-    /* Exit needs M consecutive clean samples, and one masked sample mid-count
-       resets it - the scripted-transition blink (pad release -> cancel ->
-       next demo) must ride through as one theater, not two. */
-    for (i = 0; i < DG_THEATER_EXIT_SAMPLES - 1; i++)
-        if (!dg_theater_hyst_step(&h, 0, DG_THEATER_ENTER_SAMPLES,
-                                  DG_THEATER_EXIT_SAMPLES)) bad++;
-    if (!dg_theater_hyst_step(&h, 1, DG_THEATER_ENTER_SAMPLES,
-                              DG_THEATER_EXIT_SAMPLES)) bad++;
-    for (i = 0; i < DG_THEATER_EXIT_SAMPLES - 1; i++)
-        if (!dg_theater_hyst_step(&h, 0, DG_THEATER_ENTER_SAMPLES,
-                                  DG_THEATER_EXIT_SAMPLES)) bad++;
-    if (dg_theater_hyst_step(&h, 0, DG_THEATER_ENTER_SAMPLES,
-                             DG_THEATER_EXIT_SAMPLES)) bad++;
-
-    /* Steady states hold without drift in either direction. */
-    for (i = 0; i < 500; i++)
-        if (dg_theater_hyst_step(&h, 0, DG_THEATER_ENTER_SAMPLES,
-                                 DG_THEATER_EXIT_SAMPLES)) bad++;
-    for (i = 0; i < DG_THEATER_ENTER_SAMPLES; i++)
-        dg_theater_hyst_step(&h, 1, DG_THEATER_ENTER_SAMPLES,
-                             DG_THEATER_EXIT_SAMPLES);
-    for (i = 0; i < 500; i++)
-        if (!dg_theater_hyst_step(&h, 1, DG_THEATER_ENTER_SAMPLES,
-                                  DG_THEATER_EXIT_SAMPLES)) bad++;
-
-    /* The thresholds themselves are part of the contract: enter fast, exit
-       slow, and the asymmetry is the design (section 2.5). A mutant that
-       removes either collapses one of them to 1. */
-    if (DG_THEATER_ENTER_SAMPLES < 2 || DG_THEATER_EXIT_SAMPLES < 2) bad++;
-    if (DG_THEATER_EXIT_SAMPLES <= DG_THEATER_ENTER_SAMPLES) bad++;
-    if (DG_UI_ENTER_SAMPLES < 2 || DG_UI_EXIT_SAMPLES < 2) bad++;
-
-    printf("  %-6s theater hysteresis: enter only after %d consecutive masked "
-           "samples, exit only after %d clean ones, any contradiction resets "
-           "the count, and both steady states hold\n",
-           bad ? "FAIL" : "ok",
-           DG_THEATER_ENTER_SAMPLES, DG_THEATER_EXIT_SAMPLES);
-    return bad ? 1 : 0;
-}
-
-static int t_theater_verdict_is_one_publication_fail_closed(void)
-{
-    static LONG game, game_scn, menu, menu_scn;
-    static ULONGLONG player;
-    DG_ANCHORS saved_anchors = g_b.a;
-    LONG ring0;
-    int i, bad = 0;
-
-    game = game_scn = menu = menu_scn = 0;
-    player = 0;
-    memset(&g_b.a, 0, sizeof g_b.a);
-    g_b.a.gm_game_status = (ULONGLONG)(ULONG_PTR)&game;
-    g_b.a.gm_game_status_scn = (ULONGLONG)(ULONG_PTR)&game_scn;
-    g_b.a.gm_menu_status = (ULONGLONG)(ULONG_PTR)&menu;
-    g_b.a.gm_menu_status_scn = (ULONGLONG)(ULONG_PTR)&menu_scn;
-    g_b.a.gm_player_status = (ULONGLONG)(ULONG_PTR)&player;
-    memset(&g_b.thea_demo, 0, sizeof g_b.thea_demo);
-    memset(&g_b.thea_ui, 0, sizeof g_b.thea_ui);
-    InterlockedExchange(&g_b.s_theater, 0);
-    InterlockedExchange(&g_b.theater_mode, DG_THEATER_MEASURE);
-    InterlockedExchange(&g_b.theater_ui_mode, 0);
-    InterlockedExchange(&g_b.c_thea_enter, 0);
-    InterlockedExchange(&g_b.c_thea_exit, 0);
-    InterlockedExchange(&g_b.c_thea_ui_enter, 0);
-    InterlockedExchange(&g_b.c_thea_ui_exit, 0);
-    InterlockedExchange(&g_b.armed, 1);
-    g_b.fps.state = DG_FPS_OFF;          /* the seam's later gates return */
-    ring0 = InterlockedCompareExchange(&g_thea_ring_head, 0, 0);
-
-    /* A cutscene in the SCENARIO half of the word, the half a single-anchor
-       reader would miss. The judgment must publish exactly at the enter
-       threshold - and the seam is the ONE writer: everything downstream reads
-       this publication rather than judging per-eye or per-thread. */
-    game_scn = 0x08000000;
-    for (i = 0; i < DG_THEATER_ENTER_SAMPLES - 1; i++) {
-        dg_bridge_arm_seam_now(NULL);
-        if (InterlockedCompareExchange(&g_b.s_theater, 0, 0)) bad++;
-    }
-    dg_bridge_arm_seam_now(NULL);
-    if (InterlockedCompareExchange(&g_b.s_theater, 0, 0) != DG_THEATER_V_DEMO)
-        bad++;
-    if (g_b.c_thea_enter != 1) bad++;
-    /* MEASURE logged the flank... */
-    if (InterlockedCompareExchange(&g_thea_ring_head, 0, 0) != ring0 + 1)
-        bad++;
-    /* ...but MEASURE never sets a consumer bit - that is the whole mode. */
-    if (dg_bridge_theater_verdict() != 0) bad++;
-
-    /* ON reports it, freshly published as it is. */
-    InterlockedExchange(&g_b.theater_mode, DG_THEATER_ON);
-    if (dg_bridge_theater_verdict() != DG_THEATER_V_DEMO) bad++;
-
-    /* A stale publication is refused whatever the marker says: a camera hook
-       that stops firing must never pin the theater on. */
-    InterlockedExchange(&g_b.theater_ms,
-                        (LONG)(GetTickCount() - DG_THEATER_FRESH_MS - 100));
-    if (dg_bridge_theater_verdict() != 0) bad++;
-    dg_bridge_arm_seam_now(NULL);        /* one live seam re-freshens it */
-    if (dg_bridge_theater_verdict() != DG_THEATER_V_DEMO) bad++;
-
-    /* An unarmed bridge reports nothing, whatever was last published. */
-    InterlockedExchange(&g_b.armed, 0);
-    if (dg_bridge_theater_verdict() != 0) bad++;
-    InterlockedExchange(&g_b.armed, 1);
-
-    /* The scene ends; the exit hysteresis holds the verdict up for the whole
-       exit window and not one sample longer. */
-    game_scn = 0;
-    for (i = 0; i < DG_THEATER_EXIT_SAMPLES - 1; i++) {
-        dg_bridge_arm_seam_now(NULL);
-        if (!InterlockedCompareExchange(&g_b.s_theater, 0, 0)) bad++;
-    }
-    dg_bridge_arm_seam_now(NULL);
-    if (InterlockedCompareExchange(&g_b.s_theater, 0, 0)) bad++;
-    if (g_b.c_thea_exit != 1) bad++;
-    if (dg_bridge_theater_verdict() != 0) bad++;
-
-    /* The panel judgment rides the same publication under its own bit and its
-       own marker gate: a weapon menu with vr_ui off reaches no consumer. */
-    menu = 0x00000100;
-    for (i = 0; i < DG_UI_ENTER_SAMPLES; i++) dg_bridge_arm_seam_now(NULL);
-    if (InterlockedCompareExchange(&g_b.s_theater, 0, 0) != DG_THEATER_V_UI)
-        bad++;
-    if (dg_bridge_theater_verdict() != 0) bad++;
-    InterlockedExchange(&g_b.theater_ui_mode, 1);
-    if (dg_bridge_theater_verdict() != DG_THEATER_V_UI) bad++;
-    /* And vr_ui gates only its own bit, not the theater's. */
-    InterlockedExchange(&g_b.theater_mode, DG_THEATER_OFF);
-    if (dg_bridge_theater_verdict() != DG_THEATER_V_UI) bad++;
-
-    /* An anchor that never resolved measures nothing and switches nothing:
-       the whole status block is behind the anchor test, so the publication
-       simply never happens. Fail-open here would be a theater driven by
-       whatever address zero holds. */
-    g_b.a.gm_game_status = 0;
-    menu = 0;
-    for (i = 0; i < DG_THEATER_EXIT_SAMPLES + DG_UI_EXIT_SAMPLES; i++)
-        dg_bridge_arm_seam_now(NULL);
-    if (InterlockedCompareExchange(&g_b.s_theater, 0, 0) != DG_THEATER_V_UI)
-        bad++;                           /* frozen, not re-judged... */
-    Sleep(DG_THEATER_FRESH_MS + 50);     /* ...and staleness retires it */
-    if (dg_bridge_theater_verdict() != 0) bad++;
-
-    /* UI-U1: the PRESENT seam reaches the same judgment through the same
-       one publication - and it is the only seam that can, because a menu
-       pauses the actor the tick seam lives in and the camera block the
-       camera seam hangs off. Driven here rather than in a test of its own
-       so it is measured against the identical rig and the identical
-       thresholds the camera seam is held to. */
-    g_b.a.gm_game_status = (ULONGLONG)(ULONG_PTR)&game;
-    memset(&g_b.thea_demo, 0, sizeof g_b.thea_demo);
-    memset(&g_b.thea_ui, 0, sizeof g_b.thea_ui);
-    InterlockedExchange(&g_b.s_theater, 0);
-    InterlockedExchange(&g_b.seen_menu_screen, 0);
-    InterlockedExchange(&g_b.seen_game_screen, 0);
-    InterlockedExchange(&g_b.c_screen_status, 0);
-    InterlockedExchange(&g_b.theater_mode, DG_THEATER_ON);
-    InterlockedExchange(&g_b.theater_ui_mode, 1);
-    menu = 0x00000100;                       /* MENU_WEAPON_OPEN */
-    {
-        LONG samples0 = g_b.c_screen_status;
-        for (i = 0; i < DG_UI_ENTER_SAMPLES; i++) dg_bridge_screen_seam_now();
-        if (g_b.c_screen_status != samples0 + DG_UI_ENTER_SAMPLES) bad++;
-        if (dg_bridge_theater_verdict() != DG_THEATER_V_UI) bad++;
-        /* The accumulator is what makes the live log readable: the bit the
-           other two seams can never hold has to show up in THIS mask. */
-        if (!((unsigned int)g_b.seen_menu_screen & 0x100u)) bad++;
-        /* Reads only - the seam must never write the game's own words. */
-        if (menu != 0x00000100 || game != 0 || player != 0) bad++;
-
-        /* Unarmed: no sample, no count, no publication. */
-        InterlockedExchange(&g_b.armed, 0);
-        samples0 = g_b.c_screen_status;
-        dg_bridge_screen_seam_now();
-        if (g_b.c_screen_status != samples0) bad++;
-        InterlockedExchange(&g_b.armed, 1);
-
-        /* An unresolved anchor likewise: never a judgment built on address
-           zero, and the count stays put so the log can still tell "never
-           looked" from "never happened". */
-        g_b.a.gm_game_status = 0;
-        samples0 = g_b.c_screen_status;
-        dg_bridge_screen_seam_now();
-        if (g_b.c_screen_status != samples0) bad++;
-        g_b.a.gm_game_status = (ULONGLONG)(ULONG_PTR)&game;
-
-        /* And it retires a scene through the same exit hysteresis, so the
-           present seam cannot pin the quad on after the menu closes. */
-        menu = 0;
-        for (i = 0; i < DG_UI_EXIT_SAMPLES; i++) dg_bridge_screen_seam_now();
-        if (dg_bridge_theater_verdict() != 0) bad++;
-    }
-
-    /* Game Over must use that same Present publication even when the game
-       camera continues handing off frames. Continue remains independently
-       admitted, then gameplay resumes after the normal exit hysteresis. */
-    game = (LONG)0x80000000u;
-    for (i=0;i<DG_THEATER_ENTER_SAMPLES;i++) dg_bridge_screen_seam_now();
-    if(dg_bridge_theater_verdict()!=DG_THEATER_V_DEMO)bad++;
-    if(!dg_bridge_menu_gameover_now())bad++;
-    game=0;game_scn=0x00004000;
-    dg_bridge_screen_seam_now();
-    if(dg_bridge_theater_verdict()!=DG_THEATER_V_DEMO)bad++;
-    if(!dg_bridge_menu_gameover_now())bad++;
-    game_scn=0;
-    for(i=0;i<DG_THEATER_EXIT_SAMPLES;i++)dg_bridge_screen_seam_now();
-    if(dg_bridge_theater_verdict()!=0 || dg_bridge_menu_gameover_now())bad++;
-
-    InterlockedExchange(&g_b.armed, 0);
-    g_b.a = saved_anchors;
-    memset(&g_b.thea_demo, 0, sizeof g_b.thea_demo);
-    memset(&g_b.thea_ui, 0, sizeof g_b.thea_ui);
-    InterlockedExchange(&g_b.s_theater, 0);
-    InterlockedExchange(&g_b.seen_menu_screen, 0);
-    InterlockedExchange(&g_b.seen_game_screen, 0);
-    InterlockedExchange(&g_b.c_screen_status, 0);
-    InterlockedExchange(&g_b.theater_mode, 0);
-    InterlockedExchange(&g_b.theater_ui_mode, 0);
-    InterlockedExchange(&g_b.c_thea_enter, 0);
-    InterlockedExchange(&g_b.c_thea_exit, 0);
-    InterlockedExchange(&g_b.c_thea_ui_enter, 0);
-    InterlockedExchange(&g_b.c_thea_ui_exit, 0);
-    InterlockedExchange(&g_thea_ring_tail,
-                        InterlockedCompareExchange(&g_thea_ring_head, 0, 0));
-    g_b.fps.state = DG_FPS_OFF;
-
-    printf("  %-6s theater verdict: the camera seam is the one publisher, "
-           "measure counts but never switches, on reports only a FRESH "
-           "verdict, unarmed or unanchored reports none, and each marker key "
-           "gates only its own judgment\n", bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-static int t_hud_hide_borrows_the_games_own_bits(void)
-{
-    static LONG menu;
-    DG_ANCHORS saved_anchors = g_b.a;
-    int bad = 0;
-
-    memset(&g_b.a, 0, sizeof g_b.a);
-    g_b.a.gm_menu_status = (ULONGLONG)(ULONG_PTR)&menu;
-    InterlockedExchange(&g_b.hud_mode, 0);
-    InterlockedExchange(&g_b.hud_held, 0);
-    InterlockedExchange(&g_b.c_hud_writes, 0);
-    InterlockedExchange(&g_b.c_hud_cleared, 0);
-
-    /* Off writes nothing, held or not - and holds no debt. */
-    menu = 0x00001800;                   /* RADAR_ON | GAGE_ON */
-    hud_tick();
-    if (menu != 0x00001800 || g_b.c_hud_writes || g_b.hud_held) bad++;
-
-    /* On asserts exactly the four hide commands, once. */
-    InterlockedExchange(&g_b.hud_mode, 1);
-    hud_tick();
-    if (menu != 0x0000180F) bad++;
-    if (g_b.c_hud_writes != 1 || !g_b.hud_held) bad++;
-    /* Already-set bits are not re-written - the counter stays honest about
-       how often the game actually fought the hide. */
-    hud_tick();
-    if (g_b.c_hud_writes != 1) bad++;
-    /* The game clears them (scene change); the next tick re-asserts. */
-    menu = 0x00001800;
-    hud_tick();
-    if (menu != 0x0000180F || g_b.c_hud_writes != 2) bad++;
-
-    /* The game's own caption hide is preserved through both directions:
-       0x10 is not ours and must survive the release untouched. */
-    menu |= 0x00000010;
-    InterlockedExchange(&g_b.hud_mode, 0);
-    hud_tick();
-    if (menu != 0x00001810) bad++;       /* our four gone, caption kept */
-    if (g_b.c_hud_cleared != 1 || g_b.hud_held) bad++;
-    /* The release fires once, not per tick. */
-    menu = 0x0000000F;                   /* someone else's hide bits */
-    hud_tick();
-    if (menu != 0x0000000F || g_b.c_hud_cleared != 1) bad++;
-
-    /* No anchor, no write, no crash - fail closed like everything else. */
-    g_b.a.gm_menu_status = 0;
-    InterlockedExchange(&g_b.hud_mode, 1);
-    hud_tick();
-    if (g_b.c_hud_writes != 2 || g_b.hud_held) bad++;
-
-    g_b.a = saved_anchors;
-    InterlockedExchange(&g_b.hud_mode, 0);
-    InterlockedExchange(&g_b.hud_held, 0);
-    InterlockedExchange(&g_b.c_hud_writes, 0);
-    InterlockedExchange(&g_b.c_hud_cleared, 0);
-
-    printf("  %-6s hud hide: vr_hud=off asserts the game's own four hide "
-           "commands and re-asserts them when the game clears them, release "
-           "clears exactly those four once, captions and foreign bits "
-           "survive, and a missing anchor writes nothing\n",
-           bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-/* ROLL_ONTWERP_V5.1 par. 6.1: the adjust frame's helpers against ABSOLUTE
-   hand-computed oracles (17 digits, recordings/adjust_probe_blokken_2026-08-
-   30.log) - never a round trip alone, which a consistently wrong pair of
-   helpers passes. The decisive tie: the live frame at the 2026-08-18
-   session's heading (rot.vy 1024) must reproduce the legacy constant, so the
-   two modes agree where the constant was measured and differ everywhere
-   else by exactly the body's turn. */
-static int t_adjust_frame(void)
-{
-    static const double f_yaw73[4] =
-        { 0.0, 0.59482278675134126, 0.0, 0.80385686061721728 };
-    static const double s15 = 0.25881904510252076, c15 = 0.96592582628906829;
-    static const double wX[4] =
-        { 0.075671365431334875, 0.0, -0.24750988376535193, 0.9659258262890682 };
-    static const double wZ[4] =
-        { 0.24750988376535193, 0.0, 0.075671365431334875, 0.9659258262890682 };
-    static const double wY[4] =
-        { 0.0, 0.25881904510252079, 0.0, 0.96592582628906831 };
-    static const double wTilt[4] =
-        { 0.2444626263770959, -0.040488218862836309, 0.074739725353443393,
-          0.9659258262890682 };
-    static const double sentinel[4] = { 12345.0, -1.0, 7.0, 99.0 };
-    DG_ADJ_FRAME live, bad_frame;
-    double aX[4] = { s15, 0.0, 0.0, c15 };
-    double aY[4] = { 0.0, s15, 0.0, c15 };
-    double aZ[4] = { 0.0, 0.0, s15, c15 };
-    double out[4], back[4], wrong[4], t[4], fc[4], f_full[4], tilt9[4];
-    double f1024[4], f0[4], fm2048[4], xhat[3] = { 1.0, 0.0, 0.0 }, img[3];
-    double leg[4], liv[4];
-    int bad = 0, k;
-
-    memset(&live, 0, sizeof live);
-    live.live = 1; live.valid = 1;
-    for (k = 0; k < 4; k++) live.q[k] = f_yaw73[k];
-
-    /* absolute-conjugation leg: X and Z, and the commuting Y as a documented
-       negative control (identical for every yaw - a Y-only oracle is blind). */
-    if (!adjust_quat_to_world(&live, aX, out)) bad++;
-    for (k = 0; k < 4; k++) if (fabs(out[k] - wX[k]) > 1e-9) bad++;
-    if (!adjust_quat_to_world(&live, aZ, out)) bad++;
-    for (k = 0; k < 4; k++) if (fabs(out[k] - wZ[k]) > 1e-9) bad++;
-    if (!adjust_quat_to_world(&live, aY, out)) bad++;
-    for (k = 0; k < 4; k++) if (fabs(out[k] - wY[k]) > 1e-9) bad++;
-    /* The wrong side, f* (x) a (x) f, lands far away on the X case: the
-       axis flips sign on z (146 degrees between the two AXES, 57.3 degrees
-       between the two quaternions). Stated so the mutation has a number. */
-    dg_ik_quat_conj(f_yaw73, fc);
-    dg_ik_quat_mul(fc, aX, t);
-    dg_ik_quat_mul(t, f_yaw73, wrong);
-    if (dg_ik_quat_angle(wrong, wX) * 180.0 / 3.14159265358979323846 < 40.0)
-        bad++;
-
-    /* tilt leg: a full root (yaw73 (x) tilt9 about X) with A = 30 about Z -
-       not X, which commutes with the tilt - differs from the yaw-only
-       answer by 9.000 degrees of axis; the helper must give the yaw-only. */
-    tilt9[0] = sin(4.5 * 3.14159265358979323846 / 180.0); tilt9[1] = 0.0;
-    tilt9[2] = 0.0; tilt9[3] = cos(4.5 * 3.14159265358979323846 / 180.0);
-    dg_ik_quat_mul(f_yaw73, tilt9, f_full);
-    dg_ik_quat_mul(f_full, aZ, t);
-    dg_ik_quat_conj(f_full, fc);
-    dg_ik_quat_mul(t, fc, out);
-    for (k = 0; k < 4; k++) if (fabs(out[k] - wTilt[k]) > 1e-9) bad++;
-    if (!adjust_quat_to_world(&live, aZ, out)) bad++;
-    if (dg_ik_quat_angle(out, wTilt) * 180.0 / 3.14159265358979323846 < 2.0)
-        bad++;
-
-    /* round trip, tier 1 only: consistency, not correctness. */
-    if (!adjust_quat_to_world(&live, aX, out) ||
-        !world_quat_to_adjust(&live, out, back)) bad++;
-    for (k = 0; k < 4; k++) if (fabs(back[k] - aX[k]) > 1e-9) bad++;
-
-    /* fail-closed leg: NULL, NaN and a non-unit frame all return 0 and leave
-       the output exactly as they found it. */
-    for (k = 0; k < 4; k++) out[k] = sentinel[k];
-    if (adjust_quat_to_world(NULL, aX, out)) bad++;
-    if (memcmp(out, sentinel, sizeof sentinel) != 0) bad++;
-    bad_frame = live; bad_frame.q[1] = sqrt(-1.0);
-    if (adjust_quat_to_world(&bad_frame, aX, out)) bad++;
-    if (world_quat_to_adjust(&bad_frame, aX, out)) bad++;
-    if (memcmp(out, sentinel, sizeof sentinel) != 0) bad++;
-    bad_frame = live; for (k = 0; k < 4; k++) bad_frame.q[k] *= 1.01;
-    if (adjust_quat_to_world(&bad_frame, aX, out)) bad++;
-    if (memcmp(out, sentinel, sizeof sentinel) != 0) bad++;
-    bad_frame = live; bad_frame.valid = 0;
-    if (adjust_quat_to_world(&bad_frame, aX, out)) bad++;
-    if (memcmp(out, sentinel, sizeof sentinel) != 0) bad++;
-
-    if (!arm_frame_yaw(0, f0)) bad++;
-    if (fabs(f0[0]) > 1e-12 || fabs(f0[1]) > 1e-12 || fabs(f0[2]) > 1e-12 ||
-        fabs(f0[3] - 1.0) > 1e-12) bad++;
-    if (!arm_frame_yaw(1024, f1024)) bad++;
-    if (fabs(f1024[1] - 0.70710678118654752) > 1e-12 ||
-        fabs(f1024[3] - 0.70710678118654752) > 1e-12 ||
-        fabs(f1024[0]) > 1e-12 || fabs(f1024[2]) > 1e-12) bad++;
-    arm_quat_rotate(f1024, xhat, img);
-    if (fabs(img[0]) > 1e-9 || fabs(img[1]) > 1e-9 || fabs(img[2] + 1.0) > 1e-9)
-        bad++;
-    if (!arm_frame_yaw(-2048, fm2048)) bad++;
-    if (fabs(fm2048[1] + 1.0) > 1e-12 || fabs(fm2048[3]) > 1e-12) bad++;
-    /* The tie between the two modes: at the constant's own heading the live
-       conversion reproduces the legacy one to within the constant's own fit
-       residual (0.188 degrees) plus its 0.1-degree heading error. */
-    live.live = 1; live.valid = 1;
-    for (k = 0; k < 4; k++) live.q[k] = f1024[k];
-    if (!adjust_quat_to_world(&live, aX, liv) ||
-        !adjust_quat_to_world(&ADJ_FRAME_LEGACY, aX, leg)) bad++;
-    if (dg_ik_quat_angle(liv, leg) * 180.0 / 3.14159265358979323846 > 0.6) bad++;
-    if (!adjust_quat_to_world(&live, aZ, liv) ||
-        !adjust_quat_to_world(&ADJ_FRAME_LEGACY, aZ, leg)) bad++;
-    if (dg_ik_quat_angle(liv, leg) * 180.0 / 3.14159265358979323846 > 0.6) bad++;
-
-    printf("  %-6s adjust frame: yaw73 conjugation lands on the hand-computed "
-           "X/Z/Y oracles to 1e-9 (the wrong side sits 146 degrees off), a "
-           "tilted root would move the Z case 9 degrees and the helper stays "
-           "yaw-only, NULL/NaN/non-unit/invalid frames refuse and leave the "
-           "output untouched, rot.vy 0/1024/-2048 give identity/[0 sin45 0 "
-           "cos45]/[0 -1 0 0] with 1024 sending x to world -z, and at that "
-           "heading live reproduces the 2026-08-18 constant within 0.6 "
-           "degrees\n", bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-/* ---- the seam fixture (ROLL_ONTWERP_V5.1 par. 6.2) ------------------------
-   A test-engine that composes the fake hierarchy from the SLOTS under the
-   measured frame model, with the test's own quaternion arithmetic on the
-   dg_ik primitives (none of the helpers under test): W_j = (f A5 f*)(f A4 f*)
-   W_anim for the forearm chain, f the yaw of the actor's heading word. The
-   legs then run the REAL seam functions - arm_ik_now, arm_remove_cached_
-   adjust, arm_ik_replay_cached - against it, with the live slot, the cache
-   and the frame deliberately three different things where a leg needs
-   them to be. */
-typedef struct {
-    double p4[3];              /* joint 4 (elbow root) in world */
-    double upper[3];           /* the ANIMATION's upper bone, 4 -> 5 */
-    double fore[3];            /* the ANIMATION's forearm, 5 -> 6 */
-} TQ_RIG;
-
-static void tq_frame(short rot, double f[4])
-{
-    /* The engine's own statement of the measurement: heading -rot*360/4096,
-       quaternion angle minus the heading (dg_ik's yaw sends x to heading
-       -phi). Written here again on purpose, not via arm_frame_yaw. */
-    double heading = -(double)rot * (360.0 / 4096.0);
-    double half = -0.5 * heading * 3.14159265358979323846 / 180.0;
-    f[0] = 0.0; f[1] = sin(half); f[2] = 0.0; f[3] = cos(half);
-}
-
-static void tq_rot(const double q[4], const double v[3], double o[3])
-{
-    double ux = q[0], uy = q[1], uz = q[2], w = q[3];
-    double cx = uy * v[2] - uz * v[1], cy = uz * v[0] - ux * v[2],
-           cz = ux * v[1] - uy * v[0];
-    o[0] = v[0] + 2.0 * (w * cx + (uy * cz - uz * cy));
-    o[1] = v[1] + 2.0 * (w * cy + (uz * cx - ux * cz));
-    o[2] = v[2] + 2.0 * (w * cz + (ux * cy - uy * cx));
-}
-
-static void tq_world_of(const double f[4], const float a[4], double w[4])
-{
-    double A[4], t[4], fc[4];
-    int k;
-    for (k = 0; k < 4; k++) A[k] = (double)a[k];
-    dg_ik_quat_mul(f, A, t);
-    dg_ik_quat_conj(f, fc);
-    dg_ik_quat_mul(t, fc, w);
-    dg_ik_quat_normalize(w);
-}
-
-/* One hierarchy pass: joints 5 and 6 placed from the slots under `rot`. */
-static void tq_engine(unsigned char *blob, int stride, const float *adjust,
-                      short rot, const TQ_RIG *rig, double p6_out[3])
-{
-    double f[4], w4[4], w5[4], w45[4], up[3], t[3], fo[3], p5[3], p6[3];
-    float *m4 = (float *)(blob + DG_OBJS_ARRAY + 4 * stride);
-    float *m5 = (float *)(blob + DG_OBJS_ARRAY + 5 * stride);
-    float *m6 = (float *)(blob + DG_OBJS_ARRAY + 6 * stride);
-    int k, r;
-    tq_frame(rot, f);
-    tq_world_of(f, adjust + 4 * 4, w4);
-    tq_world_of(f, adjust + 5 * 4, w5);
-    /* The forearm inherits q4 first, then q5: W5 . W4 . fore, the strip's
-       peel order in reverse and the roll's chain_w = b5w (x) b4w. */
-    tq_rot(w4, rig->upper, up);
-    tq_rot(w4, rig->fore, t);
-    tq_rot(w5, t, fo);
-    for (k = 0; k < 3; k++) {
-        p5[k] = rig->p4[k] + up[k];
-        p6[k] = p5[k] + fo[k];
-        m4[12 + k] = (float)rig->p4[k];
-        m5[12 + k] = (float)p5[k];
-        m6[12 + k] = (float)p6[k];
-        if (p6_out) p6_out[k] = p6[k];
-    }
-    /* Joint 6's basis rows: world images of its local axes = W45 applied
-       to the unit axes (the animation's hand basis is the identity). */
-    dg_ik_quat_mul(w5, w4, w45);
-    for (r = 0; r < 3; r++) {
-        double e[3] = { 0.0, 0.0, 0.0 }, img[3];
-        e[r] = 1.0;
-        tq_rot(w45, e, img);
-        for (k = 0; k < 3; k++) m6[r * 4 + k] = (float)img[k];
-    }
-}
-
-static double tq_vangle(const double a[3], const double b[3])
-{
-    return v_angle_deg(a, b);
-}
-
-static int t_adjust_frame_seam(void)
-{
-    enum { STRIDE = 0x180, JOINTS = 7 };
-    static unsigned char blob[DG_OBJS_ARRAY + JOINTS * STRIDE];
-    static union { ULONGLONG align; unsigned char b[0x240]; } actor;
-    static union { ULONGLONG align; unsigned char b[0xD40]; } player;
-    static unsigned char mc[0x70];
-    static float adjust[55 * 4];
-    ULONGLONG arm;
-    ULONGLONG saved_anchor = g_b.a.gm_player_arm_body;
-    LONG saved_frame = InterlockedCompareExchange(&g_b.adjust_frame, 0, 0);
-    LONG saved_uproll = InterlockedCompareExchange(&g_b.arm_uproll, 0, 0);
-    DG_BRIDGE_ARM_TARGET target;
-    TQ_RIG rig;
-    double q4_1[4], q5_1[4], W4[4], W5[4], f1[4], f2[4], fc[4], t[4];
-    double exp4[4], exp5[4], got4[4], got5[4];
-    double fore_a[3], fore_b[3], p6a[3], p6b[3];
-    float miss;
-    LONG lv, n0;
-    int j, k, bad = 0, pb = 0;
-#define TS_LEG(name) do { if (bad != pb) { \
-        printf("    [seam leg %s] +%d\n", name, bad - pb); pb = bad; } \
-    } while (0)
-
-    memset(blob, 0, sizeof blob);
-    memset(&actor, 0, sizeof actor);
-    memset(&player, 0, sizeof player);
-    memset(mc, 0, sizeof mc);
-    memset(adjust, 0, sizeof adjust);
-    arm = (ULONGLONG)(ULONG_PTR)(actor.b + 0x60);
-    *(ULONGLONG *)(actor.b + 0x60) = (ULONGLONG)(ULONG_PTR)blob;
-    *(ULONGLONG *)(actor.b + 0x68) = (ULONGLONG)(ULONG_PTR)mc;
-    *(ULONGLONG *)(actor.b + 0x228) = (ULONGLONG)(ULONG_PTR)(player.b + 0xCF4);
-    *(ULONGLONG *)(player.b + 0xBA8) = arm;
-    *(LONG *)(player.b + 0xBB0) = 6;
-    *(LONG *)(player.b + 0xB90) = 1;
-    *(LONG *)(mc + 0x14) = 55;
-    *(ULONGLONG *)(mc + 0x48) = (ULONGLONG)(ULONG_PTR)adjust;
-    for (j = 0; j < JOINTS; j++) {
-        float *m = (float *)(blob + DG_OBJS_ARRAY + j * STRIDE);
-        m[0] = m[5] = m[10] = m[15] = 1.0f;
-    }
-    ((float *)(blob + DG_OBJS_ARRAY + 3 * STRIDE))[14] = 100.0f;
-    for (j = 0; j < 55; j++) adjust[j * 4 + 3] = 1.0f;
-    rig.p4[0] = rig.p4[1] = rig.p4[2] = 0.0;
-    rig.upper[0] = 200.0; rig.upper[1] = 0.0; rig.upper[2] = 0.0;
-    rig.fore[0] = 100.0; rig.fore[1] = 173.20508; rig.fore[2] = 0.0;
-    tq_engine(blob, STRIDE, adjust, 0, &rig, NULL);
-
-    g_b.a.gm_player_arm_body = (ULONGLONG)(ULONG_PTR)&arm;
-    InterlockedExchange(&g_b.skel_stride, STRIDE);
-    InterlockedExchange(&g_b.skel_parents_read, JOINTS);
-    InterlockedExchange(&g_b.skel_region_end, (LONG)sizeof blob);
-    for (j = 0; j < JOINTS; j++) InterlockedExchange(&g_b.skel_parents[j], 0);
-    InterlockedExchange(&g_b.skel_parents[3], 2);
-    InterlockedExchange(&g_b.skel_parents[4], 3);
-    InterlockedExchange(&g_b.skel_parents[5], 4);
-    InterlockedExchange(&g_b.skel_parents[6], 5);
-    InterlockedExchange(&g_b.ik_active, 0);
-    InterlockedExchange(&g_b.arm_freeze, 0);
-    InterlockedExchange(&g_b.arm_uproll, 0);
-    InterlockedExchange(&g_b.adjust_frame, 1);
-    InterlockedExchange(&g_b.c_ticks, 0);
-    InterlockedExchange(&g_b.s_wrist_miss_worst, f2l(0.0f));
-    InterlockedExchange(&g_b.c_wrist_miss_over, 0);
-    g_b.have_pred_wrist = 0;
-    arm_map_forget();
-    g_b.arm_map_phase = 0;
-    g_b.arm_orient_have_prev = 0;
-
-    memset(&target, 0, sizeof target);
-    target.write = 1;
-    target.weight = 1.0;
-    target.stream_id = 9;
-    target.pair_id = 300;
-    target.wrist_view[0] = 250.0;
-    target.wrist_view[1] = -150.0;
-    target.wrist_view[2] = 100.0;
-    target.hand_quat[3] = 1.0;
-    target.head_yaw_valid = 1;
-
-    /* Calibrate under heading 0 (rot.vy 0): the live frame is the identity
-       there, and every pair must have acquired it - `missing` stays put. */
-    *(short *)(player.b + 0x82) = 0;
-    n0 = g_b.c_frame_missing;
-    for (j = 0; j < 24 && !g_b.arm_map_cache_valid; j++) {
-        InterlockedExchange(&g_b.c_ticks, (LONG)(DG_ADJ_SETTLE_TICKS + 1 + j));
-        arm_ik_now(arm, &target);
-        tq_engine(blob, STRIDE, adjust, 0, &rig, NULL);
-        target.pair_id++;
-    }
-    if (!g_b.arm_map_cache_valid) bad++;
-    if (!g_b.pair_frame.live || !g_b.pair_frame.valid) bad++;
-    if (g_b.c_frame_missing != n0) bad++;
-    TS_LEG("calibrate-live");
-
-    /* Settle: a few more pairs at the same target so the solution stands. */
-    for (j = 0; j < 4; j++) {
-        InterlockedIncrement(&g_b.c_ticks);
-        arm_ik_now(arm, &target);
-        tq_engine(blob, STRIDE, adjust, 0, &rig, NULL);
-        target.pair_id++;
-    }
-    for (k = 0; k < 4; k++) {
-        q4_1[k] = (double)g_b.arm_map_cached_adjust[k];
-        q5_1[k] = (double)g_b.arm_map_cached_adjust[4 + k];
-    }
-    /* The wrist-miss meter under the right frame: the engine puts the
-       wrist where the solution predicted, to float precision. */
-    InterlockedExchange(&g_b.s_wrist_miss_worst, f2l(0.0f));
-    InterlockedIncrement(&g_b.c_ticks);
-    arm_ik_now(arm, &target);
-    tq_engine(blob, STRIDE, adjust, 0, &rig, NULL);
-    target.pair_id++;
-    InterlockedIncrement(&g_b.c_ticks);
-    arm_ik_now(arm, &target);
-    tq_engine(blob, STRIDE, adjust, 0, &rig, NULL);
-    target.pair_id++;
-    lv = g_b.s_wrist_miss_worst; memcpy(&miss, &lv, sizeof miss);
-    if (!(miss < 0.5f)) bad++;
-    TS_LEG("wrist-miss-live");
-
-    /* strip leg (par. 6.2): known q4 = 20 about adjust-Z, q5 = 30 about
-       adjust-Y in the slots AND the cache, the engine posing them under
-       heading 73 (rot.vy -831 -> 73.04 degrees); the strip with that frame
-       recovers the animation bones within 0.10 degrees, and the same call
-       under the calibration heading (identity - yesterday's) misses by the
-       hand-computed 14.30 (upper) / 22.79 (fore) degrees for THIS rig
-       (scratchpad strip_check.py, 2026-09-01; asserted at >= 12 / >= 20). */
-    {
-        static const float kq4[4] = { 0.0f, 0.0f, 0.17364817766693033f, 0.98480775301220806f };
-        static const float kq5[4] = { 0.0f, 0.25881904510252076f, 0.0f, 0.96592582628906829f };
-        float saved_slots[8], saved_cache[8];
-        double live[5][3], clean[5][3], up[3], fo[3];
-        DG_ADJ_FRAME fr_ok, fr_stale;
-        memcpy(saved_slots, adjust + 16, sizeof saved_slots);
-        memcpy(saved_cache, g_b.arm_map_cached_adjust, sizeof saved_cache);
-        memcpy(adjust + 16, kq4, sizeof kq4);
-        memcpy(adjust + 20, kq5, sizeof kq5);
-        memcpy(g_b.arm_map_cached_adjust, kq4, sizeof kq4);
-        memcpy(g_b.arm_map_cached_adjust + 4, kq5, sizeof kq5);
-        tq_engine(blob, STRIDE, adjust, -831, &rig, NULL);
-        for (j = 2; j <= 6; j++) {
-            const float *m = (const float *)(blob + DG_OBJS_ARRAY + j * STRIDE);
-            for (k = 0; k < 3; k++) live[j - 2][k] = (double)m[12 + k];
-        }
-        memset(&fr_ok, 0, sizeof fr_ok);
-        fr_ok.live = 1; fr_ok.valid = 1;
-        arm_frame_yaw(-831, fr_ok.q);
-        if (!arm_remove_cached_adjust(&fr_ok, live, g_b.arm_map_cached_adjust,
-                                      clean)) bad++;
-        for (k = 0; k < 3; k++) {
-            up[k] = clean[3][k] - clean[2][k];
-            fo[k] = clean[4][k] - clean[3][k];
-        }
-        if (tq_vangle(up, rig.upper) > 0.10) bad++;
-        if (tq_vangle(fo, rig.fore) > 0.10) bad++;
-        memset(&fr_stale, 0, sizeof fr_stale);
-        fr_stale.live = 1; fr_stale.valid = 1;
-        quat_identity(fr_stale.q);
-        if (!arm_remove_cached_adjust(&fr_stale, live, g_b.arm_map_cached_adjust,
-                                      clean)) bad++;
-        for (k = 0; k < 3; k++) {
-            up[k] = clean[3][k] - clean[2][k];
-            fo[k] = clean[4][k] - clean[3][k];
-        }
-        if (!(tq_vangle(up, rig.upper) >= 12.0)) bad++;
-        if (!(tq_vangle(fo, rig.fore) >= 20.0)) bad++;
-        memcpy(adjust + 16, saved_slots, sizeof saved_slots);
-        memcpy(g_b.arm_map_cached_adjust, saved_cache, sizeof saved_cache);
-        tq_engine(blob, STRIDE, adjust, 0, &rig, NULL);
-    }
-    TS_LEG("strip");
-
-    /* seam leg: the body turns 90 degrees (rot.vy 1024) with the slots
-       untouched - the engine re-composes them under the new heading. The
-       next pair strips with the NEW frame, recovers the same animation,
-       solves the same world answer, and commits it re-expressed in the new
-       frame: q_2 = f2* W f2. A strip under yesterday's heading would
-       recover bent bones and commit something else. */
-    tq_frame(0, f1);
-    tq_frame(1024, f2);
-    dg_ik_quat_mul(f1, q4_1, t); dg_ik_quat_conj(f1, fc); dg_ik_quat_mul(t, fc, W4);
-    dg_ik_quat_mul(f1, q5_1, t); dg_ik_quat_mul(t, fc, W5);
-    dg_ik_quat_conj(f2, fc);
-    dg_ik_quat_mul(fc, W4, t); dg_ik_quat_mul(t, f2, exp4);
-    dg_ik_quat_mul(fc, W5, t); dg_ik_quat_mul(t, f2, exp5);
-    *(short *)(player.b + 0x82) = 1024;
-    tq_engine(blob, STRIDE, adjust, 1024, &rig, NULL);
-    InterlockedIncrement(&g_b.c_ticks);
-    arm_ik_now(arm, &target);
-    target.pair_id++;
-    for (k = 0; k < 4; k++) {
-        got4[k] = (double)g_b.arm_map_cached_adjust[k];
-        got5[k] = (double)g_b.arm_map_cached_adjust[4 + k];
-    }
-    if (dg_ik_quat_angle(got4, exp4) * 180.0 / 3.14159265358979323846 > 0.5) bad++;
-    if (dg_ik_quat_angle(got5, exp5) * 180.0 / 3.14159265358979323846 > 0.5) bad++;
-    tq_engine(blob, STRIDE, adjust, 1024, &rig, NULL);
-    TS_LEG("seam-turn");
-
-    /* The 2026-08-30 failure on the desk: under legacy the constant is the
-       frame of heading -90 (rot.vy 1024); at heading -180 (2048) it is 90
-       degrees wrong. A CONVERGED wrong-frame loop hides that from every
-       self-consistent meter (strip error and re-application cancel while
-       q stands still), so the target MOVES each pair here: with the right
-       frame the prediction stays exact whatever q does; with the wrong one
-       the wrist lands a forearm's worth away. Live at the same heading, same
-       moving target, stays exact. */
-    {
-        static const double tA[3] = { 250.0, -150.0, 100.0 };
-        static const double tB[3] = { 150.0, -250.0,  50.0 };
-        int i;
-        *(short *)(player.b + 0x82) = 2048;
-        tq_engine(blob, STRIDE, adjust, 2048, &rig, NULL);
-        for (j = 0; j < 3; j++) {
-            InterlockedIncrement(&g_b.c_ticks);
-            arm_ik_now(arm, &target);
-            tq_engine(blob, STRIDE, adjust, 2048, &rig, NULL);
-            target.pair_id++;
-        }
-        InterlockedExchange(&g_b.s_wrist_miss_worst, f2l(0.0f));
-        for (i = 0; i < 6; i++) {
-            for (k = 0; k < 3; k++) target.wrist_view[k] = (i & 1) ? tB[k] : tA[k];
-            InterlockedIncrement(&g_b.c_ticks);
-            arm_ik_now(arm, &target);
-            tq_engine(blob, STRIDE, adjust, 2048, &rig, NULL);
-            target.pair_id++;
-        }
-        lv = g_b.s_wrist_miss_worst; memcpy(&miss, &lv, sizeof miss);
-        if (!(miss < 0.5f)) bad++;
-        TS_LEG("live-at-180");
-        InterlockedExchange(&g_b.adjust_frame, 0);
-        for (j = 0; j < 3; j++) {
-            InterlockedIncrement(&g_b.c_ticks);
-            arm_ik_now(arm, &target);
-            tq_engine(blob, STRIDE, adjust, 2048, &rig, NULL);
-            target.pair_id++;
-        }
-        InterlockedExchange(&g_b.s_wrist_miss_worst, f2l(0.0f));
-        for (i = 0; i < 6; i++) {
-            for (k = 0; k < 3; k++) target.wrist_view[k] = (i & 1) ? tB[k] : tA[k];
-            InterlockedIncrement(&g_b.c_ticks);
-            arm_ik_now(arm, &target);
-            tq_engine(blob, STRIDE, adjust, 2048, &rig, NULL);
-            target.pair_id++;
-        }
-        lv = g_b.s_wrist_miss_worst; memcpy(&miss, &lv, sizeof miss);
-        if (!(miss > 50.0f)) bad++;
-        TS_LEG("legacy-at-180");
-        InterlockedExchange(&g_b.adjust_frame, 1);
-        for (k = 0; k < 3; k++) target.wrist_view[k] = tA[k];
-        for (j = 0; j < 4; j++) {
-            InterlockedIncrement(&g_b.c_ticks);
-            arm_ik_now(arm, &target);
-            tq_engine(blob, STRIDE, adjust, 2048, &rig, NULL);
-            target.pair_id++;
-        }
-    }
-
-    /* replay/cache leg: constant replay writes the CACHE, bit for bit, and
-       converts nothing; the engine under a heading 90 degrees on turns the
-       world forearm by exactly that. Slot, cache and frame are three
-       different things here: the slots are scribbled first, the cache is
-       the truth replay must restore, and the frame moves underneath. */
-    if (!g_b.arm_map_cache_valid || !g_b.ik_active) bad++;
-    tq_engine(blob, STRIDE, adjust, 2048, &rig, p6a);
-    for (k = 0; k < 8; k++) adjust[16 + k] = 0.123f * (float)(k + 1);
-    if (!arm_ik_replay_cached(arm)) bad++;
-    if (memcmp(adjust + 16, g_b.arm_map_cached_adjust, 8 * sizeof(float)) != 0)
-        bad++;
-    tq_engine(blob, STRIDE, adjust, 2048, &rig, p6a);
-    {
-        const float *m5 = (const float *)(blob + DG_OBJS_ARRAY + 5 * STRIDE);
-        for (k = 0; k < 3; k++) fore_a[k] = p6a[k] - (double)m5[12 + k];
-    }
-    /* The body turns 90 degrees: in the engine the animation rig turns
-       WITH the actor (it hangs off him) and so does the frame - the slots
-       stay. Then the world forearm's heading turns by exactly the frame
-       delta's yaw and its height does not change: the bone-vector oracle,
-       not a quaternion delta. */
-    {
-        TQ_RIG turned = rig;
-        double f3[4], f2c[4], delta[4], ha, hb, d;
-        tq_frame(3072, f3);
-        tq_frame(2048, f2c);
-        dg_ik_quat_conj(f2c, fc);
-        dg_ik_quat_mul(f3, fc, delta);
-        tq_rot(delta, rig.upper, turned.upper);
-        tq_rot(delta, rig.fore, turned.fore);
-        tq_engine(blob, STRIDE, adjust, 3072, &turned, p6b);
-        {
-            const float *m5 = (const float *)(blob + DG_OBJS_ARRAY + 5 * STRIDE);
-            for (k = 0; k < 3; k++) fore_b[k] = p6b[k] - (double)m5[12 + k];
-        }
-        ha = atan2(fore_a[2], fore_a[0]) * 180.0 / 3.14159265358979323846;
-        hb = atan2(fore_b[2], fore_b[0]) * 180.0 / 3.14159265358979323846;
-        d = hb - ha;
-        while (d > 180.0) d -= 360.0;
-        while (d < -180.0) d += 360.0;
-        if (fabs(d + 90.0) > 0.01) bad++;
-        if (fabs(fore_b[1] - fore_a[1]) > 0.01) bad++;
-    }
-    tq_engine(blob, STRIDE, adjust, 2048, &rig, NULL);
-    TS_LEG("replay-cache");
-
-    /* axis/cache leg: the roll's axis comes from the SLOTS, never the cache.
-       The cache is scaled off-unit (same direction: the strip normalises it
-       and is unharmed); the slots hold the truth. A read-back that
-       trusted the cache would fail its own unit check and count a skip. */
-    {
-        LONG sk0;
-        float saved_cache[8];
-        memcpy(saved_cache, g_b.arm_map_cached_adjust, sizeof saved_cache);
-        for (k = 0; k < 8; k++) g_b.arm_map_cached_adjust[k] *= 1.5f;
-        InterlockedExchange(&g_b.arm_uproll, 1);
-        sk0 = g_b.c_uproll_skipped;
-        InterlockedIncrement(&g_b.c_ticks);
-        arm_ik_now(arm, &target);
-        tq_engine(blob, STRIDE, adjust, 2048, &rig, NULL);
-        target.pair_id++;
-        if (g_b.c_uproll_skipped != sk0) bad++;
-        InterlockedExchange(&g_b.arm_uproll, 0);
-        memcpy(g_b.arm_map_cached_adjust, saved_cache, sizeof saved_cache);
-    }
-    TS_LEG("axis-from-slots");
-
-    /* Cached replay validity, independent of the solve's geometry oracle.
-       Real solves warm the cache; then poison the actual slots/mask, change
-       only current player ownership, and observe writes/release directly. */
-    {
-        static union { ULONGLONG align; unsigned char b[0x240]; } other_actor;
-        static union { ULONGLONG align; unsigned char b[0xD40]; } other_player;
-        const ULONGLONG bits = (1ULL << 4) | (1ULL << 5);
-        const ULONGLONG foreign_bit = 1ULL << 9;
-        ULONGLONG other_arm = (ULONGLONG)(ULONG_PTR)(other_actor.b + 0x60);
-        ULONGLONG anchor = g_b.a.gm_player_arm_body;
-        LONG freeze_saved = g_b.arm_freeze;
-        int mode, loss;
-        memset(&other_actor, 0, sizeof other_actor);
-        memset(&other_player, 0, sizeof other_player);
-        *(ULONGLONG *)(other_actor.b + 0x228) =
-            (ULONGLONG)(ULONG_PTR)(other_player.b + 0xCF4);
-        *(ULONGLONG *)(other_player.b + 0xBA8) = other_arm;
-        *(LONG *)(other_player.b + 0xBB0) = 6;
-        *(LONG *)(other_player.b + 0xB90) = 1;
-        for (mode = 0; mode < 2; mode++) for (loss = 0; loss < 3; loss++) {
-            DG_BRIDGE_ARM_TARGET replay_target;
-            float cached[8], sentinels[8];
-            DG_ADJ_FRAME saved_pair_frame;
-            LONG writes_before, refused_before, missing_before;
-            int start_bad = bad;
-            g_b.a.gm_player_arm_body = anchor;
-            *(LONG *)(player.b + 0xBB0) = 6;
-            *(short *)(player.b + 0x82) = 2048;
-            InterlockedExchange(&g_b.arm_freeze, 0);
-            InterlockedExchange(&g_b.adjust_frame, 1);
-            arm_map_forget();
-            for (k = 0; k < 8; k++) adjust[16+k] = (k == 3 || k == 7) ? 1.0f : 0.0f;
-            for (j = 0; j < 24 && !g_b.arm_map_cache_valid; j++) {
-                tq_engine(blob, STRIDE, adjust, 2048, &rig, NULL);
-                InterlockedIncrement(&g_b.c_ticks);
-                target.pair_id++;
-                arm_ik_now(arm, &target);
-            }
-            if (!g_b.arm_map_cache_valid || !g_b.ik_active) bad++;
-            memcpy(cached, g_b.arm_map_cached_adjust, sizeof cached);
-            replay_target = target;
-            replay_target.pair_id = g_b.arm_map_last_pair + (mode ? 1 : 0);
-            /* A pending hand command must be cleared by refusal/forget,
-               not accidentally by the separate !hand_write guard. */
-            replay_target.hand_write = 1;
-            InterlockedExchange(&g_b.arm_freeze, mode);
-            saved_pair_frame = g_b.pair_frame;
-            *(short *)(player.b + 0x82) = 3072;
-            for (k = 0; k < 8; k++) adjust[16+k] = .125f*(k+1);
-            *(ULONGLONG *)(mc + 0x38) = foreign_bit;
-            writes_before = g_b.c_arm_tracked;
-            arm_ik_now(arm, &replay_target);
-            if (memcmp(adjust + 16, cached, sizeof cached) ||
-                *(ULONGLONG *)(mc + 0x38) != (foreign_bit | bits) ||
-                g_b.c_arm_tracked != writes_before + 1 ||
-                memcmp(&g_b.pair_frame, &saved_pair_frame, sizeof saved_pair_frame)) bad++;
-
-            for (k = 0; k < 8; k++) sentinels[k] = adjust[16+k] = .25f*(k+1);
-            *(ULONGLONG *)(mc + 0x38) = foreign_bit;
-            InterlockedExchange(&g_b.hand_command_valid, 1);
-            if (mode) replay_target.pair_id++;
-            if (loss == 0) *(LONG *)(player.b + 0xBB0) = 5;
-            else if (loss == 1) g_b.a.gm_player_arm_body = 0;
-            else g_b.a.gm_player_arm_body = (ULONGLONG)(ULONG_PTR)&other_arm;
-            writes_before = g_b.c_arm_tracked;
-            refused_before = g_b.c_arm_ik_refused;
-            missing_before = g_b.c_frame_missing;
-            arm_ik_now(arm, &replay_target);
-            if (g_b.c_arm_tracked != writes_before ||
-                g_b.c_arm_ik_refused != refused_before + 1 ||
-                g_b.c_frame_missing != missing_before + 1 ||
-                g_b.arm_map_cache_valid || g_b.ik_active ||
-                g_b.hand_command_valid || g_b.arm_map_phase) bad++;
-            if (*(ULONGLONG *)(mc + 0x38) != foreign_bit) bad++;
-            if (loss == 0) {
-                /* Same adjust owner: release to identity is permitted. */
-                static const float identity_pair[8] = {0,0,0,1,0,0,0,1};
-                if (memcmp(adjust + 16, identity_pair, sizeof identity_pair)) bad++;
-            } else if (memcmp(adjust + 16, sentinels, sizeof sentinels)) {
-                /* Missing/replaced anchor: never touch the old slots. */
-                bad++;
-            }
-            g_b.a.gm_player_arm_body = anchor;
-            *(LONG *)(player.b + 0xBB0) = 6;
-            *(short *)(player.b + 0x82) = 2048;
-            InterlockedExchange(&g_b.arm_freeze, 0);
-            /* The same pair cannot resurrect the cache on return. */
-            replay_target.hand_write = 0;
-            arm_ik_now(arm, &replay_target);
-            if (g_b.arm_map_cache_valid || g_b.ik_active || g_b.arm_map_phase != 1) bad++;
-            /* No ownership bits means a real engine ignores old slot bytes.
-               This small test-engine has no mask input, so give it the
-               equivalent identity slots before the resumed hierarchy pass. */
-            for (k = 0; k < 8; k++) adjust[16+k] = (k == 3 || k == 7) ? 1.0f : 0.0f;
-            for (j = 0; j < 24 && !g_b.arm_map_cache_valid; j++) {
-                tq_engine(blob, STRIDE, adjust, 2048, &rig, NULL);
-                InterlockedIncrement(&g_b.c_ticks);
-                replay_target.pair_id++;
-                arm_ik_now(arm, &replay_target);
-            }
-            if (!g_b.arm_map_cache_valid || !g_b.ik_active) bad++;
-            if (bad != start_bad)
-                printf("    replay validity %s loss=%d: %d failures\n",
-                       mode ? "freeze" : "duplicate", loss, bad-start_bad);
-            target.pair_id = replay_target.pair_id + 1;
-        }
-        /* Compatibility control: legacy deliberately has no live heading
-           dependency. Its valid cached replay may work without a resolver. */
-        arm_map_forget();
-        *(short *)(player.b + 0x82) = 2048;
-        for (j = 0; j < 24 && !g_b.arm_map_cache_valid; j++) {
-            tq_engine(blob, STRIDE, adjust, 2048, &rig, NULL);
-            InterlockedIncrement(&g_b.c_ticks);
-            target.pair_id++;
-            arm_ik_now(arm, &target);
-        }
-        if (!g_b.arm_map_cache_valid) bad++;
-        {
-            DG_BRIDGE_ARM_TARGET legacy_target = target;
-            LONG tracked = g_b.c_arm_tracked;
-            legacy_target.pair_id = g_b.arm_map_last_pair;
-            InterlockedExchange(&g_b.adjust_frame, 0);
-            g_b.a.gm_player_arm_body = 0;
-            arm_ik_now(arm, &legacy_target);
-            if (g_b.c_arm_tracked != tracked + 1 || !g_b.arm_map_cache_valid) bad++;
-        }
-        g_b.a.gm_player_arm_body = anchor;
-        InterlockedExchange(&g_b.adjust_frame, 1);
-        InterlockedExchange(&g_b.arm_freeze, freeze_saved);
-        target.pair_id++;
-    }
-    TS_LEG("live-replay-validity-and-recovery");
-
-    /* A pair with no resolvable player under live has no frame: it refuses
-       (missing counts), and nothing is written. */
-    {
-        LONG acc0 = g_b.c_arm_pairs_accepted, ref0 = g_b.c_arm_ik_refused;
-        n0 = g_b.c_frame_missing;
-        *(LONG *)(player.b + 0xBB0) = 5;             /* owner check fails */
-        InterlockedIncrement(&g_b.c_ticks);
-        arm_ik_now(arm, &target);
-        target.pair_id++;
-        if (g_b.c_frame_missing != n0 + 1) bad++;
-        if (g_b.c_arm_pairs_accepted != acc0) bad++;
-        if (g_b.c_arm_ik_refused == ref0) bad++;
-        *(LONG *)(player.b + 0xBB0) = 6;
-    }
-    TS_LEG("no-heading-refuses");
-
-    /* Fades and pose loss must not reach the meter (runs 9/10, 2026-09-02:
-       worst 531-587 mm, every one of them the headset being put down). The
-       engine here is moved by hand after each pose - the stand-in for the
-       runtime blending the arm elsewhere while the pair is faded. */
-    {
-        float *wrist = (float *)(blob + DG_OBJS_ARRAY + 6 * STRIDE);
-        InterlockedExchange(&g_b.adjust_frame, 1);
-        *(short *)(player.b + 0x82) = 2048;
-        /* The headingless refusal above forgot the map: calibrate again and
-           settle, so a prediction actually stands when the fade arrives. */
-        for (j = 0; j < 24 && !g_b.arm_map_cache_valid; j++) {
-            InterlockedIncrement(&g_b.c_ticks);
-            arm_ik_now(arm, &target);
-            tq_engine(blob, STRIDE, adjust, 2048, &rig, NULL);
-            target.pair_id++;
-        }
-        if (!g_b.arm_map_cache_valid) bad++;
-        for (j = 0; j < 4; j++) {
-            InterlockedIncrement(&g_b.c_ticks);
-            arm_ik_now(arm, &target);
-            tq_engine(blob, STRIDE, adjust, 2048, &rig, NULL);
-            target.pair_id++;
-        }
-        InterlockedExchange(&g_b.s_wrist_miss_worst, f2l(0.0f));
-        InterlockedExchange(&g_b.c_wrist_miss_over, 0);
-        /* A full pair predicts; a plausible faded pair leaves NO prediction
-           behind (a 300 mm wrist would be refused as implausible before it
-           could write, so this pair reads the engine's own wrist). */
-        InterlockedIncrement(&g_b.c_ticks);
-        arm_ik_now(arm, &target);
-        tq_engine(blob, STRIDE, adjust, 2048, &rig, NULL);
-        target.pair_id++;
-        if (!g_b.have_pred_wrist) bad++;
-        target.weight = 0.5;
-        InterlockedIncrement(&g_b.c_ticks);
-        arm_ik_now(arm, &target);
-        tq_engine(blob, STRIDE, adjust, 2048, &rig, NULL);
-        target.pair_id++;
-        if (g_b.have_pred_wrist) bad++;
-        /* Then a full pair predicts, the engine lands the wrist 300 mm
-           away, and the faded pair that reads it grades nothing; the full
-           pair after it has nothing to grade either. */
-        target.weight = 1.0;
-        InterlockedIncrement(&g_b.c_ticks);
-        arm_ik_now(arm, &target);
-        tq_engine(blob, STRIDE, adjust, 2048, &rig, NULL);
-        target.pair_id++;
-        if (!g_b.have_pred_wrist) bad++;
-        wrist[12] += 300.0f;
-        target.weight = 0.5;
-        InterlockedIncrement(&g_b.c_ticks);
-        arm_ik_now(arm, &target);
-        tq_engine(blob, STRIDE, adjust, 2048, &rig, NULL);
-        target.pair_id++;
-        wrist[12] += 300.0f;
-        target.weight = 1.0;
-        InterlockedIncrement(&g_b.c_ticks);
-        arm_ik_now(arm, &target);
-        tq_engine(blob, STRIDE, adjust, 2048, &rig, NULL);
-        target.pair_id++;
-        lv = g_b.s_wrist_miss_worst; memcpy(&miss, &lv, sizeof miss);
-        if (!(miss < 0.5f)) bad++;
-        if (g_b.c_wrist_miss_over != 0) bad++;
-        TS_LEG("fade-not-graded");
-
-        /* Pose loss: a full pair predicts, the pose goes (weight 0 forgets
-           the map), the wrist is elsewhere when tracking returns, and the
-           recalibration's first read must not grade the dead prediction.
-           The 600 mm the previous leg moved the wrist made its last pair
-           implausible (the map forgot itself), so calibrate again first. */
-        for (j = 0; j < 24 && !g_b.arm_map_cache_valid; j++) {
-            InterlockedIncrement(&g_b.c_ticks);
-            arm_ik_now(arm, &target);
-            tq_engine(blob, STRIDE, adjust, 2048, &rig, NULL);
-            target.pair_id++;
-        }
-        for (j = 0; j < 4; j++) {
-            InterlockedIncrement(&g_b.c_ticks);
-            arm_ik_now(arm, &target);
-            tq_engine(blob, STRIDE, adjust, 2048, &rig, NULL);
-            target.pair_id++;
-        }
-        InterlockedExchange(&g_b.s_wrist_miss_worst, f2l(0.0f));
-        InterlockedExchange(&g_b.c_wrist_miss_over, 0);
-        InterlockedIncrement(&g_b.c_ticks);
-        arm_ik_now(arm, &target);
-        tq_engine(blob, STRIDE, adjust, 2048, &rig, NULL);
-        target.pair_id++;
-        if (!g_b.have_pred_wrist) {
-            printf("    pose-loss: the full pair before the loss predicted "
-                   "nothing (cache %ld)\n", (long)g_b.arm_map_cache_valid);
-            bad++;
-        }
-        target.weight = 0.0;
-        InterlockedIncrement(&g_b.c_ticks);
-        arm_ik_now(arm, &target);
-        target.pair_id++;
-        if (g_b.have_pred_wrist) {
-            printf("    pose-loss: the prediction survived the loss\n");
-            bad++;
-        }
-        target.weight = 1.0;
-        wrist[12] += 300.0f;
-        /* The first read after tracking returns is the one that would grade
-           the dead prediction against a wrist that moved 300 mm meanwhile. */
-        InterlockedIncrement(&g_b.c_ticks);
-        arm_ik_now(arm, &target);
-        tq_engine(blob, STRIDE, adjust, 2048, &rig, NULL);
-        target.pair_id++;
-        lv = g_b.s_wrist_miss_worst; memcpy(&miss, &lv, sizeof miss);
-        if (!(miss < 0.5f)) {
-            printf("    pose-loss: the dead prediction was graded, %.1f mm\n",
-                   (double)miss);
-            bad++;
-        }
-        for (j = 0; j < 24 && !g_b.arm_map_cache_valid; j++) {
-            InterlockedIncrement(&g_b.c_ticks);
-            arm_ik_now(arm, &target);
-            tq_engine(blob, STRIDE, adjust, 2048, &rig, NULL);
-            target.pair_id++;
-        }
-        if (!g_b.arm_map_cache_valid) {
-            printf("    pose-loss: no recalibration within 24 pairs\n");
-            bad++;
-        }
-        /* Calibration-time reads are not this meter's claim. */
-        InterlockedExchange(&g_b.s_wrist_miss_worst, f2l(0.0f));
-        InterlockedExchange(&g_b.c_wrist_miss_over, 0);
-        TS_LEG("pose-loss-drops-prediction");
-
-        /* And the meter is still a meter: a full pair predicts, the engine
-           misplaces the wrist, the next full pair grades it. */
-        for (j = 0; j < 24 && !g_b.arm_map_cache_valid; j++) {
-            InterlockedIncrement(&g_b.c_ticks);
-            arm_ik_now(arm, &target);
-            tq_engine(blob, STRIDE, adjust, 2048, &rig, NULL);
-            target.pair_id++;
-        }
-        for (j = 0; j < 4; j++) {
-            InterlockedIncrement(&g_b.c_ticks);
-            arm_ik_now(arm, &target);
-            tq_engine(blob, STRIDE, adjust, 2048, &rig, NULL);
-            target.pair_id++;
-        }
-        InterlockedExchange(&g_b.s_wrist_miss_worst, f2l(0.0f));
-        InterlockedExchange(&g_b.c_wrist_miss_over, 0);
-        InterlockedIncrement(&g_b.c_ticks);
-        arm_ik_now(arm, &target);
-        tq_engine(blob, STRIDE, adjust, 2048, &rig, NULL);
-        target.pair_id++;
-        if (!g_b.have_pred_wrist) bad++;
-        wrist[12] += 300.0f;
-        InterlockedIncrement(&g_b.c_ticks);
-        arm_ik_now(arm, &target);
-        tq_engine(blob, STRIDE, adjust, 2048, &rig, NULL);
-        target.pair_id++;
-        lv = g_b.s_wrist_miss_worst; memcpy(&miss, &lv, sizeof miss);
-        if (!(miss > 100.0f)) bad++;
-        if (g_b.c_wrist_miss_over != 1) bad++;
-        TS_LEG("meter-still-grades");
-    }
-
-    arm_map_forget();
-    InterlockedExchange(&g_b.ik_active, 0);
-    InterlockedExchange(&g_b.adjust_frame, saved_frame);
-    InterlockedExchange(&g_b.arm_uproll, saved_uproll);
-    g_b.a.gm_player_arm_body = saved_anchor;
-    InterlockedExchange(&g_b.skel_stride, 0);
-    InterlockedExchange(&g_b.skel_parents_read, 0);
-    InterlockedExchange(&g_b.skel_region_end, 0);
-    InterlockedExchange(&g_b.c_ticks, 0);
-    g_b.have_pred_wrist = 0;
-    InterlockedExchange(&g_b.s_wrist_miss_worst, f2l(0.0f));
-    InterlockedExchange(&g_b.c_wrist_miss_over, 0);
-    g_b.pair_frame = ADJ_FRAME_LEGACY;
-#undef TS_LEG
-
-    printf("  %-6s adjust frame seam: through the real arm_ik_now against a "
-           "test-engine that composes the slots under the measured frame - "
-           "calibrates live with no missing heading, the wrist lands where the "
-           "solution predicted (<0.5 mm), the strip recovers the animation "
-           "under its own heading (0.10 deg) and misses by 14/23 deg under "
-           "yesterday's, a 90-degree body turn re-expresses the same world "
-           "answer in the new frame (0.5 deg), legacy at heading -180 with a "
-           "moving target misses the wrist by >50 mm where live stays under "
-           "0.5 mm, constant replay writes "
-           "the cache bit for bit and the engine turns the forearm exactly 90 "
-           "under the next heading, the roll reads the slots not the cache, "
-           "a headingless pair refuses, and neither a faded pair nor a pose "
-           "loss reaches the wrist meter while a real miss still does\n",
-           bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-#include "dg_camera_bob_test.inl"
-#include "dg_view_calibration_test.inl"
-
-static int t_camera_gate_now(void)
-{
-    DG_ANCHORS saved_anchors = g_b.a;
-    DG_FPS_STATE saved_fps = g_b.fps;
-    LONG saved_armed = InterlockedCompareExchange(&g_b.armed, 0, 0);
-    int saved_owner = g_b.owner;
-    volatile LONG native_active = 1;
-    volatile ULONGLONG player_status = 0;
-    volatile LONG game_status = 0, game_status_scn = 0;
-    volatile LONG menu_status = 0, menu_status_scn = 0;
-    volatile ULONGLONG arm_value;
-    unsigned char arm_mem[0x400], camera_mem[0x40];
-    DG_CAMERA_GATE out;
-    SYSTEM_INFO si;
-    void *guard = NULL;
-    DWORD old_protect;
-    int bad = 0;
-
-    memset(arm_mem, 0, sizeof arm_mem);
-    memset(camera_mem, 0, sizeof camera_mem);
-    arm_value = (ULONGLONG)(ULONG_PTR)(arm_mem + 0x100);
-    *(volatile ULONGLONG *)(ULONG_PTR)(arm_value - 0x60 + 0x248) =
-        (ULONGLONG)(ULONG_PTR)camera_mem;
-    *(volatile LONG *)(ULONG_PTR)((ULONGLONG)(ULONG_PTR)camera_mem + 0x2C) = 1;
-
-    memset(&g_b.a, 0, sizeof g_b.a);
-    g_b.a.gbp_active = (ULONGLONG)(ULONG_PTR)&native_active;
-    g_b.a.gm_player_status = (ULONGLONG)(ULONG_PTR)&player_status;
-    g_b.a.gm_game_status = (ULONGLONG)(ULONG_PTR)&game_status;
-    g_b.a.gm_game_status_scn = (ULONGLONG)(ULONG_PTR)&game_status_scn;
-    g_b.a.gm_menu_status = (ULONGLONG)(ULONG_PTR)&menu_status;
-    g_b.a.gm_menu_status_scn = (ULONGLONG)(ULONG_PTR)&menu_status_scn;
-    g_b.a.gm_player_arm_body = (ULONGLONG)(ULONG_PTR)&arm_value;
-    InterlockedExchange(&g_b.armed, 1);
-    g_b.fps.state = DG_FPS_ACTIVE;
-    g_b.owner = 0;
-
-    /* Button context is raw and mode-independent. A must also enter FPS;
-       theater rendering settings must not grant permission in a menu. */
-    {
-        LONG saved_request=g_b.toggle_request, saved_request_ms=g_b.toggle_request_ms;
-        if (!dg_bridge_controller_gameplay_now()) bad++;
-        g_b.fps.state=DG_FPS_OFF;
-        native_active=0;
-        if (!dg_bridge_controller_gameplay_now()) bad++;
-        g_b.fps.state=DG_FPS_ACTIVE; native_active=1;
-        menu_status=DG_MENU_UNSAFE_MASK;
-        if (dg_bridge_controller_gameplay_now()) bad++;
-        menu_status=0; menu_status_scn=DG_MENU_UNSAFE_MASK;
-        if (dg_bridge_controller_gameplay_now()) bad++;
-        menu_status_scn=0; game_status=DG_GAME_UNSAFE_MASK;
-        if (dg_bridge_controller_gameplay_now()) bad++;
-        game_status=0; game_status_scn=DG_GAME_UNSAFE_MASK;
-        if (dg_bridge_controller_gameplay_now()) bad++;
-        game_status_scn=0; player_status=DG_PLAYER_UNSAFE_MASK;
-        if (dg_bridge_controller_gameplay_now()) bad++;
-        player_status=0;
-        { ULONGLONG saved_arm=arm_value;
-          arm_value=0;
-          if (dg_bridge_controller_gameplay_now()) bad++;
-          arm_value=saved_arm;
-        }
-        dg_bridge_request_toggle();
-        if (!controller_toggle_pending(1,(DWORD)g_b.toggle_request_ms)) bad++;
-        if (controller_toggle_pending(0,(DWORD)g_b.toggle_request_ms) || g_b.toggle_request) bad++;
-        if (controller_toggle_pending(1,(DWORD)g_b.toggle_request_ms)) bad++;
-        dg_bridge_request_toggle();
-        if (controller_toggle_pending(1,(DWORD)g_b.toggle_request_ms+101) || g_b.toggle_request) bad++;
-        dg_bridge_request_toggle(); dg_bridge_cancel_toggle();
-        if (g_b.toggle_request) bad++;
-        g_b.toggle_request=saved_request; g_b.toggle_request_ms=saved_request_ms;
-    }
-
-    if (!dg_bridge_camera_gate_now(&out) || !out.valid || !out.native_active ||
-        !out.safe_gameplay || !out.arm_camera_on || out.arm_body != arm_value ||
-        out.camera != (ULONGLONG)(ULONG_PTR)camera_mem)
-        bad++;
-
-    /* The resolved work record must advertise channel zero and a live camera
-       object. Each refusal below exercises the corresponding bounded walk. */
-    *(volatile LONG *)(ULONG_PTR)(arm_value - 0x60 + 0x238) = 1;
-    if (dg_bridge_camera_gate_now(&out)) bad++;
-    *(volatile LONG *)(ULONG_PTR)(arm_value - 0x60 + 0x238) = 0;
-    *(volatile ULONGLONG *)(ULONG_PTR)(arm_value - 0x60 + 0x248) = 0;
-    if (dg_bridge_camera_gate_now(&out)) bad++;
-    *(volatile ULONGLONG *)(ULONG_PTR)(arm_value - 0x60 + 0x248) =
-        (ULONGLONG)(ULONG_PTR)camera_mem;
-
-    /* Native inactivity and every unsafe status word must stop before the
-       arm walk, while still publishing the words that explain the refusal. */
-    native_active = 0;
-    if (dg_bridge_camera_gate_now(&out) || out.native_active ||
-        !out.safe_gameplay || out.arm_body || out.camera)
-        bad++;
-    native_active = 1;
-
-    player_status = DG_PLAYER_UNSAFE_MASK;
-    if (dg_bridge_camera_gate_now(&out) || out.safe_gameplay)
-        bad++;
-    player_status = 0;
-    game_status = DG_GAME_UNSAFE_MASK;
-    if (dg_bridge_camera_gate_now(&out) || out.safe_gameplay ||
-        out.game_status != (unsigned int)game_status)
-        bad++;
-    game_status = 0;
-    game_status_scn = DG_GAME_UNSAFE_MASK;
-    if (dg_bridge_camera_gate_now(&out) || out.safe_gameplay ||
-        out.game_status != (unsigned int)game_status_scn)
-        bad++;
-    game_status_scn = 0;
-    menu_status = DG_MENU_UNSAFE_MASK;
-    if (dg_bridge_camera_gate_now(&out) || out.safe_gameplay ||
-        out.menu_status != (unsigned int)menu_status)
-        bad++;
-    menu_status = 0;
-    menu_status_scn = DG_MENU_UNSAFE_MASK;
-    if (dg_bridge_camera_gate_now(&out) || out.safe_gameplay ||
-        out.menu_status != (unsigned int)menu_status_scn)
-        bad++;
-    menu_status_scn = 0;
-
-    *(volatile LONG *)(ULONG_PTR)((ULONGLONG)(ULONG_PTR)camera_mem + 0x2C) = 0;
-    if (dg_bridge_camera_gate_now(&out) || !out.safe_gameplay || out.arm_camera_on)
-        bad++;
-    *(volatile LONG *)(ULONG_PTR)((ULONGLONG)(ULONG_PTR)camera_mem + 0x2C) = 1;
-
-    /* Session and ownership gates retain their diagnostics and do not touch
-       the anchors at all. */
-    g_b.owner = 1;
-    if (dg_bridge_camera_gate_now(&out) || !out.armed || !out.fps_active)
-        bad++;
-    g_b.owner = 0;
-    InterlockedExchange(&g_b.armed, 0);
-    if (dg_bridge_camera_gate_now(&out) || out.armed || !out.fps_active)
-        bad++;
-    InterlockedExchange(&g_b.armed, 1);
-    g_b.fps.state = DG_FPS_OFF;
-    if (dg_bridge_camera_gate_now(&out) || !out.armed || out.fps_active)
-        bad++;
-    g_b.fps.state = DG_FPS_ACTIVE;
-
-    /* Null, no-access, and a committed span too short for the requested read
-       all fail closed without relying on an exception handler. */
-    g_b.a.gm_game_status = 0;
-    if (dg_bridge_camera_gate_now(&out)) bad++;
-    g_b.a.gm_game_status = (ULONGLONG)(ULONG_PTR)&game_status;
-    guard = VirtualAlloc(NULL, 0x1000, MEM_RESERVE | MEM_COMMIT,
-                         PAGE_NOACCESS);
-    if (!guard) {
-        bad++;
-    } else {
-        g_b.a.gm_game_status = (ULONGLONG)(ULONG_PTR)guard;
-        if (dg_bridge_camera_gate_now(&out)) bad++;
-        g_b.a.gm_game_status = (ULONGLONG)(ULONG_PTR)&game_status;
-    }
-    if (guard) VirtualFree(guard, 0, MEM_RELEASE);
-
-    GetSystemInfo(&si);
-    guard = VirtualAlloc(NULL, si.dwPageSize * 2, MEM_RESERVE | MEM_COMMIT,
-                         PAGE_READWRITE);
-    if (!guard || !VirtualProtect((unsigned char *)guard + si.dwPageSize,
-                                  si.dwPageSize, PAGE_NOACCESS, &old_protect)) {
-        if (guard) VirtualFree(guard, 0, MEM_RELEASE);
-        bad++;
-    } else {
-        g_b.a.gm_game_status = (ULONGLONG)(ULONG_PTR)
-            ((unsigned char *)guard + si.dwPageSize - 2);
-        if (dg_bridge_camera_gate_now(&out)) bad++;
-        VirtualProtect((unsigned char *)guard + si.dwPageSize, si.dwPageSize,
-                       old_protect, &old_protect);
-        VirtualFree(guard, 0, MEM_RELEASE);
-        g_b.a.gm_game_status = (ULONGLONG)(ULONG_PTR)&game_status;
-    }
-
-    guard = VirtualAlloc(NULL, si.dwPageSize, MEM_RESERVE | MEM_COMMIT,
-                         PAGE_READWRITE);
-    if (!guard) {
-        bad++;
-    } else {
-        arm_value = (ULONGLONG)(ULONG_PTR)
-            ((unsigned char *)guard + si.dwPageSize - 8);
-        if (dg_bridge_camera_gate_now(&out)) bad++;
-        VirtualFree(guard, 0, MEM_RELEASE);
-        arm_value = (ULONGLONG)(ULONG_PTR)(arm_mem + 0x100);
-    }
-    g_b.a.gm_player_arm_body = 0;
-    if (dg_bridge_camera_gate_now(&out)) bad++;
-    g_b.a.gm_player_arm_body = (ULONGLONG)(ULONG_PTR)&arm_value;
-
-    g_b.a = saved_anchors;
-    g_b.fps = saved_fps;
-    g_b.owner = saved_owner;
-    InterlockedExchange(&g_b.armed, saved_armed);
-    printf("  %-6s camera gate: real ACTIVE/owned/safe channel-0 arm-camera "
-           "passes; native-inactive, owner, lifecycle, player/game/menu "
-           "including SCN, camera-off, null, no-access and short-span cells "
-           "refuse with bounded reads\n", bad ? "FAIL" : "ok");
-    return bad ? 1 : 0;
-}
-
-#include "dg_position_bridge_test.h"
-#include "dg_left_arm_test.inl"
-#include "dg_left_model_test.inl"
-#include "dg_unarmed_right_test.inl"
-#include "dg_hand_profile_test.inl"
-#include "dg_unarmed_prone_test.inl"
-#include "dg_hand_pose_test.inl"
-#include "dg_interact_bridge_test.inl"
-#include "dg_hanging_visibility_test.inl"
-
-#include "dg_native_hud_fixture.h"
-static int t_native_hud_relocation(void) {
-    const unsigned char *data[]={hud_fixture_life,hud_fixture_frame,hud_fixture_coolant};
-    size_t lengths[]={sizeof hud_fixture_life,sizeof hud_fixture_frame,sizeof hud_fixture_coolant};
-    size_t offsets[]={0x5769da-0x576730,0x11e083-0x11df40,0x51f9b1-0x51f880};
-    unsigned char *code;DG_DETOUR detour;const char *why;int i,bad=0;
-    for(i=0;i<3;i++) {
-        code=VirtualAlloc(NULL,4096,MEM_RESERVE|MEM_COMMIT,PAGE_EXECUTE_READWRITE);
-        if(!code){bad++;continue;}
-        memcpy(code,data[i],lengths[i]);
-        if(!dg_detour_install_ex(&detour,code+offsets[i],native_hud_life,code,code+lengths[i],&why,1)) {
-            printf("  FAIL native hook %d relocation: %s\n",i,why);bad++;
-        } else {
-            dg_detour_remove(&detour);
-            if(memcmp(code,data[i],lengths[i]))bad++;
-        }
-        VirtualFree(code,0,MEM_RELEASE);
-    }
-    printf("  %s native HUD/coolant: all three retail seams install and restore\n",bad?"FAIL":"ok");
-    return bad;
-}
-static int t_coolant_pad_alignment(void) {
-    __declspec(align(8)) unsigned words[4]={0,0,0x80,0};
-    uint64_t p=(uint64_t)(ULONG_PTR)&words[1];int bad=0;
-    if((p&7)!=4 || coolant_pad_status(p)!=0x80)bad++;
-    if(coolant_pad_status(0)!=0xffffffffu || coolant_pad_status(p+1)!=0xffffffffu)bad++;
-    printf("  %s coolant pad: real four-byte alignment readable; null/misaligned rejected\n",bad?"FAIL":"ok");
-    return bad;
-}
-static int t_native_hud_selective(void) {
-    unsigned char gauge[0x60]={0},work[0x790]={0},sprites[5][0x40]={0};
-    uint64_t regs[16]={0};unsigned prim=0x22;int i,bad=0;
-    LONG armed=g_b.armed,late=g_b.s_late_unsafe,menu=g_b.script_menu_only,requested=g_native_hud_requested;
-    int fps=g_b.fps.state,live=g_native_hud_live;
-    g_b.armed=1;g_b.s_late_unsafe=0;g_b.script_menu_only=0;g_b.fps.state=DG_FPS_ACTIVE;
-    g_native_hud_requested=g_native_hud_live=1;
-    *(uint64_t *)(gauge+0x38)=(uint64_t)(ULONG_PTR)&prim;regs[11]=(uint64_t)(ULONG_PTR)gauge;
-    native_hud_life(regs+16);if(prim!=0x122)bad++;
-    prim=0x22;*(short *)(gauge+0x24)=1;native_hud_life(regs+16);if(prim!=0x22)bad++;
-    *(short *)(gauge+0x24)=0;
-    for(i=0;i<5;i++){*(unsigned *)(sprites[i]+0x30)=0x42;*(uint64_t *)(work+0x768+i*8)=(uint64_t)(ULONG_PTR)sprites[i];}
-    regs[11]=(uint64_t)(ULONG_PTR)work;native_hud_frame(regs+16);
-    for(i=0;i<5;i++)if(*(unsigned *)(sprites[i]+0x30)!=(i?0x8042:0x42))bad++;
-    for(i=0;i<5;i++) {
-        prim=0x22;regs[11]=(uint64_t)(ULONG_PTR)gauge;
-        g_native_hud_requested=i!=0;g_b.armed=i!=1;g_b.s_late_unsafe=i==2;
-        g_b.script_menu_only=i==3;g_b.fps.state=i==4?0:DG_FPS_ACTIVE;
-        native_hud_life(regs+16);if(prim!=0x22)bad++;
-        *(unsigned *)(sprites[1]+0x30)=0x42;regs[11]=(uint64_t)(ULONG_PTR)work;
-        native_hud_frame(regs+16);if(*(unsigned *)(sprites[1]+0x30)!=0x42)bad++;
-    }
-    g_b.armed=armed;g_b.s_late_unsafe=late;g_b.script_menu_only=menu;g_b.fps.state=fps;
-    g_native_hud_requested=requested;g_native_hud_live=live;
-    printf("  %s native HUD: LIFE only, exactly four frame sprites, inactive gates\n",bad?"FAIL":"ok");
-    return bad;
-}
-
-#include "dg_menu_recovery_test.inl"
-int dg_bridge_self_test(void)
-{
-    int bad = 0;
-    bad += t_native_hud_relocation();
-    bad += t_native_hud_selective();
-    bad += t_coolant_pad_alignment();
-    bad += t_twohand_latch();
-    bad += t_interact_native_writer();
-    bad += t_hanging_visibility();
-    bad += t_interact_codec_direct();
-    bad += t_left_seam();
-    bad += t_left_model_transport();
-    bad += t_unarmed_right();
-    bad += t_persistent_hand_profile();
-    bad += t_unarmed_prone_tables();
-    bad += t_hand_pose_mirror();
-    bad += t_hand_pose_mirror_heading();
-    bad += t_camera_pair_telemetry();
-    bad += t_cutscene_reaches_the_safety_gate();
-    bad += t_adjust_frame();
-    bad += t_adjust_frame_seam();
-    bad += t_skeleton_is_measured_not_assumed();
-    bad += t_active_seam_rate_uses_active_ticks();
-    bad += t_adjust_probe_holds_a_case_for_a_whole_pass();
-    bad += t_bend_writes_one_joint_behind_its_gate();
-    bad += t_ik_glue_uses_measured_adjust_space();
-    bad += t_grip_roll();
-    bad += t_arm_mapping_is_once_per_pair();
-    bad += t_arm_freeze_replays_one_pair_and_never_solves();
-    bad += t_hand_net_meter_separates_winding_from_shaking();
-    bad += t_rest_freeze_breaks_the_strip_feedback_loop();
-    bad += t_the_gap_reads_the_facing_minus_the_body();
-    bad += t_writer_stands_down_on_the_seams_own_reading();
-    bad += t_set_pos_quat_matches_the_game();
-    bad += t_hand_probe_owns_and_returns_the_svector();
-    bad += t_hand_tick_writer_is_fail_closed();
-    bad += t_release_gives_the_wrist_back();
-    bad += t_the_two_halves_of_the_conversion_agree();
-    bad += t_the_trigger_crosses_the_seams();
-    bad += t_walking_speaks_only_over_silence();
-    bad += t_walking_in_third_person_and_prone();
-    bad += t_body_follow_speaks_for_the_aim();
-    bad += t_press_order_keeps_presses_in_order();
-    bad += t_menu_seam_writes_only_where_it_may();
-    bad += t_xr_menu_recovery();
-    bad += t_script_menu_context_guard();
-    bad += t_the_trigger_only_ever_adds();
-    bad += t_the_kick_is_ours_and_comes_home();
-    bad += t_hand_follows_the_controller();
-    bad += t_the_arm_ignores_the_bodys_yaw();
-    bad += t_probe_the_walking_turn();
-    bad += t_off_never_writes();
-    bad += t_toggle_ten_cycles();
-    bad += t_native_fps_is_left_alone();
-    bad += t_engine_leaving_is_not_a_fight();
-    bad += t_move_is_borrowed_only_on_request();
-    bad += t_claim_is_released_when_idle();
-    bad += t_idle_is_not_a_second_owner();
-    bad += t_player_status_mask();
-    bad += t_game_status_mask();
-    bad += t_menu_status_mask();
-    bad += t_theater_mask_is_narrower_than_the_gate();
-    bad += t_theater_hysteresis_holds_both_flanks();
-    bad += t_theater_verdict_is_one_publication_fail_closed();
-    bad += t_hud_hide_borrows_the_games_own_bits();
-    bad += t_always_suspend_resume();
-    bad += t_no_edge_without_toggle();
-    bad += t_restore_once();
-    bad += t_decoder();
-    bad += t_relocation();
-    bad += t_detour_end_to_end();
-    bad += t_detour_refusals();
-    bad += t_anchor_gate();
-    bad += t_arm_body_needs_two_agreeing_anchors();
-    bad += t_camera_gate_now();
-    bad += t_camera_standing_height();
-    bad += t_view_calibration_gate();
-    return bad;
-}
-
-#endif
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

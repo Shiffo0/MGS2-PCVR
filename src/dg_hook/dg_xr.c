@@ -14,16 +14,19 @@ static PVOID volatile g_capture_observer;
 void dg_xr_set_capture_observer(DG_XR_CAPTURE_OBSERVER observer) {
     InterlockedExchangePointer(&g_capture_observer,(PVOID)observer);
 }
-#ifdef DG_XR_NO_RUNTIME
-void dg_xr_m9_feedback(unsigned events) {(void)events;}
-#endif
+
+
+
+
+
+
 #include "dg_proj.h"
 /* Shared bridge types only. Physical button events go through the bounded
    context mailbox above; this runtime thread does not enqueue FPS directly. */
 #include "dg_bridge.h"
 #include "dg_model_arm.h"
 
-#ifndef DG_XR_NO_RUNTIME
+
 #include <d3d11.h>
 #include <d3d11_4.h>                    /* ID3D11Multithread - see g_mt */
 #include <dxgi.h>
@@ -31,7 +34,7 @@ void dg_xr_m9_feedback(unsigned events) {(void)events;}
 #define XR_USE_GRAPHICS_API_D3D11
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
-#endif
+
 
 #define PI 3.14159265358979323846
 
@@ -275,27 +278,27 @@ static int controller_recenter_current(uint32_t now_ms)
            g_controller_recenter_context==controller_context_fresh(now_ms);
 }
 
-#ifdef DG_HOOK_TEST
-unsigned dg_xr_test_controller_buttons(int active, unsigned a, unsigned y, uint32_t now_ms)
-{ return controller_buttons_at(active?3:0,a,y,now_ms); }
-unsigned dg_xr_test_controller_actions(unsigned valid, unsigned a, unsigned y, uint32_t now_ms)
-{ return controller_buttons_at((int)valid,a,y,now_ms); }
-void dg_xr_test_controller_context(int gameplay, uint32_t now_ms)
-{ controller_context_at(gameplay,now_ms); }
-int dg_xr_test_controller_toggle_take(uint32_t now_ms)
-{ return controller_toggle_take_at(now_ms); }
-int dg_xr_test_controller_recenter_current(uint32_t now_ms)
-{ return controller_recenter_current(now_ms); }
-#endif
 
-#ifdef DG_HOOK_TEST
-/* capture_reference lives in the runtime half and the desk build has none, so
-   without this the arm's recentre-restarts-the-stream contract could only be
-   argued about. Same precedent as dg_xr_test_publish. */
-void dg_xr_test_recenter(void) {
-    InterlockedIncrement(&g_recenter_count);
-}
-#endif
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 void dg_xr_quat_yaw_only(const double q[4], double out[4]) {
     /* The twist of a swing/twist split about +Y is the Y and W components on
@@ -513,14 +516,14 @@ int dg_xr_get_stereo(DG_XR_FRAME *out) {
     return 0;
 }
 
-#ifdef DG_HOOK_TEST
-void dg_xr_test_publish(const DG_XR_FRAME *frame) {
-    publish(frame, 1, 1);
-}
-void dg_xr_test_publish_status(const DG_XR_FRAME *frame, int flags) {
-    publish(frame, (flags & 1) != 0, (flags & 2) != 0);
-}
-#endif
+
+
+
+
+
+
+
+
 
 int dg_xr_get_target_fov(DG_PROJ_FOV *out) {
     DG_XR_POSE pose;
@@ -593,18 +596,18 @@ uint64_t dg_xr_menu_press_seq(void) {
     return (uint64_t)InterlockedCompareExchange64(&g_menu_press_seq, 0, 0);
 }
 
-#ifdef DG_HOOK_TEST
-/* The runtime half is what normally increments these, and the desk build has
-   no runtime. Without this the LEFT/RIGHT to 0/1 translation above could only
-   be argued about, not asserted: every accessor call would read zero and any
-   wrong mapping would look exactly like a correct one. Same precedent as
-   dg_xr_test_publish. */
-void dg_xr_test_press_secondary(unsigned int hand) {
-    if (hand == DG_XR_HAND_LEFT) InterlockedIncrement(&g_secondary_presses[0]);
-    else if (hand == DG_XR_HAND_RIGHT)
-        InterlockedIncrement(&g_secondary_presses[1]);
-}
-#endif
+
+
+
+
+
+
+
+
+
+
+
+
 
 void dg_xr_recenter(void) {
     InterlockedExchange(&g_recenter_cause, DG_XR_CAUSE_HOTKEY);
@@ -735,37 +738,37 @@ void dg_xr_turn_step(double ref_q[2], double ref_p[2],
     ref_p[1] = head_pz - (c1 * vz - s1 * vx);
 }
 
-#ifdef DG_XR_NO_RUNTIME
-uint64_t dg_xr_radial_generation(void) { return 0; }
-int dg_xr_radial_publish(const dg_radial_view *v, uint64_t g, uint64_t c, uint64_t k) {
-    (void)v; (void)g; (void)c; (void)k; return 0;
-}
-void dg_xr_radial_invalidate(void) {}
-void dg_xr_radial_hide(void) {}
-int  dg_xr_start(void (*log)(const char *fmt, ...)) { (void)log; return 0; }
-void dg_xr_stop(void) {}
-int  dg_xr_adopt_device(void *d) { (void)d; return 0; }
-void dg_xr_capture_measured(void *sc, int eye, const DG_XR_RAW_POSE *raw,
-                          const DG_PROJ_FOV *fov, const DG_NEAR_META *meta) {
-    (void)sc; (void)eye; (void)raw; (void)fov; (void)meta;
-}
-void dg_xr_capture(void *sc, int eye, const DG_XR_RAW_POSE *raw,
-                   const DG_PROJ_FOV *fov) {
-    (void)sc; (void)eye; (void)raw; (void)fov;
-}
-int  dg_xr_submitting(void) { return 0; }
-int  dg_xr_radar_capture(void *t) { (void)t; return -1; }
-void dg_xr_radar_stats(char *out, size_t n) { if (out && n) out[0] = 0; }
-/* No runtime, no quad: the desk build tests the POSE (shared above), the
-   runtime half owns the submission - the same split as everything here. */
-void dg_xr_screen(int active) { (void)active; }
-long dg_xr_screen_frames(void) { return 0; }
-/* Nothing ever captured, so there is nothing to drop. */
-static void drop_capture_stores(void) {}
-/* No stub for dg_xr_get_target_fov: it is a seqlock read like dg_xr_get, so it
-   lives in the shared section above and is correct with or without a runtime -
-   it simply never finds a valid record when nothing publishes one. */
-#else
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 /* ---- dynamically resolved entry points ---------------------------------
    The loader is loaded by name rather than linked, so a machine with no
@@ -977,6 +980,7 @@ static volatile LONG g_bad_pose_logged;
 #include "dg_capture_diag.inl"
 #include "dg_pixel_probe.inl"
 #include "dg_near_probe.inl"
+#include "dg_stereo_measure.inl"
 #include "dg_xr_radial.inl"
 static XrSwapchain health_radar_swap(void);
 #include "dg_xr_health.inl"
@@ -1457,6 +1461,7 @@ static int xr_init(void) {
 
 static void xr_teardown(void) {
     int stopped=!g_session_running;
+    sm_teardown();
     pixel_probe_teardown();
     if (g_session_running && pfn_EndSession) stopped=pfn_EndSession(g_sess)==XR_SUCCESS;
     radial_stop(stopped);
@@ -1661,6 +1666,8 @@ void dg_xr_capture_measured(void *swapchain, int eye, const DG_XR_RAW_POSE *raw,
     HRESULT hr;
     int mono = eye == DG_EYE_MONO;
 
+    sm_producer(2,eye,raw,fov,meta,0);
+
     capture_diag_inc(CD_ATTEMPT);
     if (!sc || !g_ctx || !g_dev || !g_cap_cs_ready) {
         capture_diag_producer_fail(CD_INPUT, E_POINTER); return;
@@ -1719,6 +1726,8 @@ void dg_xr_capture_measured(void *swapchain, int eye, const DG_XR_RAW_POSE *raw,
         store->valid = 1;
         store->capture_id = (uint64_t)InterlockedIncrement64(&g_cd_count[CD_STORED]);
         store->capture_ms = GetTickCount64();
+        sp_capture(back,store->texture,mono?DG_EYE_MONO:eye,store->capture_id);
+        sm_producer(3,mono?DG_EYE_MONO:eye,raw,fov,meta,store->capture_id);
         dg_bridge_model_arm_snapshot(&store->model_arm);
         {
             DG_XR_CAPTURE_OBSERVER observer=(DG_XR_CAPTURE_OBSERVER)
@@ -2330,6 +2339,9 @@ static int submit_capture_valid(void *ctx, int eye) {
     D3D11_TEXTURE2D_DESC src, dst;
     unsigned reason = 0;
     g_cd.checked[eye] = 1;
+
+
+
     g_cd.store_valid[eye] = g_store[eye].valid;
     g_cd.capture_id[eye] = g_store[eye].capture_id;
     g_cd.capture_ms[eye] = g_store[eye].capture_ms;
@@ -2371,6 +2383,7 @@ static void submit_capture_copy(void *ctx, int eye) {
         (ID3D11Resource *)g_images[eye][cap->idx[eye]].texture,
         (ID3D11Resource *)g_store[eye].texture);
     if (!cap->stereo) pixel_probe_destination(g_images[eye][cap->idx[eye]].texture, eye);
+    sm_copy(eye,cap->stereo,g_images[eye][cap->idx[eye]].texture);
 }
 static const DG_CAPTURE_SNAPSHOT_OPS g_submit_capture_ops = {
     submit_capture_lock, submit_capture_unlock,
@@ -2447,6 +2460,7 @@ static const char *xr_frame_loop(void) {
         XrResult r;
 
         capture_diag_begin();
+        sm_tick();
         pixel_probe_tick(0, 0, XR_SUCCESS);
         if (!pump_events()) return "session lost or exiting";
 
@@ -2612,7 +2626,7 @@ static const char *xr_frame_loop(void) {
             capture.stereo = stereo;
             {
                 copied = submit_capture_images(&capture, &fatal);
-                if (fatal) { capture_diag_emit(); return fatal; }
+                if (fatal) { sm_submit(NULL); capture_diag_emit(); return fatal; }
                 if (copied && screen_on &&
                     g_screen_have_anchor) {
                     /* The theater: the captured mono frame on a core-OpenXR
@@ -2713,6 +2727,7 @@ static const char *xr_frame_loop(void) {
         g_cd.end_attempted = 1;
         r = pfn_EndFrame(g_sess, &fei);
         g_cd.end = r;
+        sm_submit(&fei);
         pixel_probe_tick(XR_SUCCEEDED(r) && g_state == XR_SESSION_STATE_FOCUSED &&
                          fei.layerCount && layers[0]->type == XR_TYPE_COMPOSITION_LAYER_QUAD,
                          1, r);
@@ -2783,6 +2798,7 @@ static DWORD WINAPI xr_thread(LPVOID unused) {
 
     {   DG_XR_FRAME z; memset(&z, 0, sizeof(z)); publish(&z, 0, 0); }
     g_log("  xr: thread stopped\r\n");
+    sm_shutdown();
     InterlockedExchange(&g_started, 0);
     return 0;
 }
@@ -2806,6 +2822,7 @@ int dg_xr_start(void (*log)(const char *fmt, ...)) {
     memset(&g_cd, 0, sizeof(g_cd));
     InterlockedExchange64(&g_cd_producer_failure, 0);
     pixel_probe_init();
+    sm_init();
     g_thread = CreateThread(NULL, 0, xr_thread, NULL, 0, NULL);
     if (!g_thread) { InterlockedExchange(&g_started, 0); return 0; }
     return 1;
@@ -2820,4 +2837,4 @@ void dg_xr_stop(void) {
     }
 }
 
-#endif /* DG_XR_NO_RUNTIME */
+

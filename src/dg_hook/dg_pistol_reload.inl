@@ -3,7 +3,7 @@
  * Ammo remains native; reload start time uses the native motion API. */
 #include "dg_pistol_reload.h"
 static SRWLOCK g_reload_lock=SRWLOCK_INIT;
-static DG_DETOUR g_reload_gate_hook,g_reload_start_hook,g_reload_model_hook,g_reload_second_hook,g_reload_motion_hook;
+static DG_DETOUR g_reload_gate_hook,g_reload_start_hook,g_reload_model_hook,g_reload_second_hook;
 static struct {
     uint64_t base,player,arm,actor,actor_ms,tick_ms,anim_ms;
     int body_seek,arm_seek;
@@ -203,7 +203,7 @@ static int reload_after_cmp(DG_DETOUR *d,const char **why) {
 }
 static void reload_stop(void) {
     g_reload.enabled=0;
-    dg_detour_remove(&g_reload_motion_hook);
+    motion_release(DG_MOTION_RELOAD);
     dg_detour_remove(&g_reload_gate_hook);dg_detour_remove(&g_reload_start_hook);
     dg_detour_remove(&g_reload_model_hook);dg_detour_remove(&g_reload_second_hook);
     g_reload.live=g_reload.anim=g_reload.waiting=0;
@@ -212,8 +212,7 @@ static void reload_install(int enabled) {
     const char *why="retail witnesses unavailable";uint64_t b=g_reload.base;
     if(!enabled)return;
     if(g_reload.resolved &&
-       dg_detour_install_ex(&g_reload_motion_hook,(void *)(ULONG_PTR)(b+0x67dd70),(void *)reload_motion,
-            (void *)(ULONG_PTR)(b+0x67dd70),(void *)(ULONG_PTR)(b+0x67ddcb),&why,1) &&
+       motion_acquire(b,DG_MOTION_RELOAD,&why) &&
        dg_detour_install_ex(&g_reload_gate_hook,(void *)(ULONG_PTR)(b+0x51bda4),(void *)reload_gate,
             (void *)(ULONG_PTR)(b+0x51b980),(void *)(ULONG_PTR)(b+0x51d012),&why,1) &&
        reload_after_cmp(&g_reload_gate_hook,&why) &&

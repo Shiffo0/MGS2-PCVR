@@ -39,34 +39,34 @@ static void dg_radar_rotate(const DG_RADAR_POSE *q, const double v[3], double ou
 
 /* out = parent * child: a pose given in the parent's frame, expressed in the
    frame the parent itself is given in. out may alias neither input. */
-static void dg_radar_pose_compose(const DG_RADAR_POSE *parent, const DG_RADAR_POSE *child, DG_RADAR_POSE *out) {
-    double p[3], r[3], n;
-    p[0] = child->px; p[1] = child->py; p[2] = child->pz;
-    dg_radar_rotate(parent, p, r);
-    out->px = parent->px + r[0]; out->py = parent->py + r[1]; out->pz = parent->pz + r[2];
-    out->qx = parent->qw * child->qx + parent->qx * child->qw + parent->qy * child->qz - parent->qz * child->qy;
-    out->qy = parent->qw * child->qy - parent->qx * child->qz + parent->qy * child->qw + parent->qz * child->qx;
-    out->qz = parent->qw * child->qz + parent->qx * child->qy - parent->qy * child->qx + parent->qz * child->qw;
-    out->qw = parent->qw * child->qw - parent->qx * child->qx - parent->qy * child->qy - parent->qz * child->qz;
-    n = sqrt(out->qx * out->qx + out->qy * out->qy + out->qz * out->qz + out->qw * out->qw);
-    if (n > 1e-12) { out->qx /= n; out->qy /= n; out->qz /= n; out->qw /= n; }
-    else { out->qx = out->qy = out->qz = 0.0; out->qw = 1.0; }
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 /* The marker's offset (metres) and rotation (degrees) as a pose in the grip
    frame. Rotation order is yaw, pitch, roll about the quad's OWN axes:
    q = Ry(ry) * Rx(rx) * Rz(rz). So ry/rx aim the quad's normal and rz then
    turns the picture about that normal, whatever the first two are. */
-static void dg_radar_offset_pose(const double off[3], const double rot_deg[3], DG_RADAR_POSE *out) {
-    const double k = 3.14159265358979323846 / 360.0;       /* half angle, radians */
-    DG_RADAR_POSE x, y, z, yx;
-    x.qx = sin(rot_deg[0] * k); x.qy = 0; x.qz = 0; x.qw = cos(rot_deg[0] * k); x.px = x.py = x.pz = 0;
-    y.qx = 0; y.qy = sin(rot_deg[1] * k); y.qz = 0; y.qw = cos(rot_deg[1] * k); y.px = y.py = y.pz = 0;
-    z.qx = 0; z.qy = 0; z.qz = sin(rot_deg[2] * k); z.qw = cos(rot_deg[2] * k); z.px = z.py = z.pz = 0;
-    dg_radar_pose_compose(&y, &x, &yx);
-    dg_radar_pose_compose(&yx, &z, out);
-    out->px = off[0]; out->py = off[1]; out->pz = off[2];
-}
+
+
+
+
+
+
+
+
+
+
 
 static double dg_radar_angle_deg(const double a[3], const double b[3]) {
     double aa = a[0] * a[0] + a[1] * a[1] + a[2] * a[2], bb = b[0] * b[0] + b[1] * b[1] + b[2] * b[2];

@@ -22,26 +22,26 @@
 /* Worker publishes once; Present owns all D3D access. No probe I/O in Present. */
 static volatile LONG g_state_request;
 void dg_present_poll_state_probe(const char *marker) {
-#if DG_ENABLE_DIAGNOSTICS
 
-    char path[MAX_PATH], text[32], *leaf;
-    FILE *f=NULL;
-    size_t n;
-    if(!marker || InterlockedCompareExchange(&g_state_request,0,0)!=0) return;
-    if(strcpy_s(path,sizeof path,marker)) return;
-    leaf=strrchr(path,'\\');
-    if(leaf) {
-        if(strcpy_s(leaf+1,sizeof(path)-(leaf+1-path),"dg_state_probe.on")) return;
-    } else strcpy_s(path,sizeof path,"dg_state_probe.on");
-    if(fopen_s(&f,path,"rb") || !f) return;
-    n=fread(text,1,sizeof(text),f);
-    fclose(f);
-    if(n==9 && memcmp(text,"roundtrip",9)==0)
-        InterlockedCompareExchange(&g_state_request,1,0);
 
-#else
 
-#endif
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 }
 
 typedef HRESULT (WINAPI *CREATE_FACTORY_FN)(REFIID, void **);
@@ -291,18 +291,18 @@ static HRESULT STDMETHODCALLTYPE hook_present(IDXGISwapChain *sc,
         AcquireSRWLockShared(&g_lock);
         callback = g_callback;
         ReleaseSRWLockShared(&g_lock);
-#if DG_ENABLE_DIAGNOSTICS
-        if (!(flags & DXGI_PRESENT_TEST) &&
-            InterlockedCompareExchange(&g_state_request,2,1)==1) {
-            ID3D11Device *probe_device=NULL;
-            int result=-2;
-            if(sc && SUCCEEDED(sc->lpVtbl->GetDevice(sc,&IID_ID3D11Device,(void**)&probe_device))) {
-                result=dg_state_roundtrip(probe_device);
-                probe_device->lpVtbl->Release(probe_device);
-            }
-            log_msg("state_roundtrip: result=%d thread=%lu boundary=pre_capture_present sampled_bindings_only=1 extra_draws=0\r\n",result,GetCurrentThreadId());
-        }
-#endif
+
+
+
+
+
+
+
+
+
+
+
+
         if (!(flags & DXGI_PRESENT_TEST)) dg_draw_trial_present();
         if (callback) callback(sc);
         g_inside_present = 0;

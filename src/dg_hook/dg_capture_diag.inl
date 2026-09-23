@@ -68,16 +68,16 @@ static void capture_diag_emit(void) {
     ULONGLONG now = GetTickCount64();
     LONG64 n[CD_COUNT];
     uint64_t producer_failure;
-#if !DG_ENABLE_DIAGNOSTICS
+
     /* First five minutes, at most 31 snapshots / 93 lines per process.
        Keep capture failures observable without enabling GPU probes. */
     static unsigned support_reports;
     if (support_reports >= 31) return;
     if (g_cd.logged && now - g_cd.last_log < 10000) return;
     ++support_reports;
-#else
-    if (g_cd.logged && now - g_cd.last_log < 2000) return;
-#endif
+
+
+
     g_cd.logged = 1; g_cd.last_log = now;
     for (i = 0; i < CD_COUNT; ++i)
         n[i] = InterlockedCompareExchange64(&g_cd_count[i], 0, 0);

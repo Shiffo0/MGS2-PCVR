@@ -37,6 +37,13 @@
 // ---------------------------------------------------------------- config
 struct Ui2dCfg { LONG on = 0, scaleMils = 750, convE5 = 1200, sign = 1, hold = 0; UINT64 vs[8]{}; unsigned vsCount = 0; };
 Ui2dCfg ui2dCfg; SRWLOCK ui2dCfgLock = SRWLOCK_INIT;
+volatile LONG64 ui2dSceneSample = 0;
+volatile LONG ui2dSceneEpoch = 0;
+LONG ui2dSeenSceneEpoch = 0, ui2dSkipScene = 0, ui2dSkipEffect = 0;
+bool ui2dSceneAllowed() {
+    LONG64 s = InterlockedCompareExchange64(&ui2dSceneSample,0,0);
+    return (s & 1) && (DWORD)(GetTickCount()-(DWORD)(s>>1)) <= 500;
+}
 
 // ---------------------------------------------------------------- shader registry
 struct VsEntry { void *ptr; UINT64 hash; UINT32 size; BYTE *bytes; };
@@ -89,7 +96,7 @@ HRESULT STDMETHODCALLTYPE createVs(ID3D11Device *d, const void *code, SIZE_T n, 
 // axes, 3 SYMMETRIC frustum (a mono camera: the game's own, not an eye),
 // 4 offset out of range, 5 scale out of range, 6 axes not orthogonal.
 int ui2dClassify(const float *f, float *x0out, float *xwOut);
-bool ui2dLearnX0(const float *f, float *x0out) { float xw; return ui2dClassify(f, x0out, &xw) == 0; }
+
 int ui2dClassifyRows(const float *cx, const float *cy, const float *cw, float *x0out, float *xwOut);
 int ui2dClassify(const float *f, float *x0out, float *xwOut) { return ui2dClassifyRows(f + 116, f + 120, f + 128, x0out, xwOut); }
 // Object eye (2026-09-18 night). The main world shaders (544F1B61.., 0674FB1F..)
@@ -143,6 +150,8 @@ bool ui2dFindSite(const BYTE *p, size_t n, size_t *callOffset) {
 // ---------------------------------------------------------------- live state (render thread)
 const void *ui2dBank = nullptr; size_t ui2dBankLen = 0;
 volatile LONG ui2dGpuPatched = 0; float ui2dGpuX0 = 0;
+ComPtr<ID3D11Buffer> ui2dOwnedBuffer;
+std::vector<BYTE> ui2dOriginal;
 float ui2dX0 = 0; DWORD ui2dX0Tick = 0; bool ui2dHaveX0 = false;
 // Flicker fix (2026-09-18 pm). Live the overlay fused but now and then jumped
 // back to double for a frame: x0 was simply the LAST perspective matrix the
@@ -233,85 +242,87 @@ void *ui2dBackbufferPtr = nullptr;                 // resource identity only, ne
 
 //    (pointer, size), blend state and write mask.
 struct Ui2dCopyNote { const char *kind; void *dst, *src; LONG at; };
-struct Ui2dQuadNote { LONG at; int target; UINT64 vs; void *src; UINT sw, sh; int blend, sb, db; UINT mask; };
+struct Ui2dQuadNote { LONG at; int disposition; int target; UINT64 vs; void *src; UINT sw, sh; int blend, sb, db; UINT mask; };
 Ui2dCopyNote ui2dCopies[48]; volatile LONG ui2dCopyCount = 0; Ui2dQuadNote ui2dQuads[64]; unsigned ui2dQuadCount = 0;   // copies may come from another thread (XR capture)
 // D3D11 swaps the immediate context's VTABLE when multithread protection is switched (seen on WARP: a hook
 // written at install time was gone later), so the observers are kept per vtable and re-armed with each trace.
 struct Ui2dCopySet { void **vt; Hook reg, res, rsv; };
 Ui2dCopySet ui2dCopySets[4]; unsigned ui2dCopySetCount = 0;
-Ui2dCopySet *ui2dCopySetOf(ID3D11DeviceContext *c) { void **vt = *(void ***)c; for (unsigned i = 0; i < ui2dCopySetCount; i++) if (ui2dCopySets[i].vt == vt) return &ui2dCopySets[i]; return ui2dCopySetCount ? &ui2dCopySets[0] : nullptr; }
+
 using CopyRes = void (STDMETHODCALLTYPE *)(ID3D11DeviceContext *, ID3D11Resource *, ID3D11Resource *);
 using CopyReg = void (STDMETHODCALLTYPE *)(ID3D11DeviceContext *, ID3D11Resource *, UINT, UINT, UINT, UINT, ID3D11Resource *, UINT, const D3D11_BOX *);
 using ResolveFn = void (STDMETHODCALLTYPE *)(ID3D11DeviceContext *, ID3D11Resource *, UINT, ID3D11Resource *, UINT, DXGI_FORMAT);
 extern volatile LONG ui2dTraceLeft; extern void *ui2dTraceTarget[2]; extern void *ui2dBackbufferPtr; extern LONG ui2dFrameDrawsAll;
 const char *ui2dTexName(void *p) { return !p ? "null" : p == ui2dTraceTarget[0] ? "A" : p == ui2dTraceTarget[1] ? "B" : p == ui2dBackbufferPtr ? "BACKBUFFER" : "other"; }
-void ui2dNoteCopy(const char *kind, void *dst, void *src) {
-    if (ui2dTraceLeft <= 0) return;
-    bool rel = dst == ui2dTraceTarget[0] || dst == ui2dTraceTarget[1] || dst == ui2dBackbufferPtr || src == ui2dTraceTarget[0] || src == ui2dTraceTarget[1] || src == ui2dBackbufferPtr;
-    if (rel) { LONG i = InterlockedIncrement(&ui2dCopyCount) - 1; if (i >= 0 && i < 48) ui2dCopies[i] = Ui2dCopyNote{ kind, dst, src, ui2dFrameDrawsAll }; }
-}
-void STDMETHODCALLTYPE copyRes(ID3D11DeviceContext *c, ID3D11Resource *dst, ID3D11Resource *src) { ui2dNoteCopy("CopyResource", dst, src); ((CopyRes)ui2dCopySetOf(c)->res.next)(c, dst, src); }
-void STDMETHODCALLTYPE copyReg(ID3D11DeviceContext *c, ID3D11Resource *dst, UINT ds, UINT x, UINT y, UINT z, ID3D11Resource *src, UINT ss, const D3D11_BOX *box) {
-    ui2dNoteCopy("CopySubresourceRegion", dst, src); ((CopyReg)ui2dCopySetOf(c)->reg.next)(c, dst, ds, x, y, z, src, ss, box); }
-void STDMETHODCALLTYPE resolveSub(ID3D11DeviceContext *c, ID3D11Resource *dst, UINT ds, ID3D11Resource *src, UINT ss, DXGI_FORMAT f) {
-    ui2dNoteCopy("ResolveSubresource", dst, src); ((ResolveFn)ui2dCopySetOf(c)->rsv.next)(c, dst, ds, src, ss, f); }
+
+
+
+
+
+
+
+
+
+
 // Present thread (install, and every time a trace is armed): make sure the context's CURRENT vtable carries the observers.
 void ui2dEnsureCopyHooks() {
-#if DG_ENABLE_DIAGNOSTICS
 
-    if (!context.Get() || stopping) return;
-    void **ct = *(void ***)context.Get();
-    if (ct[47] == (void *)copyRes) return;
-    // The runtime may rewrite the slots of a vtable we already hold (seen on WARP): reuse that set, do not burn a new one.
-    for (unsigned i = 0; i < ui2dCopySetCount; i++) if (ui2dCopySets[i].vt == ct) {
-        Ui2dCopySet &old = ui2dCopySets[i]; Hook *hs[3] = { &old.reg, &old.res, &old.rsv };
-        unsigned slots[3] = { 46, 47, 57 }; void *ours[3] = { (void *)copyReg, (void *)copyRes, (void *)resolveSub }; unsigned again = 0;
-        for (int k = 0; k < 3; k++) if (ct[slots[k]] != ours[k]) { *hs[k] = { ct + slots[k], ct[slots[k]], ours[k] }; if (writeSlot(*hs[k], hs[k]->next, hs[k]->ours)) again++; }
-        if (logger) logger("ui2d: copy observers re-armed %u slots on vtable %p\r\n", again, (void *)ct);
-        return;
-    }
-    if (ui2dCopySetCount >= 4) { if (logger) logger("ui2d: copy observers: no free vtable set\r\n"); return; }
-    Ui2dCopySet &set = ui2dCopySets[ui2dCopySetCount]; set.vt = ct;
-    set.reg = { ct + 46, ct[46], (void *)copyReg }; set.res = { ct + 47, ct[47], (void *)copyRes }; set.rsv = { ct + 57, ct[57], (void *)resolveSub };
-    ui2dCopySetCount++;                                            // published before the slots change: a call through them must find its set
-    unsigned ok = 0; for (Hook *h : { &set.reg, &set.res, &set.rsv }) { if (h->next && writeSlot(*h, h->next, h->ours)) ok++; else h->slot = nullptr; }
-    if (logger) logger("ui2d: copy observers attached %u of 3 on vtable %p (set %u)\r\n", ok, (void *)ct, ui2dCopySetCount);
 
-#else
 
-#endif
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 }
 volatile LONG ui2dFeedbackOn = 0, ui2dFeedbackSkipped = 0, ui2dFeedbackChecked = 0;
 void *ui2dFinalTex[2] = { nullptr, nullptr };
 // true = do not forward this non-indexed draw.
-void ui2dTraceQuad(ID3D11DeviceContext *c) {
-#if DG_ENABLE_DIAGNOSTICS
+void ui2dTraceQuad(ID3D11DeviceContext *c, int disposition) {
 
-    MultiLock tqLock;
-    ID3D11RenderTargetView *rtv = nullptr; c->OMGetRenderTargets(1, &rtv, nullptr);
-    if (!rtv) return;
-    ID3D11Resource *res = nullptr; rtv->GetResource(&res);
-    int t = res && res == ui2dTraceTarget[0] ? 0 : res && res == ui2dTraceTarget[1] ? 1 : -1;
-    if (t >= 0 && ui2dQuadCount < 64) {
-        Ui2dQuadNote q{}; q.at = ui2dFrameDrawsAll; q.target = t;
-        ID3D11ShaderResourceView *srv = nullptr; c->PSGetShaderResources(0, 1, &srv);
-        if (srv) { ID3D11Resource *sr = nullptr; srv->GetResource(&sr); q.src = sr;
-            if (sr) { D3D11_RESOURCE_DIMENSION dim; sr->GetType(&dim); if (dim == D3D11_RESOURCE_DIMENSION_TEXTURE2D) { D3D11_TEXTURE2D_DESC td; ((ID3D11Texture2D *)sr)->GetDesc(&td); q.sw = td.Width; q.sh = td.Height; } sr->Release(); }
-            srv->Release(); }
-        ID3D11VertexShader *vs = nullptr; ID3D11ClassInstance *ci[1]; UINT nci = 0; c->VSGetShader(&vs, ci, &nci); q.vs = vsHashOf(vs, nullptr, nullptr); if (vs) vs->Release();
-        ID3D11BlendState *bs = nullptr; FLOAT bf[4]; UINT sm = 0; c->OMGetBlendState(&bs, bf, &sm);
-        if (bs) { D3D11_BLEND_DESC bd; bs->GetDesc(&bd); q.blend = bd.RenderTarget[0].BlendEnable; q.sb = bd.RenderTarget[0].SrcBlend; q.db = bd.RenderTarget[0].DestBlend; q.mask = bd.RenderTarget[0].RenderTargetWriteMask; bs->Release(); } else q.mask = 0xF;
-        ui2dQuads[ui2dQuadCount++] = q;
-    }
-    if (res) res->Release();
-    rtv->Release();
 
-#else
 
-#endif
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+}
+void ui2dTraceDraw(ID3D11DeviceContext*c,UINT n,int disposition) {
+    if(ui2dTraceLeft>0&&n==4&&c==context.Get()&&!stopping)ui2dTraceQuad(c,disposition);
 }
 bool ui2dSkipDraw(ID3D11DeviceContext *c, UINT vertexCount) {
-    if (ui2dTraceLeft > 0 && vertexCount == 4 && c == context.Get() && !stopping) ui2dTraceQuad(c);
     if (!ui2dFeedbackOn || vertexCount != 4 || !ui2dFinalTex[0] || !ui2dFinalTex[1] || c != context.Get() || stopping) return false;
     MultiLock fbLock; bool skip = false;
     ID3D11RenderTargetView *rtv = nullptr; c->OMGetRenderTargets(1, &rtv, nullptr);
@@ -331,6 +342,9 @@ bool ui2dSkipDraw(ID3D11DeviceContext *c, UINT vertexCount) {
 struct Ui2dTraceGroup { int target, rel; UINT64 vs; LONG count, first, last; UINT vpw, vph; };
 volatile LONG ui2dTraceLeft = 0; void *ui2dTraceTarget[2] = { nullptr, nullptr };
 Ui2dTraceGroup ui2dTraceGroups[48]; unsigned ui2dTraceCount = 0; LONG ui2dTraceOverflow = 0, ui2dTraceFrameNo = 0;
+
+
+
 LONG ui2dFrameBbDraws = 0, ui2dFrameBbIndexed = 0; void *ui2dFrameBbSrv = nullptr;
 volatile LONG ui2dLastBbDraws = -1, ui2dLastBbIndexed = 0; void *ui2dLastBbSrv = nullptr;
 // What a camera-less frame uploaded, by ui2dClassify reason, kept for the
@@ -355,17 +369,54 @@ void ui2dCandidate(UINT64 h) {
     for (auto &c : ui2dCand) { if (c.hash == h) { c.count++; return; } if (!c.hash) { c.hash = h; c.count = 1; return; } }
 }
 
+bool ui2dSyncScene() {
+    bool allowed=ui2dSceneAllowed();
+    LONG epoch=InterlockedCompareExchange(&ui2dSceneEpoch,0,0);
+    if(!allowed || epoch!=ui2dSeenSceneEpoch) {
+        ui2dVotesPos=ui2dVotesNeg=0; ui2dHaveX0=ui2dHavePrev=false;
+        ui2dFrameScene=ui2dFrameEyeAtDraw=0;
+        ui2dSeenSceneEpoch=epoch;
+    }
+    return allowed;
+}
+bool ui2dRestore(ID3D11DeviceContext *c) {
+    if(!ui2dGpuPatched) return true;
+    if(!ui2dOwnedBuffer || ui2dOriginal.empty()) return false;
+    D3D11_MAPPED_SUBRESOURCE m{};
+    if(FAILED(c->Map(ui2dOwnedBuffer.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&m))) {
+        InterlockedIncrement(&ui2dErrors); return false;
+    }
+    memcpy(m.pData,ui2dOriginal.data(),ui2dOriginal.size());
+    c->Unmap(ui2dOwnedBuffer.Get(),0);
+    ui2dOwnedBuffer.Reset(); ui2dOriginal.clear();
+    InterlockedExchange(&ui2dGpuPatched,0); InterlockedIncrement(&ui2dRestored);
+    return true;
+}
+// The native scene-history draw samples its primary texture in slot 0
+// (the same route used by ui2dSkipDraw). Resource size/bind flags do not
+// identify an effect: HUD textures can be render targets too. Do not inspect
+// auxiliary slots here; an unused binding may still contain a scene image.
+bool ui2dSceneTexture(ID3D11DeviceContext *c) {
+    ComPtr<ID3D11ShaderResourceView> view;
+    c->PSGetShaderResources(0,1,&view);
+    if(!view) return false;
+    ComPtr<ID3D11Resource> resource; view->GetResource(&resource);
+    return resource && (resource.Get()==ui2dFinalTex[0] ||
+        resource.Get()==ui2dFinalTex[1] || resource.Get()==ui2dBackbufferPtr);
+}
 void *ui2dUpload(void *dst, const void *src, size_t n) {
     memcpy(dst, src, n);
     InterlockedIncrement(&ui2dUploads);
     ui2dBank = src; ui2dBankLen = n;
     InterlockedExchange(&ui2dGpuPatched, 0);                 // the game's own bytes are on the GPU now
+    ui2dOwnedBuffer.Reset(); ui2dOriginal.clear();
+    bool sceneAllowed = ui2dSyncScene();
     float x0 = 0, xw = 0; int why = n >= 0x240 ? ui2dClassify((const float *)src, &x0, &xw) : 1;
     ui2dCur.uploads++; ui2dCur.why[why]++;
     if (n >= 0x180) { float ox0 = 0, oxw = 0; if (ui2dClassifyRows((const float *)src + 80, (const float *)src + 84, (const float *)src + 92, &ox0, &oxw) == 0) { if (ox0 > 0) ui2dObjPos++; else ui2dObjNeg++; } }
     if (why == 3) ui2dCur.symXw = xw; else if (why == 4) ui2dCur.farXw = xw;
-    if (why == 0 || why == 5 || why == 6) ui2dFrameScene++;      // a projection row: the scene pass is under way
-    if (why == 0) {
+    if (sceneAllowed && (why == 0 || why == 5 || why == 6)) ui2dFrameScene++;
+    if (why == 0 && sceneAllowed) {
         if (x0 > 0) ui2dVotesPos++; else ui2dVotesNeg++;
         LONG pos = ui2dVotesPos, neg = ui2dVotesNeg;
         if (pos + neg >= ui2dMinVotes && pos != neg) {
@@ -383,6 +434,7 @@ void *ui2dUpload(void *dst, const void *src, size_t n) {
 // (majority of its perspective uploads), 0 = no camera this frame.
 volatile LONG ui2dLastFrameSign = 0;
 void ui2dOnPresent() {
+    ui2dSyncScene();
     if (ui2dTraceLeft > 0) {
         if (logger) {
             logger("ui2d trace frame %ld: %u groups (overflow %ld), %ld draws; A=%p B=%p\r\n", ui2dTraceFrameNo, ui2dTraceCount, ui2dTraceOverflow, ui2dFrameDrawsAll, ui2dTraceTarget[0], ui2dTraceTarget[1]);
@@ -393,8 +445,8 @@ void ui2dOnPresent() {
         }
         if (logger) {
             for (unsigned i = 0; i < ui2dQuadCount; i++) { const Ui2dQuadNote &q = ui2dQuads[i];
-                logger("ui2d trace   quad #%ld into %s  vs %016llX  source %s %p %ux%u  blend %d (src %d dst %d) mask %X\r\n", q.at, q.target ? "B" : "A",
-                       (unsigned long long)q.vs, ui2dTexName(q.src), q.src, q.sw, q.sh, q.blend, q.sb, q.db, q.mask); }
+                logger("ui2d trace   quad #%ld into %s  vs %016llX  source %s %p %ux%u  blend %d (src %d dst %d) mask %X disposition=%s\r\n", q.at, q.target ? "B" : "A",
+                       (unsigned long long)q.vs, ui2dTexName(q.src), q.src, q.sw, q.sh, q.blend, q.sb, q.db, q.mask, q.disposition==1?"feedback-skipped":q.disposition==2?"radar-skipped":"forward-path"); }
             LONG nc = InterlockedCompareExchange(&ui2dCopyCount, 0, 0); if (nc > 48) nc = 48;
             for (LONG i = 0; i < nc; i++) { const Ui2dCopyNote &k = ui2dCopies[i];
                 logger("ui2d trace   COPY after draw #%ld: %s  %s (%p) <- %s (%p)\r\n", k.at, k.kind, ui2dTexName(k.dst), k.dst, ui2dTexName(k.src), k.src); }
@@ -417,6 +469,9 @@ void ui2dOnPresent() {
       InterlockedExchange(&ui2dLastObjSign, op + on < ui2dMinVotes ? 0 : hi >= 4 * lo ? (op > on ? 1 : -1) : 2);
       ui2dObjPos = ui2dObjNeg = 0; }
     InterlockedExchange(&ui2dLastBbDraws, ui2dBackbufferPtr ? ui2dFrameBbDraws : -1); InterlockedExchange(&ui2dLastBbIndexed, ui2dFrameBbIndexed);
+
+
+
     ui2dLastBbSrv = ui2dFrameBbSrv; ui2dFrameBbDraws = ui2dFrameBbIndexed = 0; ui2dFrameBbSrv = nullptr;
     ui2dCur.draws = ui2dFrameDrawsAll; ui2dCur.pos = pos; ui2dCur.neg = neg; ui2dCur.sprites = ui2dFrameSprites;
     ui2dLast = ui2dCur; ui2dCur = Ui2dFrameDetail{};
@@ -432,6 +487,11 @@ void ui2dOnPresent() {
 
 // Draw path, before the draw is forwarded. kind 0 = DrawIndexed, 1 = Draw.
 void ui2dOnDraw(ID3D11DeviceContext *c, unsigned kind) {
+    bool sceneAllowed = ui2dSyncScene();
+    if(c == context.Get() && !stopping && (!sceneAllowed || !ui2dCfg.on)) {
+        MultiLock restoreLock;
+        ui2dRestore(c);
+    }
     ui2dFrameDrawsAll++;
     if (ui2dTraceLeft > 0 && c == context.Get() && !stopping) {
         MultiLock trLock;
@@ -472,6 +532,10 @@ void ui2dOnDraw(ID3D11DeviceContext *c, unsigned kind) {
                     if (!ui2dFrameBbDraws) {
                         ID3D11ShaderResourceView *srv = nullptr; c->PSGetShaderResources(0, 1, &srv);
                         if (srv) { ID3D11Resource *sr = nullptr; srv->GetResource(&sr); ui2dFrameBbSrv = sr;
+
+
+
+
                                    if (sr && sr != ui2dFinalTex[0] && sr != ui2dFinalTex[1]) { ui2dFinalTex[1] = ui2dFinalTex[0]; ui2dFinalTex[0] = sr; }   // the two most recent blit sources
                                    if (sr) sr->Release(); srv->Release(); }
                     }
@@ -488,7 +552,8 @@ void ui2dOnDraw(ID3D11DeviceContext *c, unsigned kind) {
     if (!on && !InterlockedCompareExchange(&ui2dGpuPatched, 0, 0)) return;        // idle and nothing to undo
     if (c != context.Get() || stopping) return;
     InterlockedIncrement(&ui2dSigDraws);
-    bool want = on != 0;
+    bool want = on != 0 && sceneAllowed;
+    if(on && !sceneAllowed) InterlockedIncrement(&ui2dSkipScene);
     if (want && kind != 1) { want = false; InterlockedIncrement(&ui2dSkipKind); }
     // No camera of its own yet this frame: fall back on the previous voted
     // frame (vr_ui2d_hold), decided after the other filters so that only real
@@ -541,11 +606,14 @@ void ui2dOnDraw(ID3D11DeviceContext *c, unsigned kind) {
         if (!fresh && !held) { want = false; InterlockedIncrement(&ui2dSkipStale); }
         else if (held) { ui2dFrameHeld++; InterlockedIncrement(&ui2dHeldDraws); if (byEye) InterlockedIncrement(&ui2dEyeUsed); }
     }
+    if(want && ui2dSceneTexture(c)) {want=false;InterlockedIncrement(&ui2dSkipEffect);}
     LONG patched = InterlockedCompareExchange(&ui2dGpuPatched, 0, 0);
-    if (!want && !patched) return;                                              // pristine wanted, pristine there
+    if(!want) {ui2dRestore(c);return;}
     if (want && patched && ui2dGpuX0 == useX0) return;                          // already patched for this eye
     ID3D11Buffer *b = nullptr; c->VSGetConstantBuffers(0, 1, &b);
     if (!b) { InterlockedIncrement(&ui2dErrors); return; }
+    if(patched && !ui2dRestore(c)) {b->Release();return;}
+    ui2dOriginal.assign((const BYTE*)f,(const BYTE*)f+n);
     D3D11_BUFFER_DESC desc{}; b->GetDesc(&desc);
     D3D11_MAPPED_SUBRESOURCE m{};
     if (desc.Usage != D3D11_USAGE_DYNAMIC || !(desc.CPUAccessFlags & D3D11_CPU_ACCESS_WRITE) || desc.ByteWidth < n ||
@@ -553,6 +621,7 @@ void ui2dOnDraw(ID3D11DeviceContext *c, unsigned kind) {
     memcpy(m.pData, f, n);
     if (want) {
         ui2dPatch((float *)m.pData, useX0, (float)ui2dCfg.scaleMils / 1000.0f, (float)ui2dCfg.convE5 / 100000.0f, (int)ui2dCfg.sign);
+        ui2dOwnedBuffer=b;
         ui2dGpuX0 = useX0; InterlockedIncrement(&ui2dPatched);
     } else InterlockedIncrement(&ui2dRestored);
     c->Unmap(b, 0); b->Release();
@@ -578,7 +647,7 @@ void ui2dInstall(ID3D11Device *d) {
     } else { vsHook = {}; log("ui2d: vertex-shader registry REFUSED (slot owner is not a loaded module, or the write failed)"); }
     // Copy observers on the immediate context's vtable (46 CopySubresourceRegion, 47 CopyResource, 57 ResolveSubresource).
     ui2dEnsureCopyHooks();
-#ifndef DG_DRAW_TRIAL_TEST
+
     HMODULE exe = GetModuleHandleW(nullptr);
     auto dos = (IMAGE_DOS_HEADER *)exe; auto nt = (IMAGE_NT_HEADERS64 *)((BYTE *)exe + dos->e_lfanew);
     auto sec = IMAGE_FIRST_SECTION(nt);
@@ -608,9 +677,14 @@ void ui2dInstall(ID3D11Device *d) {
     ui2dSiteInstalled = true;
     if (logger) logger("ui2d: upload site rva 0x%llX retargeted (one call, CPU bank untouched); default off\r\n",
                        (unsigned long long)(ui2dSite - (BYTE *)exe));
-#endif
+
 }
 void ui2dRemove() {
+    InterlockedExchange64(&ui2dSceneSample,0);
+    if(context) ui2dRestore(context.Get());
+
+
+
     if (ui2dSiteInstalled) {
         INT32 now; memcpy(&now, ui2dSite + 1, 4);
         DWORD old, ignored;

@@ -2,11 +2,11 @@
 
 #include "dg_policy.h"
 
-#ifdef DG_POLICY_TEST_BAD_VERSION
-#define DG_POLICY_STAMP_VERSION (DG_POLICY_ABI_VERSION + 1u)
-#else
+
+
+
 #define DG_POLICY_STAMP_VERSION DG_POLICY_ABI_VERSION
-#endif
+
 
 const DG_POLICY_TABLE dg_policy_builtin = {
     DG_POLICY_MAGIC,
@@ -50,9 +50,9 @@ const DG_POLICY_TABLE dg_policy_builtin = {
     dg_move_step,
 };
 
-#ifdef DG_POLICY_DLL
-__declspec(dllexport) const DG_POLICY_TABLE *dg_policy_query(void)
-{
-    return &dg_policy_builtin;
-}
-#endif
+
+
+
+
+
+

@@ -214,9 +214,9 @@ void dg_policy_status(DG_POLICY_STATUS *out);
 int dg_policy_validate(const DG_POLICY_TABLE *t, const char **why);
 long dg_policy_load_from(const char *path, const char **why);
 
-#ifdef DG_HOOK_TEST
-int dg_policy_self_test(const char *exe_dir);
-#endif
+
+
+
 
 /* ------------------------------------------------ call-site redirect ---- */
 /* dg_bridge.c and dg_hook.c define DG_POLICY_REDIRECT before including this
