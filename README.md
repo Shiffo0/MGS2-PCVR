@@ -10,7 +10,7 @@ The **Tanker chapter with Snake** is the focus of this beta. Switch between VR a
 
 ## New in v0.4.0
 
-**Huge performance increase in VR:** stereo VR now reaches a steady 60 fps on the maintainer's setup (previously 43–56 fps). PSG-1 scope zoom now works by holding a grip, the Nikita can be used from your hand, and the Stinger stays in your hand. Development measurements are excluded from the player build.
+**Huge performance increase in VR:** stereo VR now reaches a steady 60 fps (previously 43–56 fps). PSG-1 scope zoom now works by holding a grip, the Nikita can be used from your hand, and the Stinger stays in your hand. Thermal goggles can be activated by holding the left grip button near your left ear.
 
 See [the release notes](RELEASE_NOTES.md) for changes since v0.3.5 and validation limits. This source-cleaned rebuild is **AEF2EC93**.
 
@@ -98,7 +98,7 @@ You may notice ghosting or judder during motion. Keep the game's frame rate stab
 
 ## What's next?
 
-Future work focuses on **Raiden and the Plant chapter**, including further coolant and SOCOM validation, scope and sniper-rifle support, further Stinger work (lock-on validation) and HF-blade support. There is no release date for complete Raiden support yet.
+Future work focuses on **Raiden and the Plant chapter**, including further coolant validation, scope and sniper-rifle support, further Stinger work (lock-on validation) and HF-blade support. There is no release date for complete Raiden support yet.
 
 ## Troubleshooting and feedback
 
