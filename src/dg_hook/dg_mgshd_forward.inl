@@ -82,7 +82,45 @@ bool forwardChain(){
 }
 bool forwardOwned(){return forwardStatus()!=FORWARD_BOUND||(*forwardHook.slot==forwardHook.ours&&forwardChain());}
 
+#include "dg_initialized_signature.h"
+
+
+
+
+
+
+
 void restoreForward(){if(forwardHook.slot&&*forwardHook.slot==forwardHook.ours)writeSlot(forwardHook,forwardHook.ours,forwardHook.next);}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

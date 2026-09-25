@@ -109,7 +109,7 @@ typedef struct {
 } DG_MENU_STATE;
 
 void dg_menu_step(DG_MENU_STATE *state, const DG_MENU_IN *in, DG_MENU_OUT *out);
-/* Retail title requires ENTER; Continue accepts PAD_OK or START. */
+
 static unsigned int dg_menu_native_confirm(unsigned int status,int confirm,int pregame,int gameover)
 {
     status &= DG_MENU_PAD_ALLOWED;

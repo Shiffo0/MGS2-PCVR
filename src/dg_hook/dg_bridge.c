@@ -1,19 +1,19 @@
 #include "dg_build_profile.h"
-/* dg_bridge.c - F2: in-process anchors, a detour, and the FPS state machine.
- *
- * Read dg_bridge.h first for the shape. What follows is, in order:
- *
- *   1. the pure state machine - no Windows, no game, no clock;
- *   2. a conservative x64 length decoder and a minimal detour built on it;
- *   3. the in-process anchor resolver, sharing shared\dg_anchors.h with the
- *      external scanner;
- *   4. the drive point installed at Action()'s PlayerPad merge seam;
- *   5. lifecycle, telemetry and the desk tests.
- *
- * The ordering is deliberate: everything above the game-touching part can be
- * compiled and tested on a machine with no MGS2 on it at all, which is the only
- * kind of evidence this phase is allowed to produce.
- */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -24,12 +24,14 @@
 #include <string.h>
 
 #include "dg_bridge.h"
+#include "dg_model_arm.h"
 #include "dg_interact_adapter.inl"
 #include "dg_radial_inventory.h"
 #include "dg_arm_map.h"
 #include "dg_ik.h"
 #include "dg_pose.h"
 #include "dg_aim_capture.h"
+
 #include "dg_fire.h"
 #include "dg_recoil.h"
 #include "dg_move.h"
@@ -51,9 +53,9 @@ static volatile LONG g_codec_exit_requested, g_codec_exit_written, g_codec_exit_
 
 /* ======================================================= state machine === */
 
-/* Ticks the native state gets to confirm a requested transition. CheckWatch
-   runs once per player update, so half a second at 60 Hz is generous without
-   being an invitation to re-request forever. */
+
+
+
 #define DG_FPS_CONFIRM_TICKS 30
 /* How stale the camera-seam status latch may be before bridge_tick stops
    trusting it. The two seams ran at roughly comparable rates in the run of
@@ -250,9 +252,9 @@ void dg_fps_step(DG_FPS_STATE *s, const DG_FPS_INPUT *in, DG_FPS_STEP *out)
 
     case DG_FPS_ACTIVE:
         if (s->desired && s->camera_missing_ticks >= DG_FPS_RETRY_TICKS) {
-            /* CheckWatch only calls IntoSubject when Active changes. A new
-               level can retain Active while losing the actual camera. Ask
-               the native leave/enter sequence once; keep the user's choice. */
+
+
+
             s->camera_missing_ticks = 0;
             fps_edge(s, out, in);
             fps_set(s, out, DG_FPS_REQUEST_LEAVE, DG_FPS_REASON_NATIVE_EXIT);
@@ -839,7 +841,9 @@ static int dg_detour_install_ex(DG_DETOUR *d, void *target, void *callback,
         disp = (LONG)new_disp;
         memcpy(tramp + offset[i] + insn[i].disp_offset, &disp, sizeof(disp));
     }
-    emit_jmp_abs(tramp + stolen, code + stolen);
+    /* Mode 4 runs relocated instructions before the saved-context callback.
+       Used only for a witnessed TEST whose resulting ZF feeds native JZ. */
+    emit_jmp_abs(tramp + stolen, original_stack==4 ? stub : code + stolen);
 
     if (original_stack==2) {
         /* Function-entry replacement with a callable original trampoline. */
@@ -847,7 +851,7 @@ static int dg_detour_install_ex(DG_DETOUR *d, void *target, void *callback,
     } else {
         size_t n=sizeof(k_stub_head)-2;
         static const unsigned char stack_arg[]={0x48,0x8d,0x8b,0x80,0,0,0};
-        ULONGLONG back=(ULONGLONG)(ULONG_PTR)tramp;
+        ULONGLONG back=(ULONGLONG)(ULONG_PTR)(original_stack==4 ? code+stolen : tramp);
         memcpy(stub,k_stub_head,n);
         if(original_stack==3) {
             static const unsigned char save67[]={
@@ -874,7 +878,7 @@ static int dg_detour_install_ex(DG_DETOUR *d, void *target, void *callback,
         memcpy(stub+n,&back,sizeof back);
     }
 
-    rel = (LONGLONG)stub - (LONGLONG)(code + 5);
+    rel = (LONGLONG)(original_stack==4 ? tramp : stub) - (LONGLONG)(code + 5);
     if (rel > 0x7FFFFFFFLL || rel < -0x80000000LL) {
         VirtualFree(page, 0, MEM_RELEASE);
         *why = "stub is out of rel32 range after allocation";
@@ -928,10 +932,10 @@ static void dg_detour_remove(DG_DETOUR *d)
 #define DG_PAD_STATUS_OFFSET 4
 #define DG_PAD_PRESS_OFFSET  8
 #define DG_PAD_RELEASE_OFFSET 12
-/* pressure[12] at +0x18, indexed by PL_PAD_PRESS_WEAPON - which is a runtime
-   index into that array, not a mask, and is read from the anchor rather than
-   assumed. Twelve is the array's own length; anything outside it would be a
-   write past the pad. */
+
+
+
+
 
 #define DG_PAD_DIR_OFFSET     0x10   /* short: pad->dir, 0..4095 or -1 */
 #define DG_PAD_ANALOG_OFFSET  0x12
@@ -940,9 +944,9 @@ static void dg_detour_remove(DG_DETOUR *d)
 #define DG_PAD_LEFT_DY_OFFSET 0x17
 #define DG_PAD_PRESSURE_OFFSET 0x18
 #define DG_PAD_PRESSURE_COUNT  12
-/* BP_PlayerPad.weaponState / .buttonState, one 40-byte pad above the anchor
-   (F7 research SS3). Read only, and read as a witness: they are the Bluepoint
-   layer's own answer to what we wrote the tick before. */
+
+
+
 #define DG_PAD_WEAPON_STATE_OFFSET 0x28
 #define DG_PAD_BUTTON_STATE_OFFSET 0x2C
 #define DG_GV_PAD_PRESS_SCN 0x00000020u
@@ -962,55 +966,55 @@ static void dg_detour_remove(DG_DETOUR *d)
     | 0x0000000010000000ULL /* STOP      */ \
     | 0x0000020000000000ULL /* PAD_OFF   */ )
 
-/* PLAYER_HOLD (0x800) is deliberately absent. It is the weapon-ready stance,
-   not a loss of control; refusing it would stand the tracked hand down at the
-   exact moment the player raises a pistol. The user approved this policy on
-   2026-08-18. All actual takeover/death/menu bits above remain fail-closed. */
+
+
+
+
 
 #define DG_GAME_UNSAFE_MASK ( \
-      0x00000040UL /* STATE_CUT_IN        */ \
-    | 0x00004000UL /* STATE_DISP_GAMEOVER */ \
-    | 0x08000000UL /* STATE_SCN_DEMO      */ \
-    | 0x10000000UL /* STATE_DEMO          */ \
-    | 0x20000000UL /* STATE_PRG_DEMO      */ \
-    | 0x40000000UL /* STATE_PAD_DEMO      */ \
-    | 0x80000000UL /* STATE_GAMEOVER      */ )
+      0x00000040UL                           \
+    | 0x00004000UL                           \
+    | 0x08000000UL                           \
+    | 0x10000000UL                           \
+    | 0x20000000UL                           \
+    | 0x40000000UL                           \
+    | 0x80000000UL                           )
 
 #define DG_MENU_UNSAFE_MASK ( \
-      0x00000100UL /* MENU_WEAPON_OPEN */ \
-    | 0x00000200UL /* MENU_ITEM_OPEN   */ \
-    | 0x00000400UL /* MENU_RADIO_ON    */ )
+      0x00000100UL                        \
+    | 0x00000200UL                        \
+    | 0x00000400UL                        )
 
 #define DG_THEATER_GAME_MASK ( \
       0x08000000UL   \
-    | 0x10000000UL /* STATE_DEMO - polygon demos AND PSS/MPEG movies      */ \
-    | 0x40000000UL /* STATE_PAD_DEMO - attract replay, player only watches */ \
-    | 0x80004000UL /* STATE_GAMEOVER / STATE_DISP_GAMEOVER - flat Continue UI */ )
+    | 0x10000000UL                                                           \
+    | 0x40000000UL                                                            \
+    | 0x80004000UL                                                               )
 #define DG_THEATER_MENU_MASK ( \
-      0x00000400UL /* MENU_RADIO_ON - the only bit that sees a codec */ )
+      0x00000400UL                                                      )
 
 /* UI-U1: the full-menu panel judgment. Separate from the theater mask so the
    marker can enable either without the other; the codec is the theater's. */
 #define DG_UI_PANEL_MENU_MASK ( \
-      0x00000100UL /* MENU_WEAPON_OPEN */ \
-    | 0x00000200UL /* MENU_ITEM_OPEN   */ )
+      0x00000100UL                        \
+    | 0x00000200UL                        )
 
 #define DG_HUD_HIDE_BITS ( \
-      0x00000001UL /* MENU_WEAPON_OFF */ \
-    | 0x00000002UL /* MENU_ITEM_OFF   */ \
-    | 0x00000004UL /* MENU_RADAR_OFF  */ \
-    | 0x00000008UL /* MENU_GAGE_OFF   */ )
+      0x00000001UL                       \
+    | 0x00000002UL                       \
+    | 0x00000004UL                       \
+    | 0x00000008UL                       )
 
-/* Hysteresis, in camera-seam samples (the seam runs about one per frame and
-   SPEEDS UP during a demo - measured 2474 seams against 465 ticks in one
-   window - so ticks would be the wrong clock here). Enter fast: ~0.1 s costs
-   an unnoticeable head-coupled sliver at the start of a scene the game is
-   fading anyway. Exit slow: STATE_SCN_DEMO can blink across script
-   transitions (pad release -> cancel -> next demo, section 2.5), and a
-   theater that reappears for each blink is the flap the hysteresis exists to
-   prevent. The menu panel closes faster - its bits are set and cleared
-   cleanly by the menu machine, and a camera that stays frozen for a second
-   after closing a weapon ring would read as a hang. */
+
+
+
+
+
+
+
+
+
+
 #define DG_THEATER_ENTER_SAMPLES 8
 #define DG_THEATER_EXIT_SAMPLES  45
 #define DG_UI_ENTER_SAMPLES 4
@@ -1172,10 +1176,10 @@ static struct {
 
     DG_ANCHORS a;
     DG_DETOUR detour;
-    /* U2: the second detour, on GV_UpdatePadSystem. Separate from the tick
-       detour in every way that matters - its own install, its own failure,
-       its own removal - because the pad anchor is the one OPTIONAL anchor
-       and a miss there must cost the menu feature alone. */
+
+
+
+
     DG_DETOUR pad_detour;
     volatile LONG pad_detour_live;
     volatile LONG menu_mode;             /* vr_menu: 0 off, 1 measure, 2 write */
@@ -1183,10 +1187,10 @@ static struct {
     volatile LONG menu_clear;            /* bits to remove first, see DG_BRIDGE_MENU */
     volatile LONG menu_allow;            /* the caller's front-end judgment */
     volatile LONG menu_stamp;            /* tick the command came from */
-    /* The game's own status/press words in GV_PadDataDirect as seen at the
-       pad seam, accumulated. Named for the record so it cannot be confused
-       with seen_pad_status, which watches the PlayerPad copy instead. The
-       only way to learn which bit this build calls PAD_OK. */
+
+
+
+
     volatile LONG seen_direct_status;
     volatile LONG seen_direct_press;
     /* Distinct press words and their counts - see the filling site for
@@ -1263,17 +1267,17 @@ static struct {
        running, and unloading during a cutscene would otherwise leave our angle
        sitting there for the next time the arm camera comes on. */
     volatile LONG hand_probe_owned;
-    /* The wrist channel's release debt. hand_drive_write puts our command into
-       ArmCamRotateShift every tick; when a stream ends, the game does not
-       remove it - ArmMove only decays it 25% per frame toward the weapon
-       table's {0,0,0}. The next stream's rest capture reads the hierarchy
-       DG_ADJ_SETTLE_TICKS later, when 0.75^2 = 56% of our last wrist is still
-       in it, and bakes that error into the new rest pair. That is a ratchet:
-       measured on 2026-08-19 as a session where nine B-press recalibrations
-       never unpinned the wrist envelope (200/200, then 93%, then 88% of pairs
-       clamped at the full 70 degrees). So a release WRITES the zero the decay
-       was drifting toward - one tick, through the same gates as every other
-       wrist write, and only if this session ever wrote the channel at all. */
+
+
+
+
+
+
+
+
+
+
+
     volatile LONG hand_zero_pending;
     volatile LONG hand_drive_owned;
     volatile LONG c_arm_hand_zeroed;
@@ -1290,7 +1294,7 @@ static struct {
     volatile LONG c_arm_destroyed;
     ULONGLONG last_arm_body;
 
-    /* The GM_PlayerBody candidate, same shape, opt-in and read-only. */
+
     volatile LONG s_body_lo;
     volatile LONG s_body_hi;
     volatile LONG s_body_objs_lo;
@@ -1338,16 +1342,16 @@ static struct {
     LONG arm_map_settle_until;
     int arm_map_unarmed; /* reset positional calibration when equip mode changes */
     int arm_map_phase;              /* 0 reset, 1 settling, 2 calibrated */
-    /* Only q4 and q5 are ours. SetPos owns q6 and rebuilds it from
-       ArmCamRotateShift on every arm-camera pass. */
+
+
     float arm_map_cached_adjust[8];
     int arm_map_cache_valid;
     ULONGLONG ik_owned_arm;
     ULONGLONG ik_owned_mctrl;
     ULONGLONG ik_owned_adjust;
-    /* Exactly the adjust_flag bits this hook set, so release clears what it
-       took and nothing else. Joint 6 comes and goes with hand tracking, and a
-       hard-coded mask would either strand a bit or clear one we never owned. */
+
+
+
     ULONGLONG ik_owned_mask;
     /* The hand's animated rotation and the controller's, both in the arm root
        frame, captured on the same calibration pair. Everything the hand does
@@ -1431,8 +1435,8 @@ static struct {
     volatile LONG s_arm_base_drift_worst;
     volatile LONG s_arm_cmd_drift;
     volatile LONG s_arm_cmd_drift_worst;
-    /* Camera seam publishes one precompensated ArmCamRotateShift command;
-       tick seam consumes a coherent snapshot. Odd seq means writer active. */
+
+
     volatile LONG hand_command_seq;
     volatile LONG hand_command_requested;
     volatile LONG hand_command_valid;
@@ -1497,7 +1501,7 @@ static struct {
     volatile LONG c_move_third_writes, c_move_not_third;
     volatile LONG c_move_prone_writes, c_move_dir_writes;
     volatile LONG s_move_last_org, s_move_last_dir;
-    ULONGLONG tick_status;              /* GM_PlayerStatus at this tick */
+    ULONGLONG tick_status;
     /* Move probe. */
     volatile LONG mp_w_tick, mp_w_dir, mp_w_status, mp_w_bytes;
     volatile LONG mp_c_tick, mp_c_dir, mp_c_status, mp_c_bytes, mp_c_analog;
@@ -1696,7 +1700,7 @@ static struct {
     volatile LONG s_arm_adjust_hi;
     volatile LONG s_arm_mctrl_lo;
     volatile LONG s_arm_mctrl_hi;
-    volatile LONG s_mctrl_dump[20];     /* 10 qwords from m_ctrl + 0x00 */
+    volatile LONG s_mctrl_dump[20];
     volatile LONG s_obj_dump[16];       /* 8 qwords from the OBJECT + 0x00 */
 
     /* Every bit each status word has ever had set this session, ORed.
@@ -1719,11 +1723,11 @@ static struct {
     volatile LONG seen_player_late_lo;
     volatile LONG seen_player_late_hi;
     volatile LONG c_late_status;
-    /* The same three words sampled at the Present seam - the one seam that
-       survives GV_PauseLevel, and therefore the only place a menu is visible
-       at all (see dg_bridge_screen_seam_now). Kept separate from the pair
-       above because "the camera seam never saw it" and "nobody looked while
-       it was true" are the two readings that pair could not tell apart. */
+
+
+
+
+
     volatile LONG seen_game_screen;
     volatile LONG seen_menu_screen;
     volatile LONG c_screen_status;
@@ -1827,11 +1831,11 @@ static struct {
        trigger into exactly this field. */
     volatile LONG seen_pad_status;
     volatile LONG c_weapon_press;
-    /* And the same edge counted only while we hold first person. Six presses
-       and a hidden arm is two different findings depending on whether any of
-       the six landed inside a first-person session, and the plain counter
-       cannot tell them apart - the weapon camera needs PLAYER_WATCH, which
-       only holds while we are in. */
+
+
+
+
+
     volatile LONG c_weapon_press_fps;
     /* Which physical keys were down at the instant the weapon bit went down.
        Knowing the button is reachable is not the same as knowing how to press
@@ -1842,11 +1846,11 @@ static struct {
     volatile LONG s_weapon_vk[4];
     LONG last_pad_status;
 
-    /* F5 step 2, the skeleton probe. Measured once per object and then left
-       alone: the stride and the parent table do not change while the model is
-       loaded, and re-scanning every frame would be pointless work in the middle
-       of the render seam. skel_for is the DG_OBJS the measurement belongs to,
-       so a model swap re-measures instead of reporting a stale rig. */
+
+
+
+
+
     volatile LONG skel_probe;
     volatile LONG skel_base;
     volatile LONG skel_for_lo;
@@ -1944,12 +1948,12 @@ static void thea_ring_push(unsigned kind, unsigned game, unsigned menu,
 #define RD32(addr) (*(volatile LONG *)(ULONG_PTR)(addr))
 #define WR32(addr, v) (*(volatile LONG *)(ULONG_PTR)(addr) = (LONG)(v))
 
-/* Cheap sanity for a pointer we are about to dereference on the game thread.
-   Every other address the bridge touches came out of the anchor table and was
-   cross-checked before it was believed; the GM_PlayerBody candidate did not, so
-   it gets this instead. Canonical user-space, above the null page, and aligned,
-   which is all an OBJECT* from this allocator can be. It cannot make a bad
-   pointer safe - only a bad pointer obvious. */
+
+
+
+
+
+
 static int plausible_ptr(ULONGLONG p)
 {
     return p >= 0x10000ULL && p < 0x00007FFFFFFFFFFFULL && (p & 7) == 0;
@@ -1970,7 +1974,7 @@ static void ring_push(const DG_FPS_STATE *s, const DG_FPS_STEP *o,
     e->player_status = player;
 }
 
-/* One write per tick, at most. Never gBP_1stPersonCamera_Active. */
+
 static void apply_write(int kind, int value)
 {
     switch (kind) {
@@ -1988,12 +1992,12 @@ static void apply_write(int kind, int value)
         InterlockedExchange(&g_b.wrote_move, 1);
         break;
     case DG_FPS_WRITE_SUBJECT_EDGE:
-        /* One frame of PL_PAD_SUBJECT in press, offered after Action() has
-           copied GV_PadData into PlayerPad.pad and before the Bluepoint weapon
-           and button state rewrite it. The next tick's copy clears it, so the
-           edge cannot be consumed twice. status is left alone: CheckWatch reads
-           press in toggle mode, and setting status would also trip the raw
-           GV_PadData consumers documented in the review. */
+
+
+
+
+
+
         *(volatile LONG *)(ULONG_PTR)(g_b.a.player_pad + DG_PAD_PRESS_OFFSET) |=
             (LONG)value;
         break;
@@ -2088,9 +2092,9 @@ static int fight_step(int held, int native_override, int *fights)
 /* The per-tick drive point. Runs on the game thread inside Action(). No
    OpenXR, no allocation, no formatting, no logging - counters and a bounded
    ring only. */
-/* Defined with the rest of the ArmCamRotateShift probe further down. They are
-   called from here because the tick seam is the only one that runs ahead of
-   the arm actor, which is the whole point of that probe. */
+
+
+
 static void hand_probe_write(void);
 static void hand_probe_release(void);
 static void hand_drive_write(void);
@@ -2106,6 +2110,7 @@ static struct {
     volatile LONG64 actor;
     DWORD last_log;
 } g_interact_stats;
+#include "dg_vq_cache.h"       /* 20 ms per-thread VirtualQuery cache (hot read paths) */
 #include "dg_interact_player.inl"
 
 static SRWLOCK g_controls_lock = SRWLOCK_INIT;
@@ -2119,11 +2124,18 @@ static volatile LONG g_controls_fire_retired;
 static unsigned g_controls_epoch;
 #include "dg_radial_game.inl"
 #include "dg_health_bridge.inl"
+static int psg_zoom_observe(uint64_t expected,uint64_t *owner,uint64_t *cam,unsigned *om,unsigned *imask);
+
+
+
 #include "dg_action_bridge.inl"
 #include "dg_m9_bridge.inl"
 static void stinger_resolve(const LiveImage *im);
 static void stinger_install(void);
 static void stinger_stop(void);
+static void psg_resolve(const LiveImage *im);
+static void psg_install(void);
+static void psg_stop(void);
 static void unarmed_prone_resolve(const LiveImage *im);
 static void unarmed_prone_install(int enabled);
 static void unarmed_prone_stop(void);
@@ -2131,9 +2143,22 @@ static void blade_resolve(const LiveImage *im);
 static void blade_install(int requested);
 static void blade_stop(void);
 static void blade_tick(int safe);
+static void stinger_tick(int safe);
+static void stinger_revoke(void);
 static int blade_claim(void);
 #include "dg_native_hud.inl"
 static void mobile_resolve(const LiveImage *im);
+static void nikita_visual_release(void);
+static void nikita_revoke(void);
+static void nikita_tick(int safe);
+static void nikita_steer_tick(int safe);
+static void nikita_steer_revoke(void);
+static void nikita_steer_resolve(const LiveImage *im);
+static void nikita_steer_install(void);
+static void nikita_steer_stop(void);
+static void nikita_sight_resolve(const LiveImage *im);
+static void nikita_sight_install(void);
+static void nikita_sight_stop(void);
 static void mobile_install(void);
 static void mobile_stop(void);
 static void coolant_resolve(const LiveImage *im);
@@ -2157,6 +2182,9 @@ void dg_bridge_controls_register(DG_BRIDGE_CONTROLS_PROVIDER provider,
     else if (g_controls_provider) InterlockedExchange(&g_controls_fire_retired,1);
     g_controls_provider=provider; g_controls_stop=stop; g_controls_user=user;
     g_controls_epoch++;
+    stinger_revoke();
+    nikita_revoke();
+    nikita_steer_revoke();
     g_controls_allowed=g_controls_radial_allowed=0; g_controls_lease=0; g_controls_active=0;
     g_controls_ladder=0;
     g_controls_special=0;
@@ -2181,6 +2209,8 @@ void dg_bridge_controls_context_ex(int allowed,int radial) {
 void dg_bridge_controls_context_all(int allowed,int special,int radial) {
     AcquireSRWLockExclusive(&g_controls_lock);
     g_controls_allowed=allowed ? 1 : 0;
+    if(!allowed || special)stinger_revoke();
+    if(!allowed || special){nikita_revoke();nikita_steer_revoke();}
     g_controls_special=(special==DG_CONTROLS_LADDER || special==DG_CONTROLS_BEYOND ||
         special==DG_CONTROLS_LOCKER || special==DG_CONTROLS_DOWNED)?special:0;
     g_controls_ladder=g_controls_special==DG_CONTROLS_LADDER;
@@ -2232,6 +2262,41 @@ static void controls_end(void) {
     ReleaseSRWLockShared(&g_controls_lock);
 }
 
+static void radial_pause_pad_tick(void) {
+    uint64_t now=GetTickCount64(),status=0;
+    int safe;
+    if (!dg_bridge_radial_paused()) return;
+    safe=radial_actor_present() && radial_environment_safe(&status) &&
+        dg_xr_radial_generation()!=0;
+    controls_begin(safe,now);
+    /* The provider runs while actors are stopped. Transfer any accepted
+     * equip request to the next real actor tick; paused item-use observations
+     * below must never acknowledge an equip before the actor actually runs. */
+    if (g_radial_game.commit.phase==DG_RADIAL_COMMIT_PENDING) {
+        g_radial_game.offered_tick=(uint64_t)(DWORD)(g_b.c_ticks+1);
+        radial_pause_release();
+    }
+    if (g_item_use.pending && dg_bridge_radial_paused()) {
+        uint64_t player=0;
+
+
+        controls_end();
+        if (radial_live_read(NULL,g_radial_game.inventory.player_slot,&player,8)) {
+            radial_phase_tick((void *)(ULONG_PTR)player);
+
+
+            radial_phase_tick((void *)(ULONG_PTR)player);
+        }
+        return;
+    }
+    if (g_item_use.pending) g_item_use.tick=(uint64_t)(DWORD)(g_b.c_ticks+1);
+    if (!safe) radial_pause_cancel();
+    /* Frozen presentation remains valid for one bounded resume interval;
+     * the next real phase still samples and validates native inventory. */
+    if (!dg_bridge_radial_paused() && safe)
+        g_radial_game.catalog.sampled_ms=now;
+    controls_end();
+}
 static void bridge_tick_body(void);
 /* Declared here because the install site sits thousands of lines above
    the body; see pad_seam_tick for why this seam exists at all. */
@@ -2271,14 +2336,14 @@ static void bridge_tick(void)
 
 
 
-/* UI-U1's HUD hide, on the tick seam because that is the game thread and the
-   one seam allowed to write game state. The write is the game's own command
-   vocabulary - the MENU_*_OFF bits scenes already use to blank the HUD - OR'd
-   in and re-asserted every tick (the game may clear them), and the release
-   clears exactly those four bits once. Bounded: four bits, one word, only
-   with the anchors resolved and the bridge armed, and MENU_CAPTION_OFF is
-   never touched. On release the game's own scene logic re-imposes whatever
-   hide state it wants; these are standing commands, not latched history. */
+
+
+
+
+
+
+
+
 static void hud_tick(void)
 {
     LONG want = InterlockedCompareExchange(&g_b.hud_mode, 0, 0);
@@ -2393,9 +2458,9 @@ static void bridge_tick_body(void)
         g_b.owner = 1;
     in.mgshdfix_owner = g_b.owner;
 
-    /* PL_SetPadTypeSubjectMove() runs on level load whenever PL_SubjectMove is
-       set, and the pattern it installs zeroes PL_PAD_SUBJECT. That pair is the
-       only level-load evidence the resolved anchors can carry. */
+
+
+
     in.level_load = in.subject_move != 0 && in.pad_subject_mask == 0;
     {
         DG_CAMERA_GATE camera;
@@ -2468,11 +2533,11 @@ static void bridge_tick_body(void)
     InterlockedExchange(&g_b.s_toggle, in.native_toggle);
     InterlockedExchange(&g_b.s_move, in.native_move);
     InterlockedExchange(&g_b.s_subject_move, in.subject_move);
-    /* PL_SubjectMove is the whole point of vr_fps_move=on and the snapshot
-       above is one tick in thousands, so count the ticks it was actually set.
-       Zero here with Move held at 1 means our write did not reach the entry
-       edge, which is a completely different failure from "the arm did not
-       appear" and must not be mistaken for it. */
+
+
+
+
+
     if (in.subject_move) InterlockedIncrement(&g_b.c_subject_move_ticks);
     InterlockedExchange(&g_b.s_subject_toggle,
                         (LONG)RD32(g_b.a.pl_subject_toggle));
@@ -2497,7 +2562,10 @@ static void bridge_tick_body(void)
        has just closed. */
     action_log_drain();
     controls_begin(in.safe_gameplay,GetTickCount64());
+    stinger_tick(in.safe_gameplay);
     blade_tick(in.safe_gameplay);
+    nikita_tick(in.safe_gameplay);
+    nikita_steer_tick(in.safe_gameplay);
     fire_tick(in.safe_gameplay);
     g_b.tick_status = status;
     move_tick(in.safe_gameplay);
@@ -2517,8 +2585,8 @@ static void bridge_tick_body(void)
                        (g_b.a.player_pad + DG_PAD_STATUS_OFFSET);
         LONG wmask = (LONG)RD32(g_b.a.pad_weapon);
         InterlockedOr(&g_b.seen_pad_status, pad);
-        /* Rising edge against the mask the game resolved at runtime, not a
-           constant: PL_PAD_WEAPON is reassigned per pad pattern. */
+
+
         if (wmask && (pad & wmask) && !(g_b.last_pad_status & wmask)) {
             int vk, n = 0;
             InterlockedIncrement(&g_b.c_weapon_press);
@@ -2547,12 +2615,12 @@ static void bridge_tick_body(void)
             objs = *(volatile ULONGLONG *)(ULONG_PTR)arm;
             if (objs) flag = RD32(objs + 0x58);
         }
-        /* Counted on any change of identity, not only on the passes through
-           null. The 2026-08-13 run swapped GM_PlayerArmBody from ...842990 to
-           ...842B50 between two heartbeats and both counters stayed at their
-           starting values, because a destroy and a create inside one tick
-           never shows a null to anybody sampling per tick. A counter that
-           misses the event it is named after is worse than no counter. */
+
+
+
+
+
+
         if (arm != g_b.last_arm_body) {
             if (arm) InterlockedIncrement(&g_b.c_arm_created);
             if (g_b.last_arm_body) InterlockedIncrement(&g_b.c_arm_destroyed);
@@ -2731,6 +2799,7 @@ int dg_bridge_start(void (*log)(const char *fmt, ...),
     }
     g_b.log = log;
     hanging_visibility_reset();
+    nikita_visual_release();
     memset(&g_interact_stats,0,sizeof g_interact_stats);
     script_menu_clear(0);
     InterlockedExchange(&g_b.c_pad_seam_entries, 0);
@@ -2814,6 +2883,9 @@ int dg_bridge_start(void (*log)(const char *fmt, ...),
     m9_resolve(&image);
     blade_resolve(&image);
     stinger_resolve(&image);
+    nikita_sight_resolve(&image);
+    nikita_steer_resolve(&image);
+    psg_resolve(&image);
     unarmed_prone_resolve(&image);
     native_hud_resolve(&image);
     coolant_resolve(&image);
@@ -2866,6 +2938,9 @@ int dg_bridge_start(void (*log)(const char *fmt, ...),
     mobile_install();
     m9_install(1);
     stinger_install();
+    nikita_sight_install();
+    nikita_steer_install();
+    psg_install();
     unarmed_prone_install(cfg && cfg->unarmed_prone_enabled);
     blade_install(cfg && cfg->hf_blade);
     reload_install(1);
@@ -2920,20 +2995,20 @@ int dg_bridge_start(void (*log)(const char *fmt, ...),
             g_b.seam_is_copy ? "COPY (before CheckDirection)" : "publication",
             g_b.a.copy_seam ? "resolved" : "not found",
             (unsigned long)g_b.a.copy_seam, (unsigned long)g_b.a.merge_seam);
-        log("    PL_SubjectMove 0x%llX  PL_SubjectToggle 0x%llX\r\n"
-            "    PL_PAD_SUBJECT 0x%llX  PL_PAD_STOP_AIM 0x%llX\r\n"
+        log("    fps move flag 0x%llX  fps toggle flag 0x%llX\r\n"
+            "    subject pad bit 0x%llX  stop-aim pad bit 0x%llX\r\n"
             "    PlayerPad.pad 0x%llX\r\n",
             g_b.a.pl_subject_move, g_b.a.pl_subject_toggle,
             g_b.a.pad_subject, g_b.a.pad_stop_aim, g_b.a.player_pad);
-        /* GM_PlayerStatus has never once been logged with its address, and it
-           has read 0 in every session so far - including with first person
-           live, where PLAYER_WATCH must be set. Print where it thinks it is,
-           so the next run can settle whether the word is wrong or the mask is
-           simply never exercised. */
-        log("    GM_PlayerStatus 0x%llX  (unsafe mask 0x%016llX)\r\n"
-            "    GM_GameStatus 0x%llX  GM_GameStatusScn 0x%llX"
+
+
+
+
+
+        log("    player status 0x%llX  (unsafe mask 0x%016llX)\r\n"
+            "    game status 0x%llX  scene game status 0x%llX"
             "  (unsafe mask 0x%08lX)\r\n"
-            "    GM_MenuStatus 0x%llX  GM_MenuStatusScn 0x%llX"
+            "    menu status 0x%llX  scene menu status 0x%llX"
             "  (unsafe mask 0x%08lX)\r\n",
             g_b.a.gm_player_status,
             (unsigned long long)DG_PLAYER_UNSAFE_MASK,
@@ -2945,18 +3020,18 @@ int dg_bridge_start(void (*log)(const char *fmt, ...),
     return 1;
 }
 
-/* `always` promises suspension during menus, codec, cutscenes, pad demos, load
-   and death (plan section 4). All three status words now back that promise:
-   player-status for death, lockers, ladders and the menu-open bit, game-status
-   for cutscenes, both demo kinds, cut-in and gameover, and menu-status for the
-   codec. Each is read the way the game reads it - the Scn half ORed in - and
-   each mask is pinned by a desk test in both directions.
 
-   The warning stays, and it is not a formality. What the masks assert is which
-   bits mean "not controllable gameplay", and only a live run can settle
-   whether a codec call really does raise MENU_RADIO_ON on this build, or
-   whether some sequence holds a bit we chose to permit. Until F2.5's live gate
-   says otherwise, `always` is plausible rather than proven. */
+
+
+
+
+
+
+
+
+
+
+
 static void warn_always_is_incomplete(void)
 {
     if (InterlockedCompareExchange(&g_b.always_warned, 1, 0) != 0) return;
@@ -3232,6 +3307,18 @@ void dg_bridge_drain_log(void)
             g_interact_stats.weapon,g_interact_stats.context,g_interact_stats.pad_writes,g_interact_stats.capture_writes,g_interact_stats.ladder_writes,
             g_interact_stats.codec_queued,g_interact_stats.codec_written,g_interact_stats.codec_dropped);
     }
+
+
+
+
+
+
+
+
+
+
+
+
     head = InterlockedCompareExchange(&g_ring_head, 0, 0);
     tail = g_ring_tail;
     if (head - tail > DG_RING) {
@@ -3316,7 +3403,10 @@ void dg_bridge_stop(void)
     }
     dg_bridge_action_register(NULL);
     reload_stop();
+    psg_stop();
     stinger_stop();
+    nikita_sight_stop();
+    nikita_steer_stop();
     unarmed_prone_stop();
     native_hud_stop();
     mobile_stop();
@@ -3345,13 +3435,13 @@ static void arm_bend_now(ULONGLONG arm, const double *quat_xyzw)
     joint = InterlockedCompareExchange(&g_b.bend_joint, 0, 0);
     if (joint < 0 || joint > 20 || joint == 6) return;
 
-    /* The OBJECT itself, dumped before any gate can swallow the reason. The
-       run of 2026-08-14 produced no bend line at all, which means m_ctrl was
-       never even a plausible pointer - a different failure from the one before
-       it, and one the m_ctrl dump could not report because it sat behind the
-       very check that was failing. Two known values make this dump
-       self-checking: +0x00 must equal the objs already logged and +0x30 the
-       evmobj, both fixed by retail at 0x0057D5A2 and 0x0057D5AC. */
+
+
+
+
+
+
+
     {
         int i;
         for (i = 0; i < 8; i++) {
@@ -3373,11 +3463,11 @@ static void arm_bend_now(ULONGLONG arm, const double *quat_xyzw)
     InterlockedExchange(&g_b.s_arm_adjust_hi, (LONG)(DWORD)(adjust >> 32));
     InterlockedExchange(&g_b.s_arm_mctrl_lo, (LONG)(DWORD)mctrl);
     InterlockedExchange(&g_b.s_arm_mctrl_hi, (LONG)(DWORD)(mctrl >> 32));
-    /* The gate refused on 2026-08-14 with n_joints reading 55 and the adjust
-       pointer null, which cannot both be true of a MOTION_CONTROL that SetPos
-       writes adjust[6] into every frame. Rather than theorise about which
-       offset moved, dump the head of the block and let it say. Torn reads are
-       fine here: it is a diagnostic, not a decision. */
+
+
+
+
+
     {
         int i;
         for (i = 0; i < 10; i++) {
@@ -3555,21 +3645,21 @@ static int arm_target_plausible(const double root[3],
            root_shoulder >= 0.0 && d <= lim;
 }
 
-/* ------------------------------------------------ the adjust frame (V5.1) ---
-   The constant above is the frozen heading of one measurement session. The
-   adjust-probe runs of 2026-08-30 and 2026-09-01 (ROLL_ONTWERP_V5.1 par. 3.1)
-   measured what it stands in for: the world image of adjust-X has heading
-   atan2(z, x) = DG_FRAME_HEADING_SIGN * rot.vy * (360/4096) + DG_FRAME_ZERO_DEG
-   with rot.vy the actor's body yaw (PlayerWork+0x82), rms 0.10 degrees over
-   432 cycles and 12 headings, the frame yaw-only (root tilt never reaches
-   it). So world = f (x) adjust (x) f* with f that yaw. Which frame a
-   conversion uses is one runtime choice, vr_adjust_frame=legacy|live:
-   legacy is the constant, byte for byte the behaviour every build so far
-   shipped; live is the measured heading. Both helpers take the frame as a
-   mandatory parameter and return 0 - output untouched - for a NULL, invalid,
-   non-finite or non-unit frame, so a pair that never acquired a heading
-   fails at the site's own fail-closed policy instead of converting with
-   yesterday's. */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 /* DG_ADJ_FRAME itself lives in dg_bridge.h: the bridge state holds one. */
 static const DG_ADJ_FRAME ADJ_FRAME_LEGACY = { 0, 1, { 0.0, 0.0, 0.0, 1.0 } };
 
@@ -3681,7 +3771,7 @@ static void arm_quat_unrotate(const double q[4], const double v[3],
     arm_quat_rotate(inverse, v, out);
 }
 
-/* ------------------------------- F5 step 3a: the ArmCamRotateShift probe --- */
+
 
 /* Defined with the skeleton probe further down; used here first. */
 static LONG f2l(float f);
@@ -3710,9 +3800,9 @@ static void set_pos_quat(const double rot[3], double q[4])
         q[2] = -sin(y) * r;
         q[1] = 0.0;
     }
-    {   /* GM_RotToQuat normalises; XAfterY is unit by construction. Doing it
-           for both costs nothing and removes one way for the comparison below
-           to differ for an uninteresting reason. */
+    {
+
+
         double n = sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
         if (n > 0.0) { q[0] /= n; q[1] /= n; q[2] /= n; q[3] /= n; }
     }
@@ -4556,6 +4646,7 @@ mismatch:
 
 static void arm_map_forget(void)
 {
+    dg_bridge_right_model_arm_clear();
     int i;
     arm_ik_release();
     dg_arm_map_reset(&g_b.arm_map);
@@ -4569,6 +4660,9 @@ static void arm_map_forget(void)
        would be removed from a hierarchy that never had it. */
     for (i = 0; i < 8; i++)
         g_b.arm_map_cached_adjust[i] = ((i % 4) == 3) ? 1.0f : 0.0f;
+
+
+
     hand_command_clear();
     if (InterlockedCompareExchange(&g_b.hand_drive_owned, 0, 0))
         InterlockedExchange(&g_b.hand_zero_pending, 1);
@@ -4600,6 +4694,9 @@ static void arm_map_begin(ULONGLONG arm, ULONGLONG objs,
        stream is both a stale wrist about to be written into a new stream and
        a live-looking publication that would supersede the release zero
        below. */
+
+
+
     hand_command_clear();
     if (InterlockedCompareExchange(&g_b.hand_drive_owned, 0, 0))
         InterlockedExchange(&g_b.hand_zero_pending, 1);
@@ -4672,21 +4769,21 @@ static ULONGLONG region_end(ULONGLONG p)
                      PAGE_EXECUTE_WRITECOPY;
 
     memset(&mbi, 0, sizeof mbi);
-    if (!VirtualQuery((LPCVOID)(ULONG_PTR)p, &mbi, sizeof mbi)) return 0;
+    if (!dg_vq((LPCVOID)(ULONG_PTR)p, &mbi)) return 0;
     if (mbi.State != MEM_COMMIT) return 0;
     if (mbi.Protect & PAGE_GUARD) return 0;
     if (!(mbi.Protect & readable)) return 0;
     return (ULONGLONG)(ULONG_PTR)mbi.BaseAddress + (ULONGLONG)mbi.RegionSize;
 }
 
-/* Walk from the subjective arm body to the player work, refusing at every step
-   that cannot be independently justified. Two consumers need this - the hand
-   writer and the trigger - and they need to agree about who owns the arm, so
-   there is one copy of the rules and each caller maps the refusal to its own
-   counter. The microphone weapons are named because their native
-   WeaponCamRotateShift is non-zero and would give that global two owners; for
-   the trigger they are refused for the plainer reason that a microphone has no
-   trigger. */
+
+
+
+
+
+
+
+
 enum {
     DG_RESOLVE_OK = 0,
     DG_RESOLVE_NO_PLAYER,
@@ -4715,12 +4812,17 @@ static int resolve_player_policy(ULONGLONG *arm_out, ULONGLONG *pwork_out,
     end = region_end(pwork);
     if (!plausible_ptr(pwork) || !end || pwork + 0xBB8 > end)
         return DG_RESOLVE_NO_PLAYER;
-    if (*(volatile ULONGLONG *)(ULONG_PTR)(pwork + 0xBA8) != arm ||
-        RD32(pwork + 0xBB0) != 6)
-        return DG_RESOLVE_OWNER_MISMATCH;
     weapon = RD32(pwork + 0xB90);
     if (weapon < 0 || weapon >= DG_WEAPON_COUNT) return DG_RESOLVE_BAD_WEAPON;
-    if ((weapon == DG_WEAPON_MIC && !motion) || weapon == DG_WEAPON_DEMO_MIC)
+    if(weapon==6 && motion) {
+        DG_NIKITA_BINDING n;
+        if((g_b.a.gm_player_arm_body<=0x17df698) ||
+           (!dg_aim_capture_nikita_binding((uintptr_t)(g_b.a.gm_player_arm_body-0x17df698),arm,&n)) ||
+           (n.player!=pwork))return DG_RESOLVE_OWNER_MISMATCH;
+    } else if (*(volatile ULONGLONG *)(ULONG_PTR)(pwork + 0xBA8) != arm ||
+        RD32(pwork + 0xBB0) != 6)
+        return DG_RESOLVE_OWNER_MISMATCH;
+    if ((weapon == DG_WEAPON_MIC && motion!=1) || weapon == DG_WEAPON_DEMO_MIC)
         return DG_RESOLVE_MIC;
 
     if (arm_out) *arm_out = arm;
@@ -4735,11 +4837,47 @@ static int resolve_player(ULONGLONG *a, ULONGLONG *p, LONG *w)
 static int resolve_motion_player(ULONGLONG *a, ULONGLONG *p, LONG *w)
 { return resolve_player_policy(a,p,w,1); }
 
+static int resolve_hand_player(ULONGLONG *a, ULONGLONG *p, LONG *w)
+{ return resolve_player_policy(a,p,w,2); }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#include "dg_nikita_sight.inl"
+#include "dg_nikita_visual.inl"
+#include "dg_nikita_steer.inl"
+
 #include "dg_blade_bridge.inl"
 #include "dg_stinger_bridge.inl"
+#include "dg_psg_bridge.inl"
+#include "dg_psg_zoom.inl"
 #include "dg_unarmed_prone.inl"
 #include "dg_model_arm_bridge.inl"
+#include "dg_right_model.inl"
 
+static void interact_grip_claims(DG_INTERACT_SAMPLE *sample) {
+    if(blade_claim() || stinger_claim() || g_nikita_claim)sample->suppressed|=DG_IA_CODEC;
+}
 static void interact_tick(int safe_gameplay)
 {
     static unsigned diagnostic_action;
@@ -4755,7 +4893,7 @@ static void interact_tick(int safe_gameplay)
         in.input=g_controls_frame.interact;
         /* The blade owns the right grip: raising a held sword past the ear
          * must not open codec. Suppression retains release-to-rearm semantics. */
-        if(blade_claim())in.input.suppressed|=DG_IA_CODEC;
+        interact_grip_claims(&in.input);
     }
     if (in.input.sample) InterlockedIncrement(&g_interact_stats.samples);
     in.safe=safe_gameplay && g_controls_allowed &&
@@ -4850,7 +4988,7 @@ static void hand_drive_write(void)
         if (InterlockedCompareExchange(&g_b.hand_command_valid, 0, 0)) {
             InterlockedExchange(&g_b.hand_zero_pending, 0);
         } else if (g_b.a.arm_cam_rotate_shift &&
-                   resolve_player(NULL, NULL, NULL) == DG_RESOLVE_OK) {
+                   resolve_hand_player(NULL, NULL, NULL) == DG_RESOLVE_OK) {
             volatile short *r =
                 (volatile short *)(ULONG_PTR)g_b.a.arm_cam_rotate_shift;
             r[0] = 0; r[1] = 0; r[2] = 0;
@@ -4867,6 +5005,9 @@ static void hand_drive_write(void)
     age = (LONG)((DWORD)now - (DWORD)made_tick);
     if (age < 0 || age > DG_HAND_COMMAND_TICKS) {
         InterlockedIncrement(&g_b.c_arm_hand_tick_stale);
+
+
+
         hand_command_clear();
         return;
     }
@@ -4874,7 +5015,7 @@ static void hand_drive_write(void)
         InterlockedIncrement(&g_b.c_arm_hand_tick_no_player);
         return;
     }
-    switch (resolve_player(NULL, NULL, NULL)) {
+    switch (resolve_hand_player(NULL, NULL, NULL)) {
     case DG_RESOLVE_OK:
         break;
     case DG_RESOLVE_OWNER_MISMATCH:
@@ -5139,11 +5280,11 @@ static int move_read(DG_BRIDGE_MOVE *out, LONG *tick)
    themselves. The pad is written plainly, not interlocked - this runs on the
    game thread at the seam the game itself writes the pad from, the same
    discipline fire_write already relies on. */
-/* The actuator probe: read the six deciders off the PlayerWork into the ring
-   the log drains. A full ring or an unresolvable player drops the sample,
-   never blocks the seam. `wrote` says whether this tick put a byte on the
-   pad (the classic per-write sample) or is a dense aim-tick sample taken
-   for the series itself. */
+
+
+
+
+
 static void turn_probe_sample(unsigned char byte, int wrote)
 {
     LONG w = g_b.turn_probe_w;
@@ -5338,14 +5479,14 @@ static void move_tick(int safe_gameplay)
         }
     }
 
-    /* The same gate as the trigger, and in the same order: state, safety,
-       anchors, and the PlayerPad.enable check that says the record we would
-       write is the record the player actually reads. */
+
+
+
     if (want_third && g_b.fps.state != DG_FPS_ACTIVE &&
-        !(tstat & 0x1ULL /* PLAYER_WATCH */) &&
+        !(tstat & 0x1ULL                   ) &&
         g_b.a.pl_subject_move && RD32(g_b.a.pl_subject_move) == 0)
         third_ok = 1;
-    prone = (tstat & 0x20ULL /* PLAYER_GROUND */) != 0;
+    prone = (tstat & 0x20ULL                    ) != 0;
     if ((g_b.fps.state == DG_FPS_ACTIVE || third_ok) && safe_gameplay &&
         !InterlockedCompareExchange(&g_b.s_late_unsafe, 0, 0) &&
         g_b.a.player_pad && RD32(g_b.a.player_pad - 4) != 0) {
@@ -5393,10 +5534,10 @@ static void move_tick(int safe_gameplay)
     if (prone && InterlockedCompareExchange(&g_b.move_prone, 0, 0))
         in.max_deflect = (int)InterlockedCompareExchange(&g_b.move_prone_max, 0, 0);
     if (InterlockedCompareExchange(&g_b.move_dir_org, 0, 0)) {
-        /* Diagnostic origin: the body's own yaw (rot.vy), so a forward stick
-           is always "the way the body faces" and StandStill needs no turn
-           before StandRun. Reads the player work the interact layer resolves
-           (works in third person, unlike the arm-body walk). */
+
+
+
+
         uint64_t id = 0; int weapon = -1;
         if (interact_player_now(&id, &weapon) && plausible_ptr(id) &&
             region_end(id) && id + 0x84 <= region_end(id))
@@ -5483,12 +5624,12 @@ static void move_tick(int safe_gameplay)
         InterlockedIncrement(&g_b.c_move_dir_writes);
         InterlockedExchange(&g_b.s_move_last_org, (LONG)in.dir_org);
         InterlockedExchange(&g_b.s_move_last_dir, (LONG)out.dir);
-        /* CheckDirection already ran this tick with the driver's pad (dir
-           -1, force 0): redo its two stores from OUR bytes. See
-           move_resolve_workl. */
+
+
+
         if (InterlockedCompareExchange(&g_b.seam_is_copy, 0, 0)) {
-            /* Copy seam: CheckDirection runs AFTER us this tick and derives
-               PadTo, PadForce, WallTo and Liable from our stick itself. */
+
+
         } else if (g_b.workl_ptr) {
             ULONGLONG wl = *(volatile ULONGLONG *)(ULONG_PTR)g_b.workl_ptr;
             if (plausible_ptr(wl)) {
@@ -5660,16 +5801,16 @@ static void fire_tick(int safe_gameplay)
         resolve_player(NULL, &pwork, &weapon) == DG_RESOLVE_OK && weapon > 0) {
         /* None must not receive a weapon press: native unarmed actions can
            replace the resting finger pose. Capture has its own input owner. */
-        /* PlayerPad.enable sits one int below the pad the merge point copies
-           into. With it clear the player reads a different pad record and our
-           contract would be written where nobody looks. */
+
+
+
         if (RD32(g_b.a.player_pad - 4) != 0) in.can_write = 1;
         wp_set = *(volatile ULONGLONG *)(ULONG_PTR)(pwork + 0xBA0);
         if (plausible_ptr(wp_set)) in.wtype = (unsigned int)RD32(wp_set + 0x10);
-        /* Retail 2.1.0.0 ShootBullet: 0x51B9AE reads ftime2 at +C84,
-           0x51BD08 returns below 8; 0x51BD32 dispatches data3 at +CA8.
-           The global HOLD bit is set at 0x51B9B8. Never spend a synthetic
-           trigger-release while the native draw/reload cannot consume it. */
+
+
+
+
         in.native_cancel_ready = RD32(pwork + 0xC84) >= 8;
         if (g_b.a.gm_player_status &&
             region_end(g_b.a.gm_player_status) >= g_b.a.gm_player_status + 8 &&
@@ -5682,17 +5823,17 @@ static void fire_tick(int safe_gameplay)
             wmask = (LONG)RD32(g_b.a.pad_weapon);
             in.physical_down = (wmask && (status & wmask)) ? 1 : 0;
         }
-        /* PL_PAD_PRESS_WEAPON is an index into pressure[12], resolved at
-           runtime like the mask beside it. Read here so the write path never
-           touches an anchor it did not see through the gate. */
+
+
+
         if (g_b.a.pad_press_weapon) pidx = (LONG)RD32(g_b.a.pad_press_weapon);
         InterlockedExchange(&g_b.s_fire_index, pidx);
-        /* The witness. We are at the top of the tick, so what stands in these
-           two fields is what the Bluepoint layer decided AFTER our previous
-           tick's write - WS_Draw where our press was taken, WS_HolsterQuick
-           where it was refused. It is the only reading in this build that does
-           not come from us, and the whole point of it is that it disagrees
-           when we are wrong. */
+
+
+
+
+
+
         {
             LONG ws = RD32(g_b.a.player_pad + DG_PAD_WEAPON_STATE_OFFSET);
             LONG bs = RD32(g_b.a.player_pad + DG_PAD_BUTTON_STATE_OFFSET);
@@ -5786,13 +5927,13 @@ static void fire_tick(int safe_gameplay)
     }
 }
 
-/* Search upward for the stride and take the FIRST hit. An exact multiple of the
-   true stride validates just as well - it lands on every second joint, whose
-   matrices are equally real - so "best score" would happily return double the
-   answer. Lowest wins instead.
-   The floor of 0xC0 is not a guess: world, screen and inv_mat are three
-   FMATRIX at the head of DG_OBJ, ahead of anything a port would have touched,
-   so no smaller stride is possible. */
+
+
+
+
+
+
+
 static LONG find_stride(ULONGLONG objs, LONG n, ULONGLONG end,
                         LONG *score_out, LONG *tried_out)
 {
@@ -6006,10 +6147,10 @@ static void skel_probe_now(ULONGLONG arm, int required_for_ik)
         }
     }
 
-    /* MOTION_CONTROL.trans, the per-joint translation channel. adjust is
-       rotation only, so whether this one is live decides whether wrist position
-       has a direct route or has to be solved for. Answering it now is cheaper
-       than discovering it halfway through an IK. */
+
+
+
+
     mctrl = *(volatile ULONGLONG *)(ULONG_PTR)(arm + 0x08);
     if (plausible_ptr(mctrl)) {
         ULONGLONG t = *(volatile ULONGLONG *)(ULONG_PTR)(mctrl + 0x60);
@@ -6126,16 +6267,22 @@ static void arm_ik_now(ULONGLONG arm, const DG_BRIDGE_ARM_TARGET *target)
     }
     if (target->absolute_aim) {
         DG_AIM_SELECTION selection;
-        int valid = target->aim_write && target->aim_pair_id == target->pair_id &&
-            target->aim_stream_id == target->stream_id && target->aim_sample_seq &&
-            target->aim_sample_time > 0 && target->aim_arm == arm &&
-            g_b.a.gm_player_arm_body > 0x17df698 &&
-            dg_aim_capture_hand_selection(
-                (uintptr_t)(g_b.a.gm_player_arm_body - 0x17df698), arm, &selection) &&
-            selection.subobject == target->aim_subobject &&
-            selection.subobjs == target->aim_subobjs && selection.hand == target->aim_hand &&
-            selection.model == target->aim_model &&
-            selection.weapon_id == target->aim_weapon_id;
+
+        int valid = !(!target->aim_write) &&
+            !(target->aim_pair_id != target->pair_id) &&
+            !(target->aim_stream_id != target->stream_id) &&
+            !(!target->aim_sample_seq) &&
+            !(target->aim_sample_time <= 0) &&
+            !(target->aim_arm != arm) &&
+            !(g_b.a.gm_player_arm_body <= 0x17df698) &&
+            !(!dg_aim_capture_hand_selection(
+                (uintptr_t)(g_b.a.gm_player_arm_body - 0x17df698), arm, &selection)) &&
+            !(selection.subobject != target->aim_subobject) &&
+            !(selection.subobjs != target->aim_subobjs) &&
+            !(selection.hand != target->aim_hand) &&
+            !(selection.model != target->aim_model) &&
+            !(selection.weapon_id != target->aim_weapon_id);
+
         effective_target = *target;
         if (!valid) effective_target.hand_write = 0;
         if(target->position.enabled) {
@@ -6151,6 +6298,9 @@ static void arm_ik_now(ULONGLONG arm, const DG_BRIDGE_ARM_TARGET *target)
         effective_target=*target;effective_target.hand_write=0;target=&effective_target;
         memset(&g_b.free_right,0,sizeof g_b.free_right);
     }
+
+
+
     if (!target->hand_write) hand_command_clear();
 
     /* The recorder's game-side half starts truthful-empty every pass and
@@ -6187,6 +6337,9 @@ static void arm_ik_now(ULONGLONG arm, const DG_BRIDGE_ARM_TARGET *target)
         InterlockedExchange(&g_b.s_arm_ik_view[k],
                             f2l((float)target->wrist_view[k]));
     if (!target->write || target->weight <= 0.0) {
+
+
+
         arm_map_forget();
         return;
     }
@@ -6198,6 +6351,11 @@ static void arm_ik_now(ULONGLONG arm, const DG_BRIDGE_ARM_TARGET *target)
        ticks. The current hierarchy may still contain our previous adjust. */
     if (!g_b.arm_map_phase || arm != g_b.arm_map_arm ||
         objs != g_b.arm_map_objs || target->stream_id != g_b.arm_map_stream) {
+
+
+
+
+
         InterlockedIncrement(&g_b.c_arm_pairs_seen);
         arm_map_begin(arm, objs, target);
         return;
@@ -6257,6 +6415,9 @@ static void arm_ik_now(ULONGLONG arm, const DG_BRIDGE_ARM_TARGET *target)
     InterlockedExchange(&g_b.s_arm_map_stream, (LONG)target->stream_id);
 
     if (g_b.c_ticks <= g_b.arm_map_settle_until) {
+
+
+
         InterlockedIncrement(&g_b.c_arm_pairs_calibration);
         return;
     }
@@ -6567,13 +6728,13 @@ static void arm_ik_now(ULONGLONG arm, const DG_BRIDGE_ARM_TARGET *target)
             !arm_remove_cached_adjust(&g_b.pair_frame, point,
                                       g_b.arm_map_cached_adjust,
                                       clean_point)) goto refuse_pair;
-        /* The removal above is only honest if the hierarchy actually CARRIES
-           what it removes. If some engine path dropped our adjust_flag bits -
-           a walking animation branch is the suspect the 2026-08-20 probe
-           raised - the matrices are pure animation, the removal rotates the
-           recovered rest by the inverse of our own adjusts, and the solve
-           chases its own tail at up to 175 degrees per pair. Counted, not
-           assumed. */
+
+
+
+
+
+
+
         {
             ULONGLONG fl = *(volatile ULONGLONG *)(ULONG_PTR)(mctrl + 0x38);
             if ((fl & ((1ULL << 4) | (1ULL << 5))) !=
@@ -7089,21 +7250,21 @@ static void arm_ik_now(ULONGLONG arm, const DG_BRIDGE_ARM_TARGET *target)
                                     recoil_climb_rad(), &hand_stable))
                 have_hand = 0;
         }
-        /* The channel's reach (run 13, 2026-09-03). GV_NearExp4PV pulls the
-           shift SVECTOR towards zero along the SHORT ARC of the 4096-unit
-           turn, so a precompensated short past a half turn is folded before
-           it is pulled and the engine lands three quarters of a turn from
-           the ask: with the swing cap at 150 the hand asked (1820, 658,
-           1303), we wrote 2426 for the roll, the engine read it as -1670,
-           pulled it to -1253 and the hand sat 90 degrees from the published
-           one for whole episodes (278 dirty slot echoes, residual locked at
-           89.9). Nothing past 1536 units per component can be delivered in
-           one pull, so the triple is renamed to the second ZYX solution
-           when that fits and otherwise a nearby reachable adjust is chosen
-           (radial shortening jumped at alternate-chart boundaries). The
-           PROJECTED rotation is what is
-           stored as the command echo and published as the desired hand, so
-           the residual and the slot echo keep judging what actually left. */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
         if (have_hand) {
             double fitted[4], fraction = 1.0;
             g_b.rec_pair.flags |= DG_REC_PAIR_F_CHANNEL_PROJECT;
@@ -7151,6 +7312,9 @@ static void arm_ik_now(ULONGLONG arm, const DG_BRIDGE_ARM_TARGET *target)
             dg_ik_ps_precompensate(wanted_rot, DG_HAND_PULL_DIVISOR,
                                    command_rot) &&
             hand_command_publish(command_rot, target->pair_id)) {
+
+
+
             for (k = 0; k < 4; k++) g_b.hand_desired[k] = desired[k];
             g_b.hand_have_desired = 1;
             for (k = 0; k < 4; k++) {
@@ -7206,15 +7370,31 @@ static void arm_ik_now(ULONGLONG arm, const DG_BRIDGE_ARM_TARGET *target)
                 f2l((float)(hand_stable.wrist_twist_rad *
                             180.0 / 3.14159265358979323846)));
         } else {
+
+
+
             hand_command_clear();
             InterlockedIncrement(&g_b.c_arm_hand_refused);
         }
     } else {
+
+
+
         hand_command_clear();
     }
 
     if (InterlockedCompareExchange(&g_b.bent_joint, 0, 0) >= 0)
         arm_bend_release();
+    dg_bridge_right_model_arm_clear();
+    if(target->weight>=1.0) {
+        double wa[4],wb[4],u[3],f[3],a[3],b[3],c[3],elbow[3],wrist[3];
+        if(adjust_quat_to_world(&g_b.pair_frame,q4,wa) && adjust_quat_to_world(&g_b.pair_frame,q5,wb)) {
+            for(k=0;k<3;k++){u[k]=clean_point[3][k]-clean_point[2][k];f[k]=clean_point[4][k]-clean_point[3][k];}
+            arm_quat_rotate(wa,u,a);arm_quat_rotate(wa,f,b);arm_quat_rotate(wb,b,c);
+            for(k=0;k<3;k++){elbow[k]=point[2][k]+a[k];wrist[k]=elbow[k]+c[k];}
+            right_model_publish(base,stride,&g_b.pair_frame,target,q4,q5,recover_cached,elbow,wrist);
+        }
+    }
     mask = (1ULL << 4) | (1ULL << 5);
     for (j = 4; j <= 5; j++) {
         const double *src = (j == 4) ? q4 : q5;
@@ -7732,6 +7912,7 @@ done:
 static void pad_seam_tick(void)
 {
     action_update_boundary();
+    radial_pause_pad_tick();
     LONG bits, stamp, now;
     ULONGLONG rec;
 
@@ -7749,11 +7930,11 @@ static void pad_seam_tick(void)
     if (!InterlockedCompareExchange(&g_b.armed, 0, 0)) return;
     mod_menu_start_pad();
 
-    /* The OpenXR thread queues a rising edge; this seam is immediately after
-       the game's direct UpdatePad call.  Writing here gives full-screen
-       readers the direct record, while arming GV_PadPress[0] for the normal
-       record lets the gameplay pause path see the same one-shot on the next
-       UpdatePad pass. */
+
+
+
+
+
     if (InterlockedExchange(&g_b.start_pending, 0)) {
         InterlockedExchange64(&g_interact_codec_pending,0);
         int menu_only = InterlockedCompareExchange(&g_b.script_menu_only, 0, 0) != 0;
@@ -7993,6 +8174,7 @@ void dg_bridge_arm_seam_now(const DG_BRIDGE_ARM_TARGET *target)
 {
     ULONGLONG arm, objs, evm;
     LONG flag;
+    nikita_visual_release(); /* includes disarm, menu, loss and replacement */
 
     /* A pair is a one-seam publication. Clear it before every gate, including
        the disarmed path, so a recorder tap can never carry an older arm or
@@ -8105,9 +8287,9 @@ void dg_bridge_arm_seam_now(const DG_BRIDGE_ARM_TARGET *target)
     /* Reads only, and reads a slot nobody here writes - SetPos owns adjust[6].
        So it sits outside the three-way exclusion below rather than inside it. */
     hand_probe_read(arm);
-    /* All three are exclusive by design. The measurement, IK and fixed bend
-       write MOTION_CONTROL.adjust; whichever path is selected first releases
-       ownership left by the previous one before it writes. */
+
+
+
     if (reload_native_animation()) {
         arm_map_forget();arm_bend_release();left_arm_release();return;
     }
@@ -8121,6 +8303,11 @@ void dg_bridge_arm_seam_now(const DG_BRIDGE_ARM_TARGET *target)
         unsigned long left_before=g_left.accepted;
         memset(&g_hand_capture,0,sizeof g_hand_capture);
         arm_ik_now(arm, target);
+        /* Every tick, as in the tested Nikita-arm build: the lease is released
+           at the top of every seam, so an accepted-pair gate here dropped the
+           visual on each tick without a new pair. nikita_visual_apply keeps
+           its own write/hand/aim/position/owner guards. */
+        nikita_visual_apply(arm, target);
         left_arm_now(arm, target, g_b.c_arm_pairs_accepted != accepted_before);
         hand_profile_commit(target,g_b.c_arm_pairs_accepted != accepted_before &&
             g_left.active && g_left.accepted!=left_before && g_left.wrist_world_valid);
@@ -8146,9 +8333,9 @@ void dg_bridge_arm_seam_now(const DG_BRIDGE_ARM_TARGET *target)
     InterlockedAnd(&g_b.held_arm_flag_late, flag);
     if (!(flag & 0x1000)) InterlockedIncrement(&g_b.c_arm_visible_late);
 
-    /* Native CheckVWait2 hides the complete subjective arm object for None.
-       A successfully driven left arm still needs that object drawn. Keep the
-       existing explicit arm-show override, but do not require it for None. */
+
+
+
     if (!InterlockedCompareExchange(&g_b.arm_show, 0, 0) &&
         !left_arm_show_unarmed(arm, target)) return;
     WR32(objs + 0x58, (LONG)(flag & ~0x1000));
@@ -8873,6 +9060,12 @@ void dg_bridge_stats(DG_BRIDGE_STATS *out)
 }
 
 /* ====================================================== desk tests ======= */
+
+
+
+
+
+
 
 
 

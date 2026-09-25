@@ -80,11 +80,11 @@ static void m9_resolve(const LiveImage *im) {
     g_m9.base=im->base;g_m9.resolved=1;
     if(g_b.log)g_b.log("  M9: retail slide/shot/audio witnesses resolved (opt-in)\r\n");
 }
-/* WeaponEfInitObject caches root once. A cutscene/room can recreate the arm
- * while the equipped actor survives; its body/unit SLOTS are updated natively.
- * Re-prove current ownership through those slots instead of requiring that
- * constructor-time root to still name the current arm. Never repair game data.
- * Called under the seam's SEH guard; no old root pointer is dereferenced. */
+
+
+
+
+
 static int m9_current_owner(uint64_t arm,uint64_t ctrl,uint64_t objs) {
     uint64_t sub,actor,trigger,player,armobjs;
     if(!g_m9.subglobal || arm<0x60)return 0;

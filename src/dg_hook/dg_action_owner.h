@@ -8,6 +8,7 @@ typedef struct {
     int valid, down, denied, shutter_down, shutter_denied;
     float zoom_y;
     int zoom_active;
+    int psg_grip_zoom; /* +1 right/in, -1 left/out, both neutral */
 } DG_ACTION_SAMPLE;
 typedef struct {
     DG_ACTION_SAMPLE physical;

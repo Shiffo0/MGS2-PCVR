@@ -10,7 +10,7 @@
 #define DG_MOVE_PAD_UDLR        0x0000F000u
 #define DG_MOVE_ANALOG_L_USE    0x0004u
 #define DG_MOVE_ANALOG_R_USE    0x0002u
-#define DG_MOVE_GAME_MARGIN     32             /* get_analog_margin, BP build */
+#define DG_MOVE_GAME_MARGIN     32
 
 #define DG_MOVE_SUBJECT_MARGIN  49
 

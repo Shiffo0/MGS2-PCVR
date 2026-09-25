@@ -11,10 +11,10 @@ static int finite_ok(double v)
     return v == v && v <= 1.0e12 && v >= -1.0e12;
 }
 
-/* Would the game's own driver have called this pad "the player is moving"?
-   Exactly the driver's tests, with the driver's margin: AnalogStat and the
-   L_USE derivation both use ANALOG_MARGIN around 128, and the dpad is the
-   status bits themselves. */
+
+
+
+
 static int physically_moving(const DG_MOVE_IN *in)
 {
     int dx = (int)in->left_dx - 128;

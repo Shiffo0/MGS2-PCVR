@@ -1,6 +1,6 @@
-/* One owner of MT_SetMotionData's entry patch. Feature registration and
- * removal happen during bridge startup/shutdown, like the other detours.
- * Each callback retains its own live/context gates. */
+
+
+
 #define DG_MOTION_MOBILE 1u
 #define DG_MOTION_RELOAD 2u
 static void mobile_arm_pose(void *rsp);

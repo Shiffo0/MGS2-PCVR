@@ -28,15 +28,15 @@ static int due(unsigned long now, unsigned long deadline)
     return (long)(now - deadline) >= 0;
 }
 
-/* Is the configured pair usable at all?
- *
- * Three ways it is not, and each of them would do damage rather than nothing:
- * a zero bit writes no button while every counter says it did; equal bits mean
- * confirm and cancel are the same press; and a bit inside PAD_UDLR would make
- * "confirm" also move the cursor one step before committing - a menu that
- * picks the wrong entry every time. Outside the allowed set is refused too:
- * the marker exists to choose among the game's buttons, not to reach into the
- * rest of the status word. */
+
+
+
+
+
+
+
+
+
 static int config_ok(const DG_MENU_IN *in)
 {
     unsigned int both = in->confirm_bit | in->cancel_bit;

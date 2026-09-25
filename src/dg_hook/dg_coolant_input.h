@@ -1,8 +1,8 @@
 #ifndef DG_COOLANT_INPUT_H
 #define DG_COOLANT_INPUT_H
 #include <stdint.h>
-/* A one-consumer lease from the existing fire state machine. Never a trigger
- * override: JetSpray still applies its native timer, reload and stance gates. */
+
+
 typedef struct {
     uint64_t player,pad,press;
     unsigned tick,stream,mask;

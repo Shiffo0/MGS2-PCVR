@@ -64,8 +64,8 @@ static unsigned camera_pre_mask(const DG_ACTION_SAMPLE *p,unsigned raw,unsigned 
        !camera_inventory(&again)||again.player_identity!=in.actor ||
        again.actor_item!=in.item || again.desired_item!=in.desired_item ||
        !interact_read(NULL,manager+0xd0,&pad2,8)||pad2!=pad)goto step;
-    /* DIRECT_TICK(30) is either 25 or 30 in the verified helper.
-     * Require >=30 before native increments it; no wall-clock guess. */
+
+
     in.ready=state==0 && time>=30 && child!=0x80 && frames<=0;
     in.mask=mask;in.native_down=(raw&mask)!=0;
     in.pad_allowed=lease && !(flags&(0x103|0x1000|0x4000|0x30)) &&

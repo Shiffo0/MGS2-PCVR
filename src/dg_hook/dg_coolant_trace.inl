@@ -13,7 +13,7 @@ static unsigned coolant_n,coolant_drops;
 static DWORD coolant_last[3];
 static SRWLOCK coolant_lock=SRWLOCK_INIT;
 static unsigned coolant_pad_status(uint64_t pad) {
-    /* GV_PAD contains 32-bit fields; retail commonly places it at ...844. */
+
     if(pad>=0x10000 && pad<UINT64_C(0x00007fffffff0000) && !(pad&3) && region_end(pad)>=pad+8)
         return RD32(pad+4);
     return 0xffffffffu;

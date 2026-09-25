@@ -42,11 +42,11 @@ static int hand_observe_step(ULONGLONG arm,unsigned long stream,unsigned long lo
     g_hand_observe.left--;g_hand_observe.total++;return 1;
 }
 
-/* Work in the engine's quaternion frame. MT_ReversalMotion's x/w negation
-   is equivalent (q and -q represent the same rotation) to y/z negation.
-   Reflect relative finger rotations, preserving the independently tracked
-   right wrist. Remove only our prior per-joint adjustment before reading
-   native local rotations; ancestors are already present in the parent. */
+
+
+
+
+
 static void hand_pose_solve(const double right[18][4],const double pose[17][4],
                             const double previous[17][4],const double wrist[4],double out[17][4])
 {

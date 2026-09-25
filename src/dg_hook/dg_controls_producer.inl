@@ -11,13 +11,16 @@ typedef struct {
     dg_radial_view hand[2];
     int ids[2][8];
     uint64_t player, inventory;
-    int busy;
     int quick_id[2];
+    int busy, actor_item, thermal_owned;
+    uint64_t eligible_items;
 } DG_CONTROLS_CATALOG;
+#include "dg_thermal_input.inl"
 static SRWLOCK g_controls_fallback_lock=SRWLOCK_INIT;
 static int g_controls_turn_fallback;
 static struct {
     dg_radial_owner owner;
+    DG_THERMAL_INPUT thermal;
     DG_CONTROLS_CATALOG catalog;
     dg_radial_owner_input last_input;
     dg_radial_owner_output last_output;
@@ -73,6 +76,9 @@ static void controls_catalog_build(const dg_radial_game_catalog *native,int weap
     g_controls.catalog.available=1;g_controls.catalog.version=native->version;
     g_controls.catalog.player=native->player;g_controls.catalog.inventory=native->inventory;
     g_controls.catalog.busy=native->busy;
+    g_controls.catalog.actor_item=native->actor_item;
+    g_controls.catalog.thermal_owned=native->thermal_owned;
+    g_controls.catalog.eligible_items=native->eligible[1];
     for (h=0;h<2;h++) {
         int id=native->current[h]>0 ? 0:native->previous[h];
         g_controls.catalog.quick_id[h]=-1;
@@ -156,6 +162,7 @@ static void controls_stop(void *user) {
     dg_bridge_mod_menu_capture(0);
     dg_bridge_radial_cancel();
     g_controls.navigate_hand=0;
+    g_controls.thermal.armed=0;
     input_turn_rate(0.0);
     if (!g_controls.stopped) {
         g_controls.context++;
@@ -361,6 +368,19 @@ static void controls_route_frame(const DG_XR_FRAME *frame, int allowed,
                 frame->right_hand.thumbstick_x,frame->right_hand.thumbstick_y);
         g_controls.diagnostic_clicks=clicks;
     }
+    {
+        dg_radial_commit_intent intent;
+        int ready=radial && !special_allowed && generation &&
+            g_controls.catalog.available && !g_controls.catalog.busy &&
+            !g_controls.owner.axes && g_controls.owner.select.hand<0 &&
+            !owned.selection.intent && !owned.selection.quick && !owned.deny_new_fire &&
+            !dg_bridge_radial_paused() && !dg_bridge_psg_scope_active() &&
+            dg_radial_controls_equip_ready(&in,&owned);
+        if (thermal_input_step(&g_controls.thermal,frame,weapon_hand,ready,
+                now_ms,generation,g_controls.context,&g_controls.catalog,&intent))
+            dg_bridge_radial_offer(&intent,g_controls.catalog.player,
+                g_controls.catalog.inventory,1,now_ms);
+    }
     m9_sample_from_frame(frame,native_allowed && !special_allowed &&
         !(radial && (owned.deny_new_fire || !owned.route_valid)) &&
         !(frame && (frame->left_hand.primary_button || frame->left_hand.secondary_button ||
@@ -377,6 +397,16 @@ static void controls_route_frame(const DG_XR_FRAME *frame, int allowed,
         frame->left_hand.trigger_click || frame->left_hand.trigger_value>.1f ||
         frame->left_hand.squeeze_click)),
         now_ms,g_controls.context,&out->blade);
+    stinger_sample_from_frame(frame,native_allowed && generation &&
+        !(radial && (owned.deny_new_fire || !owned.route_valid)) &&
+        !(frame && (frame->left_hand.thumbstick_click || frame->right_hand.thumbstick_click ||
+          frame->left_hand.menu_button || frame->right_hand.menu_button)),
+        now_ms,g_controls.context,&out->stinger);
+    nikita_sample_from_frame(frame,native_allowed && !special_allowed && generation &&
+        !(radial && (owned.deny_new_fire || !owned.route_valid)) &&
+        !(frame && (frame->left_hand.thumbstick_click || frame->right_hand.thumbstick_click ||
+          frame->left_hand.menu_button || frame->right_hand.menu_button)),
+        now_ms,g_controls.context,&out->nikita);
     out->fire_available=fire_from_frame(frame,&out->fire);
     if (fire_idle && (!native_allowed || (radial && owned.deny_new_fire)))
         out->fire.valid=0;
@@ -403,6 +433,10 @@ static void controls_route_frame(const DG_XR_FRAME *frame, int allowed,
         routed.left_hand.thumbstick_x=routed.left_hand.thumbstick_y=0;
         movement=&routed;
     }
+    nikita_steer_sample(movement,
+        (native_allowed || allowed==DG_CONTROLS_TURN_ONLY) && !special_allowed && generation &&
+        !(radial && (owned.deny_new_fire || !owned.route_valid)),
+        now_ms,g_controls.context,&out->nikita_steer);
     out->move_available=move_from_frame(movement,&out->move);
     /* TURN_ONLY is "no first person held"; with the third-person walk on the
        walk command still travels - the bridge's move_tick decides. */
@@ -418,6 +452,10 @@ static void controls_route_frame(const DG_XR_FRAME *frame, int allowed,
             (!owned.route_valid || owned.deny_new_fire)),weapon_hand,
         g_controls.context*16u+(unsigned)weapon_hand*8u+
         (unsigned)(special_allowed?allowed:0),&out->interact);
+    /* Preserve the physical grip level so the native adapter blocks it until
+     * release, including leaving the ear zone or losing ownership mid-hold. */
+    if (g_controls.thermal.claim) out->interact.suppressed|=DG_IA_CAPTURE;
+
 }
 static int controls_menu_capture_allowed(int allowed) {
     /* Raw capture is retained for rearming, but its gameplay ownership ends
@@ -433,6 +471,7 @@ static void controls_provide(void *user, int allowed, int fire_idle,
     int have=input_get_frame(&frame)&1;
     int menu_capture;
     dg_radial_game_catalog native;
+    int closing_hand=g_controls.navigate_hand ? g_controls.navigate_hand-1:g_controls.owner.select.hand;
     int weapon_hand=(g_arm_track==ARM_TRACK_L_GRIP || g_arm_track==ARM_TRACK_L_AIM) ? 0:1;
     (void)user; (void)tick;
     mod_menu_input(allowed,have?&frame:NULL,generation,&mod_view);
@@ -469,6 +508,12 @@ static void controls_provide(void *user, int allowed, int fire_idle,
         (out->interact.suppressed&DG_IA_ACTION));
     InterlockedExchange(&g_camera_route_denied,
         menu_capture || (g_controls.owner.triggers&2u) || g_controls.owner.select.hand>=0);
+    dg_bridge_radial_feedback(view.visible,view.selected,view.kind,g_controls.context,
+        !view.visible && have && generation && allowed && closing_hand>=0 &&
+        g_controls.last_input.select.safe &&
+        !g_controls.last_input.select.primary[closing_hand] &&
+        !g_controls.last_input.select.primary[1-closing_hand] &&
+        !g_controls.last_input.select.trigger[1-closing_hand]);
     if(mod_view.visible)view=mod_view;
     /* Cancellation is a lock-free fence, not a best-effort hidden mailbox
      * publication. A contended backend must never retain the old visible UI. */

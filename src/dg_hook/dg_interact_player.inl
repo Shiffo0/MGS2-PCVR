@@ -10,7 +10,7 @@ static int interact_read(void *ctx,uint64_t address,void *dst,size_t n) {
     end=address+n;
     while (cursor<end) {
         uint64_t next;
-        if (!VirtualQuery((const void *)(ULONG_PTR)cursor,&mbi,sizeof mbi) ||
+        if (!dg_vq((const void *)(ULONG_PTR)cursor,&mbi) ||
             mbi.State!=MEM_COMMIT || (mbi.Protect&(PAGE_NOACCESS|PAGE_GUARD)) ||
             !(mbi.Protect&(PAGE_READONLY|PAGE_READWRITE|PAGE_WRITECOPY|
               PAGE_EXECUTE_READ|PAGE_EXECUTE_READWRITE|PAGE_EXECUTE_WRITECOPY))) return 0;

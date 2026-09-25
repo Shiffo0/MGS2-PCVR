@@ -1,6 +1,6 @@
-/* Version-locked BladeCheckAttack wrapper. Only its synchronous call sees the
- * shadow pad; native camera/movement/global PlayerPad never see swing axes.
- * Native animation, damage windows, hit tests and cooldowns remain in charge. */
+
+
+
 typedef void (__fastcall *DG_BLADE_ATTACK_FN)(void *);
 static DG_DETOUR g_blade_detour;
 static DG_BLADE_ATTACK_FN g_blade_original;

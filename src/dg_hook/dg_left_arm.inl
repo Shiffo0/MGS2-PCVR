@@ -58,9 +58,9 @@ static int left_owner(ULONGLONG *mc, ULONGLONG *adj)
     return plausible_ptr(*adj) && *adj == g_left.adjust &&
         region_end(*adj) >= *adj + 11 * 16;
 }
-/* Called only after the seam's fresh FPS/safety checks and left solve.
-   The native actor owns visibility again on its next update. This does not
-   alter ARM_INVISIBLE, weapon selection, or the general arm-show setting. */
+
+
+
 static int left_arm_show_unarmed(ULONGLONG arm, const DG_BRIDGE_ARM_TARGET *t)
 {
     ULONGLONG current = 0, mc, adj;
@@ -69,7 +69,7 @@ static int left_arm_show_unarmed(ULONGLONG arm, const DG_BRIDGE_ARM_TARGET *t)
         g_left.arm == arm && g_left.stream == left_calibration_stream(t) &&
         g_left.pair == t->pair_id && left_owner(&mc, &adj) &&
         resolve_player(&current, NULL, &weapon) == DG_RESOLVE_OK &&
-        current == arm && weapon == 0; /* WP_None */
+        current == arm && weapon == 0;
 }
 
 static void left_wrist_release(void)

@@ -12,4 +12,7 @@ typedef struct {
 void dg_bridge_model_arm_clear(void);
 void dg_bridge_model_arm_publish(const DG_MODEL_ARM *pose);
 int dg_bridge_model_arm_snapshot(DG_MODEL_ARM *pose);
+void dg_bridge_right_model_arm_clear(void);
+void dg_bridge_right_model_arm_publish(const DG_MODEL_ARM *pose);
+int dg_bridge_right_model_arm_snapshot(DG_MODEL_ARM *pose);
 #endif

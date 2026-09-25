@@ -61,8 +61,8 @@ static void mod_menu_pad(int safe) {
     if(!reload_native_animation())m9_block_pad(mask,index);
 }
 
-/* START is consumed earlier than player input, so fence both native records
-   at UpdatePad as well. This also consumes a queued XR pause, not defers it. */
+
+
 static void mod_menu_start_pad(void) {
     uint64_t records[2]={g_b.a.gv_pad_data_direct,g_b.a.gv_pad_data};int i;
     if(!g_mod_capture)return;

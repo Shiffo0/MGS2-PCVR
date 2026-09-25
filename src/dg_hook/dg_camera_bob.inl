@@ -1,17 +1,17 @@
-/* VR standing-camera height. Included after the bridge's guarded player walk.
- * Retail 2.1.0.0: CheckSubjectMoveCamera compares StandStill/StandRun at
- * 529914/529924 and uses control.hzx_base + 1500 at 529C4D. CONTROL starts
- * at player+60. CheckLevelHazard stores floor/ceiling at control+B0/B4 and
- * grounded at BA (72A50, 72A88). Use the collision floor, not animation Y.
- * No native player/camera memory is written and no height survives a frame.
- */
+
+
+
+
+
+
+
 static int camera_standing_height_read(ULONGLONG base, ULONGLONG player,
                                        float *height)
 {
     static const unsigned char actions[] = {
-        0x48,0x8d,0x0d,0x75,0x0e,0xff,0xff, /* StandStill = 51A790 */
+        0x48,0x8d,0x0d,0x75,0x0e,0xff,0xff,
         0x48,0x3b,0xc1,0x0f,0x84,0x29,0x03,0,0,
-        0x48,0x8d,0x0d,0xf5,0x3c,0x01,0, /* StandRun = 53D620 */
+        0x48,0x8d,0x0d,0xf5,0x3c,0x01,0,
         0x48,0x3b,0xc1,0x0f,0x84,0x19,0x03,0,0
     };
     static const unsigned char floors[] = {
@@ -29,9 +29,9 @@ static int camera_standing_height_read(ULONGLONG base, ULONGLONG player,
         return 0;
     action = *(const ULONGLONG *)(ULONG_PTR)(player+0xC60);
     if (action != base+0x51A790 && action != base+0x53D620) {
-        /* JetSpray/SetMic retain standing stance but own another action.
-           Match both action and weapon; demo mic and stance transitions
-           must retain their native camera collision/height behavior. */
+
+
+
         LONG weapon;
         static const unsigned char spray[] = {0x4c,0x8b,0xdc,0x57,0x41,0x54,0x41,0x55,
             0x48,0x81,0xec,0x90,0,0,0};

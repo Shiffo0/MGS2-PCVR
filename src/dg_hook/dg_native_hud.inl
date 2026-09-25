@@ -19,7 +19,7 @@ static void native_hud_life(void *rsp) {
         /* Level zero is the player's LIFE gauge; other levels include bosses/O2. */
         if(!gauge || *(short *)(ULONG_PTR)(gauge+0x24)!=0)return;
         prim=*(uint64_t *)(ULONG_PTR)(gauge+0x38);
-        if(prim)*(unsigned *)(ULONG_PTR)prim|=0x100; /* DG_InvisibleMenu2Prim */
+        if(prim)*(unsigned *)(ULONG_PTR)prim|=0x100;
     } __except(EXCEPTION_EXECUTE_HANDLER) { }
 }
 static void native_hud_frame(void *rsp) {

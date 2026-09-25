@@ -1,7 +1,7 @@
-/* EludeStart changes control.rot.vy, while the hanging horizon-limit flag
- * makes SetCamera retain camdir.vy. Bluepoint moving FPS clears WATCH and
- * therefore skips EludeStill's SubjectTurn. Read the actual ledge-facing
- * body heading for the render camera; never rewrite native actor state. */
+
+
+
+
 int dg_bridge_hanging_heading_now(double *heading)
 {
     uint64_t player;

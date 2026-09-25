@@ -1,11 +1,11 @@
 {
-  "version": "v0.3.5",
-  "build": "1007DD0B",
-  "binary_sha256": "1007DD0B6574DA6B8329F256BCB7EA17C293CA821741BB64BA6A7E4EDF73462C",
-  "base_version": "v0.3.4",
-  "gameplay_source_base": "64B10AA2",
-  "playtest_build": "30D7CA3C",
+  "version": "v0.4.0",
+  "build": "AEF2EC93",
+  "binary_sha256": "AEF2EC9304365DF292263C5041B10BDA6AC9EBA36884AF65BD72BF3DFE9D8A23",
+  "base_version": "v0.3.5",
+  "gameplay_source_base": "05F4F9F6",
+  "playtest_build": "05F4F9F6",
   "diagnostics_enabled": false,
   "source_profile": "player-only",
-  "headset_acceptance": "Not established for this rebuilt binary"
+  "headset_acceptance": "Gameplay code accepted on playtest build 05F4F9F6; not established for this rebuilt binary"
 }

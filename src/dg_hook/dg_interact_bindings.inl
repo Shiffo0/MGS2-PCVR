@@ -44,8 +44,8 @@ static void controls_interact_from_frame(const DG_XR_FRAME *frame,
         (off->squeeze_click?DG_IA_CAPTURE:0) |
         ((weapon_hand==0 ? left : right)->squeeze_click?DG_IA_CODEC:0);
     out->choke_seq=off->trigger_press_seq;
-    /* A normally toggles FPS, but Down disables native CheckWatch and needs
-       a face-button press. Deliver it as the same native recovery edge as X. */
+
+
     if (allowed==DG_IA_DOWNED_CONTEXT && right->primary_button)
         out->levels|=DG_IA_ACTION;
     out->ladder=allowed==DG_IA_LADDER_CONTEXT;
@@ -54,10 +54,10 @@ static void controls_interact_from_frame(const DG_XR_FRAME *frame,
     if (out->special==DG_IA_BEYOND_CONTEXT || out->special==DG_IA_LOCKER_CONTEXT)
         out->levels|=(left->squeeze_click?DG_IA_PEEP_LEFT:0) |
                      (right->squeeze_click?DG_IA_PEEP_RIGHT:0);
-    /* EludeMoveCheck consumes L2/R2 in both WATCH and third person.
-     * Ordinary walking bytes/dir are not valid in this native state.
-     * Keep grips authoritative (both grips still request a pull-up).
-     * The adapter requires neutral after entry, tracking loss or denial. */
+
+
+
+
     if (out->special==DG_IA_BEYOND_CONTEXT) {
         if (!(left->thumbstick_x>=-1.0f && left->thumbstick_x<=1.0f))
             out->valid=0;
@@ -77,5 +77,7 @@ static void controls_interact_from_frame(const DG_XR_FRAME *frame,
      * preventing a held grip from becoming a press on entering the ear zone. */
     if ((out->levels&DG_IA_CODEC) && !controls_codec_at_ear(frame,weapon_hand))
         out->suppressed|=DG_IA_CODEC;
+    if (!out->special && dg_bridge_psg_scope_active())
+        out->suppressed|=DG_IA_CAPTURE|DG_IA_CODEC;
     if (denied) out->suppressed=DG_IA_ALL;
 }

@@ -365,13 +365,13 @@ enum {
        name. The engine reconstructs the rotation asked for; only the triple
        differs. */
     DG_IK_PS_ALT_NAMING  = 1u << 4,
-    /* dg_ik_quat_to_ps_reach: neither naming fits inside the reach. out[] is
-       the primary triple and the engine WILL NOT reproduce it: GV_NearExp4PV
-       measures its way back to zero along the short arc of the turn, so a
-       precompensated short past a half turn is folded before it is pulled
-       and lands three quarters of a turn from the ask - the 90-degree hand
-       flips of run 13 (2026-09-03, 278 dirty slot echoes at swing cap 150).
-       dg_ik_ps_fit is the caller's way of never publishing this. */
+
+
+
+
+
+
+
     DG_IK_PS_UNREACHABLE = 1u << 5,
     /* dg_ik_ps_fit: the rotation was shortened along its own axis until a
        naming fit. out[] and fitted[] describe the shortened rotation, which
@@ -382,40 +382,40 @@ enum {
     DG_IK_PS_PROJECTED   = 1u << 7
 };
 
-/* The inverse of GM_RotToQuat: fills out[] with the three shorts that the
-   engine's own forward conversion turns back into q. Returns 1 on success, 0
-   with out[] zeroed if q is non-finite or is not a unit quaternion to within
-   1e-6 - a non-unit input is not a rotation, and normalising it silently would
-   turn a caller's bug into a plausible pose. *flags, when non-NULL, receives
-   the DG_IK_PS_* bits; it is written on failure too.
 
-   Accuracy. The three angles land on a grid of 2*PI/4096 radians, so each is
-   off by at most half a unit. Rotation angle is subadditive under composition,
-   and perturbing one factor of Rz Ry Rx by d changes the product by at most
-   |d| (conjugation preserves angle), so the round trip is out by at most
-   1.5 units = 3*PI/4096 rad = 0.132 degrees. When DG_IK_PS_VY_CLAMPED is set
-   the pitch error is a whole unit rather than half, giving 2 units = 0.176
-   degrees. That is the floor imposed by the storage format, not by this code.
 
-   out[1] is never 0, and that is deliberate rather than incidental. The engine
-   branches on it - `if (ArmCamRotateShift.vy != 0) GM_RotToQuat(...) else
-   GM_RotToQuatXAfterY(...)` - and the else branch is a different, two
-   degree-of-freedom conversion that forces quat.vy = 0. A vy that rounded to 0
-   would therefore not be a small angle, it would be a different function. It
-   is clamped to +/-1, about 0.088 degrees, which is far below anything visible
-   and keeps the full XYZ path. */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 int dg_ik_quat_to_ps_angles(const double q[4], short out[3], unsigned *flags);
 
 int dg_ik_ps_precompensate(const short want[3], int pull_divisor, short out[3]);
 
-/* How far a component can be after the engine's pull. The pull runs on the
-   SVECTOR as a 4096-unit angle: GV_NearExp4PV takes the way back to zero
-   along the short arc, so whatever short is written, the value the pull
-   starts from is inside a half turn, and after one pull of 1/D it is inside
-   (2047 - 2047/D). At D == 4 that is 1536 units, 135 degrees. Writing a
-   larger precompensated short does not reach further - it folds, and the
-   engine lands on the far side (run 13, 2026-09-03). pull_divisor <= 1 means
-   no pull, and the reach is the half turn itself. */
+
+
+
+
+
+
+
+
 int dg_ik_ps_reach_units(int pull_divisor);
 
 /* dg_ik_quat_to_ps_angles with the reach applied. Tries the primary naming,

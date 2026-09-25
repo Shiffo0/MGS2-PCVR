@@ -20,5 +20,8 @@ void dg_present_set_callback(void (*on_present)(IDXGISwapChain *sc));
 void dg_present_stats(long *presents, long *errors);
 /* Worker-only marker polling; exactly one opt-in attempt per DLL lifetime. */
 void dg_present_poll_state_probe(const char *marker);
+/* Diagnostic build only: GPU frame time from TIMESTAMP queries around each
+   Present (no DISJOINT/scope query). Prints and resets the window. */
+void dg_present_gpu_report(void (*log)(const char *fmt, ...));
 
 #endif

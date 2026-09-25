@@ -12,8 +12,10 @@
 #pragma comment(lib,"bcrypt.lib")
 #include "dg_draw_trial.h"
 #include "dg_draw_trial_core.h"
+#include "dg_context_trace.h"
 #include "dg_native_state_probe.h"
 #include "dg_native_state_layout.h"
+#include "dg_draw_observation.h"
 namespace {
 using Indexed=void(STDMETHODCALLTYPE*)(ID3D11DeviceContext*,UINT,UINT,INT);
 using Draw=void(STDMETHODCALLTYPE*)(ID3D11DeviceContext*,UINT,UINT);
@@ -32,6 +34,9 @@ void*volatile queryOwner=nullptr;
 void*volatile modernQueryOwner=nullptr;
 bool installed=false,everAttached=false,oldProtected=false;
 DWORD ownerThread=0;DrawTrial*pending=nullptr;unsigned polls=0,requestPresents=0;
+
+
+
 void(*logger)(const char*,...)=nullptr;
 thread_local bool inside=false;
 struct LifeLock{LifeLock(){AcquireSRWLockShared(&lifetime);}~LifeLock(){ReleaseSRWLockShared(&lifetime);}};
@@ -121,7 +126,136 @@ void restoreAll(){restoreForward();for(auto&s:sites)if(s.address&&!memcmp(s.addr
 
 
 bool forwardApi(void*api);
-template<class F>void intercept(ID3D11DeviceContext*c,F next,void*api,const char*kind,bool forwarded=false){
+bool mgDrawApi(void*api);
+bool initializedApi(ID3D11DeviceContext*c,void*api);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+template<class F>void intercept(ID3D11DeviceContext*c,F next,void*api,const char*kind,bool forwarded=false,UINT drawCount=0,bool indexedDraw=false,bool initialized=false,UINT firstIndex=0,INT baseVertex=0,bool plainOriginal=false){
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -173,25 +307,51 @@ template<class F> void blitForward(ID3D11DeviceContext*c,UINT n,UINT first,void*
 
 }
 void ui2dTraceDraw(ID3D11DeviceContext*,UINT,int);void ui2dOnDraw(ID3D11DeviceContext*,unsigned);void ui2dOnPresent();bool ui2dSkipDraw(ID3D11DeviceContext*,UINT); // dg_ui2d.inl
+bool ammoHideDraw(ID3D11DeviceContext*,UINT,UINT);void ammoOnDraw(ID3D11DeviceContext*,UINT,UINT);void ammoOnPresent();
 bool radarOnDraw(ID3D11DeviceContext*,UINT);void radarOnPresent(); // dg_radar.inl
 #include "dg_cb_probe.inl"
 #include "dg_mgshd_forward.inl"
 #include "dg_mgshd_draw.inl"
 void STDMETHODCALLTYPE indexed(ID3D11DeviceContext*c,UINT n,UINT first,INT base){
+
+
+
  ui2dOnDraw(c,0);            // 2D sprite placement per eye; idle unless vr_ui2d=1
  cbOnDraw(c,0,n,first,base); // read-only constant-buffer capture, idle unless armed
  void*api=(*(void***)c)[12];auto f=(Indexed)api;
  LONG route=forwardStatus();
+
+
+
+
+
+
+
  if(route==FORWARD_WAITING||route==FORWARD_BOUND||route==FORWARD_REJECTED||route==FORWARD_STOPPED){ // No outer locks.
-  NativeForwardScope scope;f(c,n,first,base);return;
+  NativeForwardScope scope;
+
+
+
+  f(c,n,first,base);
+
+
+
+  return;
  }
- intercept(c,[=](){f(c,n,first,base);},api,"DrawIndexed");
+ intercept(c,[=](){f(c,n,first,base);},api,"DrawIndexed",false,n,true);
 }
 void STDMETHODCALLTYPE draw(ID3D11DeviceContext*c,UINT n,UINT first){if(ui2dSkipDraw(c,n)){ui2dTraceDraw(c,n,1);return;} // previous-frame feedback in stereo: not forwarded
- ui2dOnDraw(c,1);cbOnDraw(c,1,n,first,0);
+ ammoOnDraw(c,n,first);
+ ui2dOnDraw(c,1);cbOnDraw(c,1,n,first,0);if(ammoHideDraw(c,n,first))return;
  if(radarOnDraw(c,n)){ui2dTraceDraw(c,n,2);return;} // wrist radar: the composite's texture is captured; with vr_radar_hud=off the draw is not forwarded. No lock held across it.
  ui2dTraceDraw(c,n,0);
- void*api=(*(void***)c)[13];auto f=(Draw)api;intercept(c,[=](){blitForward(c,n,first,api,[=](){f(c,n,first);});},api,"Draw");}
+ void*api=(*(void***)c)[13];auto f=(Draw)api;
+
+
+
+
+
+ intercept(c,[=](){blitForward(c,n,first,api,[=](){f(c,n,first);});},api,"Draw",false,n,false);}
 
 // Geometry-only trial: timing queries may include the extra draw duration.
 // Unknown descriptors/flags/context variants remain conservative refusals.
@@ -244,6 +404,7 @@ void*nearMemory(BYTE*site){SYSTEM_INFO info;GetSystemInfo(&info);uintptr_t cente
                               void bpForeign(void*,void*){}
 
 #include "dg_radar.inl"
+#include "dg_ammo_capture.inl"
 bool prepareSites(uint64_t base){
  const unsigned rvas[]={0x53bf4,0x53b75};const BYTE expected[2][10]={{0xff,0x50,0x60,0x48,0x8b,0x05,0x82,0x16,0x38,0x01},{0xff,0x50,0x68,0x48,0x8b,0x05,0x01,0x17,0x38,0x01}};
  for(unsigned i=0;i<2;i++){auto&s=sites[i];BYTE*address=(BYTE*)(ULONG_PTR)(base+rvas[i]);BYTE bytes[10];SIZE_T got=0;
@@ -266,6 +427,7 @@ extern "C" void dg_draw_trial_attach(ID3D11Device*d,void(*out)(const char*,...))
  if(!context||FAILED(context.As(&multi))){log("attach refused: serialization unavailable");ReleaseSRWLockExclusive(&lifetime);return;}
  // Preserve the host setting: enabling D3D protection causes stereo ghosting in headset A/B tests.
  oldProtected=multi->GetMultithreadProtected()!=FALSE;
+ dg_context_trace_emit(logger,"draw_attach",device.Get(),context.Get(),multi.Get(),DG_ENABLE_DIAGNOSTICS);
  if(logger)logger("draw_trial: thread protection preserved=%d forced=0; extra trial draw requires existing protection\r\n",oldProtected);
 
 
@@ -295,7 +457,54 @@ extern "C" void dg_draw_trial_attach(ID3D11Device*d,void(*out)(const char*,...))
 }
  ReleaseSRWLockExclusive(&lifetime);
 }
+extern "C" void dg_draw_trial_xr_ready(ID3D11Device*d,ID3D11DeviceContext*c){
+
+
+
+
+
+
+
+ (void)d;(void)c;
+
+}
 extern "C" void dg_draw_trial_poll(const char*marker){
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -325,15 +534,70 @@ extern "C" void dg_draw_trial_present(){
 
 
 
-LifeLock life; if(!installed || stopping)return; MultiLock lock; ui2dOnPresent(); radarOnPresent();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+LifeLock life; if(!installed || stopping)return; ammoOnPresent();MultiLock lock; ui2dOnPresent(); radarOnPresent();
 
 }
 extern "C" void dg_draw_trial_stop(){InterlockedExchange(&stopping,1);AcquireSRWLockExclusive(&lifetime);bool owned=sitesOwned();
  // Code sites remain forwarding-only until process exit. Unlike pointer slots,
  // ten instruction bytes cannot safely be restored amid concurrent execution.
- bpStop();wwRemove();restoreMgDraw();restoreForward();setForwardStatus(FORWARD_STOPPED);ui2dRemove();
+ ammoReset();bpStop();wwRemove();restoreMgDraw();restoreForward();setForwardStatus(FORWARD_STOPPED);ui2dRemove();
  for(auto&h:hooks)if(h.slot&&*h.slot==h.ours)writeSlot(h,h.ours,h.next);
  installed=false;
+
+
+
 
 
 
@@ -411,6 +675,12 @@ extern "C" void dg_ui2d_hold(int mode){InterlockedExchange(&ui2dCfg.hold,mode<0?
 extern "C" void dg_ui2d_gameplay(int allowed){
  if(!allowed)InterlockedIncrement(&ui2dSceneEpoch);
  InterlockedExchange64(&ui2dSceneSample,((LONG64)GetTickCount()<<1)|(allowed?1:0));
+
+
+
+
+
+
 }
 extern "C" int dg_ui2d_last_frame_sign(void){return (int)InterlockedCompareExchange(&ui2dLastFrameSign,0,0);}
 // Camera seam (VEH): |NDC x of straight-ahead| of the frustum submitted to the headset.
@@ -435,3 +705,4 @@ extern "C" void dg_radar_stats(char*out,size_t n){
 }
 
 extern "C" void dg_blit_boundary_control(const char*dir,int active,unsigned mark,unsigned present,int eye){LifeLock life;if(!stopping)bpControl(dir,active,mark,present,eye);}
+

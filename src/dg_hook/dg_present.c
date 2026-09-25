@@ -255,11 +255,148 @@ static HRESULT STDMETHODCALLTYPE hook_create_sc(
     return hr;
 }
 
+/* ---- GPU frame timer (diagnostic build only, 2026-09-25) ----
+ * One TIMESTAMP query right after Present returns (frame start) and one
+ * right before the next Present is forwarded (frame end, after the XR
+ * capture callback). Busy = end - start on the GPU clock; period = end - end.
+ * Only TIMESTAMP queries: no DISJOINT or other scope query, so the draw-trial
+ * query policy ("event and timestamp are allowed") is unaffected. The GPU
+ * tick rate comes from QPC over >= 2 s. Results are read with DONOTFLUSH in
+ * submission order; a full ring skips a frame, it never waits. The queries
+ * live for the process lifetime. */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+void dg_present_gpu_report(void (*log)(const char *fmt, ...)) { (void)log; }
+
+
 static HRESULT STDMETHODCALLTYPE hook_present(IDXGISwapChain *sc,
                                                UINT sync, UINT flags) {
     PRESENT_FN next;
     void (*callback)(IDXGISwapChain *);
     LONG count;
+
+
+
     InterlockedIncrement(&g_active);
     if (g_active_event) ResetEvent(g_active_event);
     next = g_present;
@@ -305,12 +442,18 @@ static HRESULT STDMETHODCALLTYPE hook_present(IDXGISwapChain *sc,
 
         if (!(flags & DXGI_PRESENT_TEST)) dg_draw_trial_present();
         if (callback) callback(sc);
+
+
+
         g_inside_present = 0;
     } else {
         InterlockedIncrement(&g_error_count);
     }
     if (next) {
         HRESULT hr = next(sc, sync, flags);
+
+
+
         if (InterlockedDecrement(&g_active) == 0 && g_active_event)
             SetEvent(g_active_event);
         return hr;

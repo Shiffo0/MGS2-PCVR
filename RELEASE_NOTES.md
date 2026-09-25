@@ -1,27 +1,32 @@
-# MGS2 PCVR v0.3.5
+# MGS2 PCVR v0.4.0
 
-## Changes since v0.3.4
+## Huge performance increase in VR
 
-- **Game Over controls:** the displayed Continue screen accepts controller navigation and confirmation even when a scripted failure leaves cutscene flags set. The preceding death sequence stays blocked, and queued input is discarded when the screen closes. Addresses [issue #4](https://github.com/Shiffo0/MGS2-PCVR/issues/4).
-- **HUD and cutscenes:** VR HUD placement stops during cutscenes and stale gameplay states, restores the original GPU constants, and resumes when gameplay returns. The texture filter preserves eligible third-person HUD elements while excluding the scene image.
-- **Coolant spray:** a held trigger reaches the native spray handler after the game's pad processing; release and stale input cancel the handoff.
-- **Coolant and directional microphone:** standing movement and independent turning are supported, with corrected standing camera height and shoulder anchoring. Crouch, prone and scripted microphone actions retain their native behavior.
-- **USP/SOCOM reload:** reload and mobile-tool motion now share their hook so one feature no longer prevents the other from installing. Native ammunition bookkeeping and reload timing are preserved.
-- **Hand attachment:** improves selection of verified rigid weapon attachments, including the HF Blade, when the draw matrix lags behind the tracked hand.
-- **Player build and mod source:** development recording, measurement output and optional GPU probes are excluded. The corresponding mod source includes the shipping dependency closure, without the removed measurement branches, unused measurement helpers or private source-reference comments. Bounded startup/error logging remains.
+The mod checked memory validity with a Windows system call before almost every read of game state. In VR stereo those checks consumed most of the game thread's time, which kept the game below 60 frames per second even though the GPU was largely idle. The mod now remembers recent answers for a few milliseconds and falls back to a full check whenever an answer is missing, negative or expired.
 
-Retains v0.3.4 persistent wrist alignment, SteamVR support, unlimited sessions and swapchain resize recovery. AER still alternates eyes; this release does not claim to fix all stereo ghosting or animation-speed problems.
+On the maintainer's PC (Meta Quest 3, 4K render resolution, stereo), the playtest build of this code went from 43–56 fps with frame spikes of 33–50 ms to a steady 60 fps. Flat and mono modes also benefit. Results on other PCs will vary.
+
+## Other changes since v0.3.5
+
+- **PSG-1 / PSG-1T:** in the first-person scope, hold the **right grip** to zoom in and the **left grip** to zoom out; zoom continues while the grip is held. The shot stays aimed with your head.
+- **Nikita:** the launcher sits in your VR hand. Hold the **right grip** to open the native Nikita sight and fire with the trigger, then steer the missile with the left stick. Firing no longer leaves the trigger or the menu blocked afterwards.
+- **Stinger:** the launcher stays in your hand instead of opening in the zoomed view. Holding the **right grip** opens the sight. The sight and lock-on have not been verified in the headset yet.
+- **Thermal goggles (experimental):** with the goggles in your inventory, press the left grip with your left hand near your left ear to toggle them. This has not been validated in the headset.
+- **Fire handling:** a trigger action the game does not accept is now abandoned after a short time instead of blocking later input.
+- **Player build and mod source:** development measurements, recording and weapon diagnostics are excluded. Comments that named internal game functions have been removed from the mod source.
+
+Retains v0.3.5 Game Over recovery, HUD/cutscene handling, persistent wrist alignment, SteamVR support and unlimited sessions. AER still alternates eyes.
 
 ## Installation and limitations
 
 Extract the mod ZIP beside the game executable with the game closed. Back up your existing mod files first. Keep `dg_hand_calibration.bin` to preserve your wrist alignment.
 
-The Tanker chapter remains the focus. Plant/Raiden, hanging and grenades retain the limitations described in the README. The previously reported first-person locker-entry problem remains unverified; use Third Person if affected. A full campaign regression and headset acceptance for this rebuilt release are not claimed.
+The Tanker chapter remains the focus. Plant/Raiden, hanging and grenades retain the limitations described in the README. A full campaign regression is not claimed.
 
 ## Build
 
-This release is rebuilt from the 64B10AA2 gameplay source used by the 30D7CA3C playtest build, with publication-source cleanup. It is a new binary, **1007DD0B**, not the previously installed 30D7CA3C.
+The maintainer played and accepted this gameplay code on a playtest build (05F4F9F6): PSG-1 zoom, Nikita arm, firing, steering and menu, the Stinger in hand, and 60 fps in stereo. This release is **AEF2EC93**, a new binary rebuilt from that source after removing the development code. The rebuilt binary itself has not been tested in a headset.
 
-Release-profile, XR and GPU/HUD checks passed. Private test harnesses and development results are not included in the download or mod-source tree.
+The release-profile, XR runtime, HUD/cutscene and GPU checks passed on the published source. Private test harnesses and development results are not included.
 
-Binary SHA256: `1007DD0B6574DA6B8329F256BCB7EA17C293CA821741BB64BA6A7E4EDF73462C`.
+Binary SHA256: `AEF2EC9304365DF292263C5041B10BDA6AC9EBA36884AF65BD72BF3DFE9D8A23`.

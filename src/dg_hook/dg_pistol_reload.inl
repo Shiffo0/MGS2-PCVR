@@ -94,12 +94,12 @@ static void reload_start(void *rsp) {
     }
     ReleaseSRWLockExclusive(&g_reload_lock);
 }
-/* GM_ConfigObjectAction entry: RCX=object, EDX=layer, R8D=motion,
- * R9D=start in 1/300s; sixth argument (blend) is at original RSP+0x30.
- * Frame 46 = 230 ticks. Keep it strictly BEFORE native refill at 47*5.
- * SetMotion seeks all pose channels and initializes last_check_time itself;
- * do not write play_time, completion flags, ammo or animation event clocks.
- * The native frame-48 magazine drop and later insertion remain intact. */
+
+
+
+
+
+
 #define RELOAD_START_TICKS (46*5)
 static void reload_motion(void *rsp) {
     uint64_t *r=(uint64_t *)rsp-16,caller;int layer,selected=0;

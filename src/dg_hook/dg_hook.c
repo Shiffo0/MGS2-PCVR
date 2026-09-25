@@ -1,28 +1,28 @@
 #include "dg_build_profile.h"
-/* dg_hook.asi - the in-process camera hook.  Closes S2.
- *
- * S2 (plan 2.12) proved an external write reaches the renderer but cannot be
- * *ordered* against it: we won most frames and flickered on the rest. 2.13
- * located the writer - DG_Chanls[0]'s camera is produced by the function at
- * RVA 0x85A80, whose caller resumes at 0x85FA4, and every one of the thirteen
- * camera matrices is final by the time control reaches that address.
- *
- * The camera uses a hardware *execution* breakpoint at 0x85FA4. It runs
- * on the game's own thread, synchronously, inside the frame, after the camera
- * is written and before any consumer in 2.7's list reads it - the PHASE_FIRST
- * semantics of 2.7 without needing to locate DG_AddPlugin.
- *
- * A second, signature-gated breakpoint suppresses only the fullscreen
- * previous-frame blur alpha during VR stereo (see dg_scene_blur.h).
- * These camera/blur hooks patch no .text and allocate no trampoline. The
- * separately implemented game-thread bridge does use its own detours.
- * No game file is changed by these hooks. The retail .text lives under a
- * Steam DRM wrapper (the .bind section), so the two narrow synchronous
- * interventions use execution breakpoints instead of code patches.
- *
- * Disarm restores the debug registers and the game's own camera returns on the
- * next frame. Deleting the marker file disarms within a second.
- */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -69,6 +69,7 @@
 #include "dg_rec.h"                     /* F8: flight recorder, replayed at a desk */
 #include "dg_weapon_aim.h"
 #include "dg_aim_capture.h"             /* optional coherent camera/weapon observation */
+
 #include "dg_aim_target.h"
 #include "dg_xr_script.h"
 #include "dg_script_gate.h"
@@ -480,6 +481,7 @@ static int camera_gate_now(DG_CAMERA_GATE *out)
 
 static void camera_pass_begin(void)
 {
+    dg_bridge_psg_camera(NULL);
     InterlockedExchange(&g_camera_telemetry_valid, 0);
     g_aim_camera.valid = 0;
 }
@@ -510,6 +512,12 @@ static void logf_(const char *fmt, ...) {
         n = (int)strlen(buf);
         cut = 1;
     }
+
+
+
+
+
+
 
     {
         static volatile LONG lines;
@@ -812,9 +820,19 @@ static int handoff_read(DG_HOOK_HANDOFF *out) {
 #include "dg_render_link.inl"
 #include "dg_stereo_phase_probe.inl"
 #include "dg_zoom_projection.h"
-static DG_ZOOM_PROJECTION g_zoom_projection;
+static DG_ZOOM_PROJECTION g_zoom_projection,g_psg_projection;
 static double g_zoom_last_gain=1;
 static uint64_t g_zoom_last_identity;
+/* Pure producer used by the live seam and desk checks. Eye/controller data
+   are deliberately absent from the calculation, including fallback renders. */
+static int psg_head_camera(const MAT *base, const POSE *offset,
+                           const DG_XR_FRAME *frame, MAT *out) {
+    POSE hp=*offset; MAT d,di;
+    hp.yaw+=frame->head.yaw;hp.pitch+=frame->head.pitch;hp.roll+=frame->head.roll;
+    hp.tx+=frame->head.tx;hp.ty+=frame->head.ty;hp.tz+=frame->head.tz;
+    build_delta(&d,&di,&hp);mat_mul(out,&di,base);
+    return camera_rigid_valid(out);
+}
 /* ------------------------------------------------------------ the hook --- */
 
 #define M(off) ((MAT *)(g_chan0 + (off)))
@@ -822,6 +840,7 @@ static uint64_t g_zoom_last_identity;
 /* Runs on the game's thread with the camera complete and nothing having read
    it yet. Convention is settled bitwise (2.12): eye_pers = eye_inv * pers. */
 static void apply_transform(void) {
+    dg_bridge_psg_camera(NULL);
     /* Raw gameplay context closes this before theater's display hysteresis.
        No D3D calls here: restoration belongs to the next native draw. */
     dg_ui2d_gameplay(g_armed && g_source==SRC_XR && g_stereo &&
@@ -1031,9 +1050,9 @@ static void apply_transform(void) {
         }
     }
 
-    /* Moving FPS skips native hanging SubjectTurn. Align only the local
-       render base with the actual ledge-facing actor; tracked head motion
-       is still applied below and the native camera/cache remain untouched. */
+
+
+
     if (g_source == SRC_XR) {
         double heading=0;
         int hanging=dg_bridge_hanging_heading_now(&heading);
@@ -1077,9 +1096,12 @@ static void apply_transform(void) {
         dg_proj_retarget(pers_no_offset, &old_fov, &new_fov);
         {
             uint64_t identity=0;float angle=0;
-            int valid=g_source==SRC_XR && dg_bridge_zoom_now(&identity,&angle);
+            int psg=g_source==SRC_XR && dg_bridge_psg_zoom_now(&identity,&angle);
+            int valid=!psg && g_source==SRC_XR && dg_bridge_zoom_now(&identity,&angle);
             double gain=dg_zoom_projection_step(&g_zoom_projection,identity,valid,angle,
                 fabs((double)base_pers.m[0][0]),fabs((double)base_pers.m[1][1]),g_stereo,eye_idx);
+            double psg_gain=dg_psg_projection_step(&g_psg_projection,identity,psg,angle,g_stereo,eye_idx);
+            if(psg)gain=psg_gain;
             dg_zoom_projection_apply(pers,gain);dg_zoom_projection_apply(pers2,gain);
             dg_zoom_projection_apply(raise_pers,gain);dg_zoom_projection_apply(raise_pers2,gain);
             dg_zoom_projection_apply(pers_no_offset,gain);
@@ -1101,6 +1123,14 @@ static void apply_transform(void) {
 
     mat_mul(&n_eye_inv, &base_eye_inv, &d);     /* eye_inv' = eye_inv * D    */
     mat_mul(&n_eye, &d_inv, &base_eye);         /* eye'     = D^-1  * eye    */
+    /* Rebuild the central head camera even when rendering falls back to a
+       per-eye pose. Never publish eye separation or controller orientation. */
+    if (g_source == SRC_XR && (probe_frame_flags & 1)) {
+        MAT central;
+        if (psg_head_camera(&base_eye, &g_pose, &frame, &central))
+            dg_bridge_psg_camera(central.m);
+    }
+
     if (eye_shift) {
         stereo_eye_shift(&n_eye, &n_eye_inv, eye_idx, eye_half,
                          (int)InterlockedCompareExchange(&g_stereo_eye_x_sign, 0, 0));
@@ -1936,8 +1966,8 @@ static unsigned long arm_left_calibration_stream(void)
 
 static int arm_absolute_prepare(DG_AIM_SELECTION *selection)
 {
-    if (!g_aim_camera.valid ||
-        (g_arm_track != ARM_TRACK_R_GRIP && g_arm_track != ARM_TRACK_R_AIM)) return 0;
+    if ((!g_aim_camera.valid) ||
+        ((g_arm_track != ARM_TRACK_R_GRIP && g_arm_track != ARM_TRACK_R_AIM))) return 0;
 
 
 
@@ -1947,10 +1977,10 @@ static int arm_absolute_prepare(DG_AIM_SELECTION *selection)
 
 
 
-    if (!dg_aim_capture_hand_selection((uintptr_t)g_base,
-                                     g_aim_camera.gate.arm_body, selection)) return 0;
-    if(selection->weapon_id==13 && !dg_bridge_blade_enabled())return 0;
-    if(selection->weapon_id==7 && !dg_bridge_stinger_enabled())return 0;
+    if ((!dg_aim_capture_hand_selection((uintptr_t)g_base,
+                                     g_aim_camera.gate.arm_body, selection))) return 0;
+    if((selection->weapon_id==13 && !dg_bridge_blade_enabled()))return 0;
+    if((selection->weapon_id==7 && !dg_bridge_stinger_enabled()))return 0;
     if (g_absolute_stream != g_arm_pose_stream_id ||
         g_absolute_camera != g_aim_camera.gate.camera ||
         memcmp(selection, &g_absolute_selection, sizeof *selection)) {
@@ -2342,6 +2372,18 @@ static int arm_pose_target(DG_BRIDGE_ARM_TARGET *target)
         absolute_aim_step(&g_absolute_state, ai, ao);
         g_absolute_record.present = 1;
         target->aim_write = ao->write;
+
+
+
+
+
+
+
+
+
+
+
+
         if (!target->aim_write) target->hand_write = 0;
         memcpy(target->aim_world, ao->pose.quat, sizeof target->aim_world);
         target->aim_weight = ao->pose.weight;
@@ -2572,6 +2614,7 @@ static void action_from_frame(DG_ACTION_SAMPLE *out) {
     out->sample=l->grip.sample_seq;out->down=l->primary_button!=0;
     out->shutter_down=r->trigger_click!=0;
     out->zoom_y=r->thumbstick_y;out->zoom_active=r->thumbstick_active!=0;
+    out->psg_grip_zoom=(r->squeeze_click!=0)-(l->squeeze_click!=0);
     out->shutter_denied=InterlockedCompareExchange(&g_camera_route_denied,0,0)!=0;
     out->age_ms=l->grip.pose_age_ms>r->grip.pose_age_ms?l->grip.pose_age_ms:r->grip.pose_age_ms;
     out->valid=out->sample && out->sample==r->grip.sample_seq && l->grip.active && r->grip.active &&
@@ -2581,6 +2624,8 @@ static void action_from_frame(DG_ACTION_SAMPLE *out) {
 }
 #include "dg_m9_input.inl"
 #include "dg_blade_input.inl"
+#include "dg_stinger_input.inl"
+#include "dg_nikita_input.inl"
 #include "dg_mod_menu_input.inl"
 #include "dg_controls_producer.inl"
 #include "dg_controls_cleanup.inl"
@@ -4975,6 +5020,12 @@ static void log_bridge_summary(const char *when) {
 
 
 
+
+
+
+
+
+
 }
 
 /* One armed session: wait for a live camera, arm, run, disarm. Returns the
@@ -5997,9 +6048,9 @@ static void on_present_body(IDXGISwapChain *sc) {
     }
 
     dg_bridge_screen_seam_now();
-    /* The title/start screens keep Present running but pause the camera and
-       gameplay seams.  Consume the XR menu rising edge here so the pad seam
-       can publish START on the next UpdatePad pass. */
+
+
+
     start_command();
     screen = dg_bridge_theater_verdict();
 
@@ -6018,7 +6069,7 @@ static void on_present_body(IDXGISwapChain *sc) {
         if (InterlockedCompareExchange(&g_script_menu_active, 0, 0))
             have = 0; /* Incidental title/intro camera visits are not gameplay. */
     }
-    if (have) {
+    if (have || dg_bridge_radial_context_held()) {
         InterlockedExchange(&g_flat_silent, 0);
     } else if (armed && (stereo || g_source == SRC_SCRIPT)) {
         if (InterlockedCompareExchange(&g_flat_silent, 0, 0) <
@@ -6074,7 +6125,7 @@ static void on_present_body(IDXGISwapChain *sc) {
         int raw_special=(armed && !flat && !screen &&
             !InterlockedCompareExchange(&g_script_menu_active,0,0)) ?
             dg_bridge_controller_special_now():0;
-        int raw_radial=armed && !flat && !screen &&
+        int raw_radial=armed && (dg_bridge_radial_context_held() || (!flat && !screen)) &&
             !InterlockedCompareExchange(&g_script_menu_active,0,0) &&
             dg_bridge_controller_radial_now();
         dg_bridge_action_context(action_present_allowed(armed,flat,
@@ -6086,6 +6137,7 @@ static void on_present_body(IDXGISwapChain *sc) {
         controller_context_publish_all(
             controller_camera_context(camera_now,raw_gameplay,GetTickCount()),
             controller_camera_context(camera_now,raw_special,GetTickCount())?raw_special:0,
+            (dg_bridge_radial_context_held() && raw_radial && !g_buttons_start_block) ||
             controller_camera_context(camera_now,raw_radial,GetTickCount()));
         if (g_source==SRC_XR) {
             int toggle=dg_xr_controller_toggle_take();
@@ -6351,7 +6403,7 @@ static DWORD WINAPI worker(LPVOID unused) {
     logf_("\r\n=== dg_hook ready ===\r\n"
           "  module base   %016llX\r\n"
           "  hook          %016llX (rva 0x%llX)\r\n"
-          "  DG_Chanls[0]  %016llX\r\n"
+          "  render channels[0]  %016llX\r\n"
           "  waiting for %s\r\n",
           g_base, g_hook_addr, HOOK_RVA, g_chan0, MARKER);
 
@@ -6480,6 +6532,67 @@ static DWORD WINAPI worker(LPVOID unused) {
         }
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

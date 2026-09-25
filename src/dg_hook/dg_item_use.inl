@@ -1,6 +1,6 @@
-/* Serialized with the radial producer/native change seam. UseItem reads only
-   current(+94) and pad(+38); a private request frame avoids opening/mutating
-   the native menu. Inventory, healing and counters remain native-owned. */
+
+
+
 #include "dg_item_use_retail.h"
 static struct {
     int pending;

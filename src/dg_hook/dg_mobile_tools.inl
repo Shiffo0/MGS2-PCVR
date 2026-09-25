@@ -1,6 +1,6 @@
-/* Retail 2.1.0.0 mobile tools. Keep JetSpray/SetMic, their trigger, reload,
- * stance transitions and native attached actors. Only standing VR presentation
- * and locomotion are adapted. No weapon type table or action pointer writes. */
+
+
+
 static struct {
     uint64_t base;
     int resolved, live;
@@ -25,8 +25,8 @@ static int mobile_standing(int weapon,uint64_t action,uint64_t base,
     return mobile_action(weapon,action,base) && stance==0 && transition==0 && grounded==1;
 }
 static int mobile_pose(int weapon,int motion) {
-    /* PAspr_ready/PAspr_fire/PAmic_ready -> PAm9_ready. Empty/reload,
-       crouched and shared animation events retain their original motion. */
+
+
     if((weapon==14 && (motion==40 || motion==42)) ||
        (weapon==12 && motion==43))return 2;
     return motion;
@@ -58,8 +58,8 @@ static int mobile_context(uint64_t expected,uint64_t *player_out,int *weapon_out
     if(pad!=g_b.a.player_pad || region_end(pad)<pad+48 || !RD32(pad-4))return 0;
     *player_out=player;*weapon_out=weapon;return 1;
 }
-/* Entry to ActSubjectStanceControl: changing only its standing animation
- * argument preserves native crouch/stand input, transition state and return. */
+
+
 static void mobile_stance(void *rsp) {
     uint64_t *regs=(uint64_t *)rsp-16,player,table;int weapon;
     if(!mobile_context(regs[13],&player,&weapon)){g_mobile_tools.pose_arm=0;return;} /* RCX */
@@ -93,11 +93,11 @@ static void mobile_arm_pose(void *rsp) {
         g_mobile_tools.pose_weapon=weapon;InterlockedIncrement(&g_mobile_tools.poses);
     }
 }
-/* ArmAction has selected a camera-offset table and tool-specific index, but
- * has not read the vector yet. Pistol animation requires the corresponding
- * pistol root offset: leaving CS_SPRAY/CS_MIC raises the shoulders hundreds
- * of units. Change only this invocation's index and wrist rotation selector.
- * No table/global offset writes; native wall proximity and smoothing follow. */
+
+
+
+
+
 static int mobile_anchor_index(int weapon,int index,uint64_t table,uint64_t base,
                                unsigned trigger,int rotation) {
     int wall=(trigger&0x20u)!=0;
@@ -121,7 +121,7 @@ static void mobile_arm_anchor(void *rsp) {
         !(weapon==14 && *(unsigned char *)(uintptr_t)(player+0xcf0)==2)) ||
        !mobile_anchor_index(weapon,(int)regs[10],regs[11],g_mobile_tools.base,
                             (unsigned)regs[8],(int)regs[14]))return;
-    /* RBP=CS_SOCOM; RAX=RTS_NONE. Native code scales RBP by 16 afterward. */
+
     regs[10]=3;regs[14]=0;InterlockedIncrement(&g_mobile_tools.anchors);
 }
 typedef void (__fastcall *MOBILE_NATIVE_TURN)(uint64_t);
@@ -146,9 +146,9 @@ static void mobile_turn(uint64_t player,unsigned fallback) {
         ((MOBILE_NATIVE_TURN)(uintptr_t)(b+fallback))(player);return;
     }
     pad=*(uint64_t *)(uintptr_t)(player+0xd00);
-    /* The native turn sees a private left-neutral pad; native movement then
-       sees the untouched original. CheckStep/hazard processing runs afterward.
-       FLAG2_SUBJECT_MOVE is cleared by the native player every frame. */
+
+
+
     mobile_apply(player,pad,(MOBILE_NATIVE_TURN)(uintptr_t)(b+0x53e180),
                            (MOBILE_NATIVE_TURN)(uintptr_t)(b+0x53deb0));
 }

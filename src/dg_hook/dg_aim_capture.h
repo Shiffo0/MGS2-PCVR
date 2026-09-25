@@ -14,6 +14,17 @@ typedef struct {
 int dg_aim_capture_hand_selection(uintptr_t image_base, uint64_t expected_arm,
                                 DG_AIM_SELECTION *selection);
 
+/* Nikita keeps native player-body ownership outside FPS aim. This separate
+   witness admits only the measured one-piece launcher and its two objects.
+   No trigger, camera, inventory or game-memory writes occur here. */
+typedef struct {
+    uint64_t player, actor, arm, body, body_objs, arm_objs;
+    uint64_t native_root, hand, normal_object, normal_objs, normal_model;
+    uint64_t subject_object, subject_objs, subject_model, normal_root;
+} DG_NIKITA_BINDING;
+int dg_aim_capture_nikita_binding(uintptr_t image_base, uint64_t expected_arm,
+                                 DG_NIKITA_BINDING *out);
+
 /* Opt-in observation only. No game writes, callbacks or new detours.
    Caller passes the EXACT XR frame and raw view used to build camera_world.
    raw_view_kind: -1 mono/head, 0/1 actual left/right eye, 2 head stereo-test.

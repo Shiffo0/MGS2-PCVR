@@ -128,8 +128,8 @@ typedef struct FunctionRefs {
     size_t count;
 } FunctionRefs;
 
-/* pad_stop_aim, not pad_subject_toggle: PL_PAD_SUBJECT_TOGGLE is compiled out
-   of this build along with its readers - see find_pad_masks. */
+
+
 typedef struct PadMaskResult {
     ULONGLONG pad_subject;
     ULONGLONG pad_stop_aim;
@@ -165,15 +165,15 @@ typedef struct PlayerPadResult {
 #define DG_GV_PAD_PRESS_OFFSET 8
 #define DG_GV_PAD_COUNT 4
 
-/* GV_UpdatePadSystem's scenario-press machinery. gv_pad_press is the anchor;
-   everything else is carried because it is what a later detour on this path
-   would need and it costs nothing to report now. See find_pad_press. */
+
+
+
 typedef struct PadPressResult {
-    DWORD function_begin;       /* GV_UpdatePadSystem's unwind bounds */
+    DWORD function_begin;
     DWORD function_end;
     DWORD press_read;           /* the first `test flag,0x20`-guarded read */
-    DWORD press_clear;          /* `and reg, ~GV_PAD_PRESS_SCN` */
-    DWORD direct_seam;          /* just past UpdatePad(&GV_PadDataDirect[0]) */
+    DWORD press_clear;
+    DWORD direct_seam;
     ULONGLONG gv_pad_press;
     ULONGLONG gv_pad_data_direct;   /* 0 unless verified, never assumed */
     int ok;
@@ -189,8 +189,8 @@ typedef struct WristResult {
     int ok;
 } WristResult;
 
-/* No NewBullet fields: GM_SetWeaponFire has many call sites in retail, so there
-   is no unique producer to anchor - see find_fire_publication. */
+
+
 typedef struct FireResult {
     DWORD publisher_begin;
     DWORD publisher_end;
@@ -223,7 +223,7 @@ typedef struct ExtensionResult {
  */
 static const PatternDef g_patterns[] = {
     {
-        "FPS Toggle -> PL_SubjectToggle",
+        "FPS Toggle -> fps toggle flag",
         "8B 05 ?? ?? ?? ?? 89 05 ?? ?? ?? ?? 48 8B 97",
         2, { 2, 8 }, { 6, 12 }, 1
     },
@@ -238,7 +238,7 @@ static const PatternDef g_patterns[] = {
         1, { 2, 0 }, { 6, 0 }, 1
     },
     {
-        "FPS Move -> PL_SubjectMove",
+        "FPS Move -> fps move flag",
         "8B 05 ?? ?? ?? ?? 89 05 ?? ?? ?? ?? 85 C0",
         2, { 2, 8 }, { 6, 12 }, 1
     },
@@ -260,32 +260,32 @@ static const PatternDef g_patterns[] = {
     {
         /* A leaf getter with no .pdata record of its own - see
            leaf_accessor_bounds for what stands in for the unwind bounds. */
-        "GameVars GM_PlayerStatus",
+        "GameVars player status",
         "48 8B 05 ?? ?? ?? ?? 48 23 C1 C3",
         1, { 3, 0 }, { 7, 0 }, 1, 1
     },
     {
 
-        "GM_GameStatus | GM_GameStatusScn demo test",
+        "game status | scene game status demo test",
         "8B 05 ?? ?? ?? ?? 0B 05 ?? ?? ?? ?? A9 00 00 00 F8",
         2, { 2, 8 }, { 6, 12 }, 1
     },
     {
 
-        "GM_MenuStatus | GM_MenuStatusScn radio test",
+        "menu status | scene menu status radio test",
         "8B 15 ?? ?? ?? ?? 0B 15 ?? ?? ?? ?? F7 C2 04 07 00 00",
         2, { 2, 8 }, { 6, 12 }, 1
     },
     {
 
-        "GM_PlayerArmBody read (weapon_body switch, subjective half)",
+        "player arm body read (weapon_body switch, subjective half)",
         "48 8B 05 ?? ?? ?? ?? 8B 93 28 14 00 00 48 8B 8B 90 02 00 00 "
         "48 89 83 A8 0B 00 00 C7 83 B0 0B 00 00 06 00 00 00",
         1, { 3, 0 }, { 7, 0 }, 1
     },
     {
 
-        "GM_PlayerArmBody write (GetResources)",
+        "player arm body write (resource setup)",
         "48 8D 8F D0 00 00 00 48 89 1D ?? ?? ?? ?? 48 8D 05",
         1, { 10, 0 }, { 14, 0 }, 1
     },
@@ -1100,9 +1100,9 @@ static void find_pad_masks(const LiveImage *image,
             begin != table[i].BeginAddress)
             continue;
         collect_function_refs(image, begin, end, &refs);
-        /* Writing PL_SubjectToggle is not on its own rare enough - Action()'s
-           run does it too. What only a pattern setter does is write one long
-           stride-4 block of int globals in a single body. */
+
+
+
         if (function_has_target(&refs, subject_toggle, 1) &&
             longest_dword_cluster(image, &refs, &probe) >=
                 PAD_CLUSTER_MIN_SLOTS) {
@@ -1113,13 +1113,13 @@ static void find_pad_masks(const LiveImage *image,
     }
     if (candidate_count != 2) return;
 
-    /* Both candidates read PL_SubjectMove - retail inlined PL_PadSetPatternA
-       into PL_SetPadType(), whose first act is the `if (PL_SubjectMove) return`
-       early-out, and the merged SubjectMove body switches on it. So that read
-       ties both bodies to the FPS anchors but cannot tell them apart.
-       What does: only the SubjectMove body assigns PL_PAD_STOP_AIM, so only its
-       cluster is unbroken. PL_PadSetPatternA skips that one slot, which splits
-       its longest run short and strictly inside the other's. */
+
+
+
+
+
+
+
     if (!function_loads_target(&candidates[0], subject_move) ||
         !function_loads_target(&candidates[1], subject_move))
         return;
@@ -1197,8 +1197,8 @@ static int ref_is_copy_access(const RipRef *ref, RefKind kind, int width)
     return ref->kind == kind && ref->width == width;
 }
 
-/* The destination half of the copy: three RIP-relative stores covering +0, +16
-   and +32 of one base, i.e. exactly 40 bytes - sizeof(GV_PAD). */
+
+
 static int find_40byte_span(const FunctionRefs *function, RefKind kind,
                             ULONGLONG *base, DWORD *first, DWORD *last)
 {
@@ -1294,8 +1294,8 @@ static int decode_scaled_load_base(const LiveImage *image, DWORD at,
     return 1;
 }
 
-/* Three scaled loads at +0, +16, +32 of one disp32 base, all with the same
-   index scale - the 40-byte GV_PAD record the copy reads. */
+
+
 static int find_scaled_40byte_source(const LiveImage *image, DWORD begin,
                                      DWORD end, ULONGLONG *source)
 {
@@ -1632,14 +1632,14 @@ static int modrm_memory_end(const LiveImage *image, DWORD modrm_at,
 
 
 
-/* ------------------------------------------------------- GV_PadPress[] --- */
 
-/* `test <r/m>, imm` - F6 /0 ib on a byte operand, F7 /0 id on a dword one.
-   The pad update tests its flag word both ways in the same function
-   (`test r10d, 0x103` for GV_PAD_RELEASE, `test r10b, 0x20` for
-   GV_PAD_PRESS_SCN), so a decoder that only knew one of them would read half
-   the branch structure and call it the whole. Register and memory operands
-   are both accepted; the immediate comes back zero-extended. */
+
+
+
+
+
+
+
 static int decode_test_immediate(const LiveImage *image, DWORD at, DWORD limit,
                                  ULONGLONG *immediate, DWORD *end)
 {
@@ -1714,11 +1714,11 @@ static int decode_rip_dword_read(const LiveImage *image, DWORD at, DWORD limit,
     return 1;
 }
 
-/* `and r32, imm8` with the /4 reg field on a REGISTER operand - 83 /4 ib.
-   0xDF sign-extends to 0xFFFFFFDF, which is ~GV_PAD_PRESS_SCN, so this is how
-   `pad->flag &= ~GV_PAD_PRESS_SCN` looks once the flag is already in a
-   register. Register-only on purpose: an AND against a memory operand is a
-   different statement shape and not the one being identified. */
+
+
+
+
+
 static int decode_and_register_imm8(const LiveImage *image, DWORD at,
                                     DWORD limit, ULONGLONG *immediate,
                                     DWORD *end)
@@ -1749,11 +1749,11 @@ static int function_has_lea(const FunctionRefs *refs, ULONGLONG target)
     return 0;
 }
 
-/* The LAST LEA of `target` in a body, and the first direct call that starts
-   within `window` bytes after it. Used to name the instruction boundary just
-   past `UpdatePad( &GV_PadDataDirect[0], up )` - the one point in the frame
-   where that copy holds this frame's buttons and no menu actor has read them
-   yet. Reported, never required. */
+
+
+
+
+
 static int lea_then_call_seam(const LiveImage *image, DWORD begin, DWORD end,
                               ULONGLONG target, DWORD window, DWORD *seam)
 {
@@ -1972,10 +1972,6 @@ static void find_pad_press(const LiveImage *image,
 
 
 
-/* Does any function assign this exact byte global the immediate `value`? For
-   the private WeaponFire that is `WeaponFire = -1`, which is what separates it
-   from the image's other leaf byte setters - they write globals nothing ever
-   resets to -1. */
 
 
 
@@ -1999,11 +1995,15 @@ static void find_pad_press(const LiveImage *image,
 
 
 
-/* GM_SetWeaponFire: mov byte ptr [rip+disp], reg8 ; ret. A leaf with no .pdata
-   record of its own, so it is found by shape. The private global it writes must
-   also take an immediate -1 byte store elsewhere in the image - the
-   `WeaponFire = -1` in the publisher - which is what makes the match unique
-   among the image's leaf byte setters. */
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2221,17 +2221,17 @@ static int check_relationships(const PatternResult results[PATTERN_COUNT],
     }
     if (results[0].targets[0] == results[0].targets[1]) {
         if (print)
-            printf("  FAIL relation: gBP Toggle aliases PL_SubjectToggle\n");
+            printf("  FAIL relation: gBP Toggle aliases fps toggle flag\n");
         ok = 0;
     } else if (print) {
-        printf("  PASS relation: gBP Toggle -> distinct PL_SubjectToggle\n");
+        printf("  PASS relation: gBP Toggle -> distinct fps toggle flag\n");
     }
     if (results[3].targets[0] == results[3].targets[1]) {
         if (print)
-            printf("  FAIL relation: gBP Move aliases PL_SubjectMove\n");
+            printf("  FAIL relation: gBP Move aliases fps move flag\n");
         ok = 0;
     } else if (print) {
-        printf("  PASS relation: gBP Move -> distinct PL_SubjectMove\n");
+        printf("  PASS relation: gBP Move -> distinct fps move flag\n");
     }
     if (results[1].targets[1] != results[2].targets[0]) {
         if (print)
@@ -2260,7 +2260,7 @@ static int check_relationships(const PatternResult results[PATTERN_COUNT],
             printf("  FAIL relation: native subject state targets alias\n");
         ok = 0;
     } else if (print) {
-        printf("  PASS relation: PL_SubjectToggle and PL_SubjectMove are "
+        printf("  PASS relation: fps toggle flag and fps move flag are "
                "distinct targets\n");
     }
 
@@ -2365,10 +2365,10 @@ static int check_relationships(const PatternResult results[PATTERN_COUNT],
             printf("  PASS relation: arm-body is distinct from every other "
                    "anchor\n");
     }
-    /* ArmCamRotateShift. The two displacements in one branch must describe one
-       SVECTOR: the address the lea takes, and .vy two bytes into it. Getting
-       that wrong by any amount other than exactly 2 means the pattern is not
-       looking at what its name says. */
+
+
+
+
     if (!results[12].ok) {
         if (print)
             printf("  FAIL relation: ArmCamRotateShift anchor did not pass\n");
@@ -2729,8 +2729,8 @@ static int validate_image_headers(LiveImage *image)
 
 
 
-/* movups/movsd xmm,[rsi+rdx*8+disp32] - the indexed form retail uses to read
-   GV_PadData, where the disp32 is the array's RVA. */
+
+
 
 
 
@@ -2790,21 +2790,21 @@ static int validate_image_headers(LiveImage *image)
 
 
 
-/*
- * The GV_PadPress anchor, exercised against a hand-built image by BOTH halves
- * - the offline scanner and the in-process bridge's desk suite - so the thing
- * under test is the shipping resolver and not a copy of it.
- *
- * The image is modelled on the retail bytes, decoys included. The pad update's
- * normal branch reads THREE guarded globals four bytes apart from each other -
- * GV_PadMask[0] and GV_PadMask[1] under `test flag,4` and `test flag,8`, and
- * GV_PadPress under `test flag,0x20` - and the masks are the neighbours an
- * address-arithmetic guess would land on. If the 0x20 guard ever stops being
- * load-bearing, this image resolves to a MASK and the anchor would arm the
- * word that SUPPRESSES buttons while claiming to press one.
- *
- * Returns 1 on pass. Every mutation listed inside must turn it into a 0.
- */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2972,35 +2972,35 @@ typedef struct DG_ANCHORS {
     ULONGLONG gbp_move;
     ULONGLONG gbp_toggle;
     ULONGLONG gbp_active;
-    /* The native subject state CheckWatch drives from them. */
+
     ULONGLONG pl_subject_move;
     ULONGLONG pl_subject_toggle;
-    /* Runtime pad masks. Never hardcoded: the SubjectMove patterns set SUBJECT
-       to 0, and pattern A reads a user-configurable assignment.
-       pad_stop_aim is PL_PAD_STOP_AIM, not PL_PAD_SUBJECT_TOGGLE: retail never
-       assigns the latter, so there is nothing to anchor - see find_pad_masks. */
+
+
+
+
     ULONGLONG pad_subject;
     ULONGLONG pad_stop_aim;
     ULONGLONG pad_weapon;
     ULONGLONG pad_press_weapon;
-    /* Action()'s PlayerPad merge point: after the GV_PadData copy, before the
-       Bluepoint weapon/button state rewrites it. */
+
+
     ULONGLONG player_pad;
     ULONGLONG gv_pad_data;
     /* One more identity anchor, carried through so the bridge can snapshot the
        raw player-status qword. Its exact bit semantics are NOT settled by two
        independent anchors, so it gates fail-closed and never fail-open. */
     ULONGLONG gm_player_status;
-    /* Both halves of the game-status word, because there is no such thing as
-       reading one of them: GM_CheckGameStatus is
-       `(GM_GameStatus | GM_GameStatusScn) & state`. Resolving one and testing
-       it alone would call every scenario-set state safe. The names record the
-       offline evidence for which is which; no decision depends on them, since
-       the bridge ORs the pair the way the game does. */
+
+
+
+
+
+
     ULONGLONG gm_game_status;       /* the `or` operand, the lower address */
     ULONGLONG gm_game_status_scn;   /* the `mov` operand, 4 bytes above it */
-    /* The same again for the menu word, which is where a codec call shows up.
-       MENU_RADIO_ON is not a game state and never appears in GM_GameStatus. */
+
+
     ULONGLONG gm_menu_status;
     ULONGLONG gm_menu_status_scn;
     /* The subjective arm object, held by two independent anchors. F4 needs it
@@ -3019,11 +3019,11 @@ typedef struct DG_ANCHORS {
 
     ULONGLONG gv_pad_press;
     ULONGLONG gv_pad_data_direct;   /* 0 unless independently verified */
-    DWORD pad_update_begin;         /* GV_UpdatePadSystem's unwind bounds */
+    DWORD pad_update_begin;
     DWORD pad_update_end;
-    DWORD pad_press_read;           /* the guarded read of GV_PadPress[0] */
+    DWORD pad_press_read;
     DWORD pad_press_clear;          /* the one-shot's own clear */
-    DWORD pad_direct_seam;          /* past UpdatePad(&GV_PadDataDirect[0]) */
+    DWORD pad_direct_seam;
     int pad_press_ok;
 } DG_ANCHORS;
 

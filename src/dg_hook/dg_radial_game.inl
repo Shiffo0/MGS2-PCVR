@@ -18,7 +18,7 @@ static void radial_late_publish(uint64_t player,uint32_t game,uint32_t menu,uint
 static int radial_late_box_safe(void) {
     uint64_t now=GetTickCount64();int safe;
     if (!TryAcquireSRWLockShared(&g_radial_late_lock)) return 0;
-    safe=g_radial_late.valid && now>=g_radial_late.ms && now-g_radial_late.ms<=100 &&
+    safe=g_radial_late.valid && now>=g_radial_late.ms && (now-g_radial_late.ms<=100 || dg_bridge_radial_context_held()) &&
         !(g_radial_late.player&(DG_PLAYER_UNSAFE_MASK&~UINT64_C(0x4000))) &&
         !(g_radial_late.game&DG_GAME_UNSAFE_MASK) && !(g_radial_late.menu&DG_MENU_UNSAFE_MASK) &&
         g_radial_late.generation==(uint64_t)InterlockedCompareExchange64(&g_radial_late_generation,0,0);
@@ -59,7 +59,7 @@ static int radial_live_read(void *ctx,uint64_t address,void *dst,size_t size) {
     if (!address || !dst || !size || address+size<address) return 0;
     while (left) {
         MEMORY_BASIC_INFORMATION m; size_t span;
-        if (!VirtualQuery((void *)(ULONG_PTR)cursor,&m,sizeof m) ||
+        if (!dg_vq((void *)(ULONG_PTR)cursor,&m) ||
             m.State!=MEM_COMMIT || !protection_readable(m.Protect)) return 0;
         span=(size_t)((ULONG_PTR)m.BaseAddress+m.RegionSize-(ULONG_PTR)cursor);
         if (!span) return 0;
@@ -78,15 +78,20 @@ static int radial_image_read(void *ctx,uint64_t address,void *dst,size_t size) {
     if (!all_valid(im->valid,offset,size,im->size)) return 0;
     memcpy(dst,im->bytes+offset,size); return 1;
 }
+#include "dg_radial_pause.inl"
 static int radial_actor_present(void) {
-    uint64_t current=0,now=GetTickCount64();
+    uint64_t current=0,inventory=0,now=GetTickCount64();
     uint64_t stamp=(uint64_t)InterlockedCompareExchange64(&g_radial_game.actor_seen_ms,0,0);
     uint64_t seen=(uint64_t)InterlockedCompareExchange64(&g_radial_game.actor_seen,0,0);
-    return g_radial_game.live && seen && now>=stamp && now-stamp<=100 &&
+    if (dg_bridge_radial_paused() &&
+        (!radial_live_read(NULL,g_radial_game.inventory.linkvar_slot,&inventory,8) ||
+         inventory!=g_radial_game.catalog.inventory)) return 0;
+    return g_radial_game.live && seen && now>=stamp && (now-stamp<=100 || dg_bridge_radial_context_held()) &&
         radial_live_read(NULL,g_radial_game.inventory.player_slot,&current,sizeof current) && current==seen;
 }
 static void item_use_cancel(void);
 void dg_bridge_radial_cancel(void) {
+    radial_pause_cancel();
     item_use_cancel();
     g_radial_game.catalog.valid=0;
     g_radial_game.ready=0;
@@ -101,7 +106,7 @@ int dg_bridge_radial_catalog(uint64_t now,dg_radial_game_catalog *out) {
     memset(out,0,sizeof *out);
     if (!g_controls_active || !g_radial_game.live ||
         !g_radial_game.catalog.valid || now<g_radial_game.catalog.sampled_ms ||
-        now-g_radial_game.catalog.sampled_ms>100) return 0;
+        (now-g_radial_game.catalog.sampled_ms>100 && !dg_bridge_radial_paused())) return 0;
     *out=g_radial_game.catalog;
     out->busy=g_radial_game.commit.phase!=DG_RADIAL_COMMIT_IDLE;
     return 1;
@@ -112,7 +117,23 @@ void dg_bridge_radial_offer(const dg_radial_commit_intent *intent,
         !g_radial_game.catalog.valid || intent->version!=g_radial_game.catalog.version ||
         player!=g_radial_game.catalog.player || inventory!=g_radial_game.catalog.inventory)
         return;
+    if (dg_bridge_radial_paused()) {
+        /* Native inventory menus settle equip at close. Keep the last
+         * trigger-confirmed choice without advancing actors under the wheel. */
+        if (intent->seq>g_radial_game.commit.last_seq &&
+            (!g_radial_pause.deferred || intent->seq>g_radial_pause.intent.seq)) {
+            g_radial_pause.intent=*intent;g_radial_pause.player=player;
+            g_radial_pause.inventory=inventory;g_radial_pause.deferred=1;
+            if (g_radial_pause.sound) g_radial_pause.sound(0x20,0x3f,0x14);
+            g_radial_pause.confirmed=1;
+        }
+        return;
+    }
     if (dg_radial_commit_offer(&g_radial_game.commit,intent,now)) {
+        if (g_radial_pause.visible && g_radial_pause.sound) {
+            g_radial_pause.sound(0x20,0x3f,0x14);
+            g_radial_pause.confirmed=1;
+        }
         g_radial_game.offered_player=player;
         g_radial_game.offered_inventory=inventory;
         g_radial_game.offered_tick=(uint64_t)(DWORD)g_b.c_ticks;
@@ -122,6 +143,8 @@ void dg_bridge_radial_offer(const dg_radial_commit_intent *intent,
 }
 static int radial_environment_safe(uint64_t *status) {
     uint32_t game,scenario,menu,menu_scenario,pad_enable;
+    if (g_radial_pause.level && (dg_bridge_radial_paused() ?
+        *g_radial_pause.level!=4 : *g_radial_pause.level!=0)) return 0;
     if (!InterlockedCompareExchange(&g_b.armed,0,0) ||
         InterlockedCompareExchange(&g_b.script_menu_only,0,0) || g_b.owner) return 0;
     if (!radial_live_read(NULL,g_radial_game.phase.status_slot,status,sizeof *status) ||
@@ -159,8 +182,8 @@ static int radial_engine_ready(const dg_radial_native_snapshot *s,
          !(s->item_types[i->actor_item]&4u))) return 0;
     if (kind==DG_RADIAL_EQUIP_WEAPON) {
         if (status&0x4000u) return 0;
-        /* CheckChangeWeapon's watch/type restriction, plus conservative refusal
-         * of invincibility and behind/caution quick-change paths. */
+
+
         if ((status&UINT64_C(0x50000000040)) || (status&0x02000000u) ||
             (flags&0x100u) || (flags2&0x10u) ||
             (s->item_types[i->actor_item]&0x0cu) ||
@@ -211,6 +234,11 @@ static void radial_phase_tick(void *player) {
             now-g_radial_game.offered_ms<=100 && g_b.fire.state==DG_FIRE_IDLE &&
             pending->id>=0 && pending->id<64 && (eligible&(UINT64_C(1)<<pending->id)) &&
             radial_engine_ready(&sample,status,pending->kind);
+        if (pending->thermal_toggle)
+            tick.all_validation_ready=tick.all_validation_ready &&
+                pending->kind==DG_RADIAL_EQUIP_ITEM && sample.inventory.items[13]>0 &&
+                sample.inventory.actor_item==pending->expected_item &&
+                pending->id==(pending->expected_item==13 ? 0:13);
     }
     /* An uncertain proposal is never retried. Once the same native actor has
      * settled both desired slots and passes fresh engine admission, retire the
@@ -280,6 +308,8 @@ static void radial_phase_tick(void *player) {
                 g_radial_game.previous[k]=next.current[k];
             next.previous[k]=g_radial_game.previous[k];
         }
+        next.actor_item=sample.inventory.actor_item;
+        next.thermal_owned=sample.inventory.items[13]>0;
         next.eligible[0]=sample.eligible_weapons; next.eligible[1]=sample.eligible_items;
         for(id=0;id<(int)sample.inventory.item_slots && id<DG_RINV_MAX_SLOTS;id++)
             next.quantities[id]=sample.inventory.items[id];
@@ -309,6 +339,7 @@ static void radial_phase_tick(void *player) {
     ReleaseSRWLockShared(&g_controls_lock);
 }
 static void radial_game_resolve(const LiveImage *image) {
+    radial_pause_resolve(image);
     memset(&g_radial_game,0,sizeof g_radial_game);
     AcquireSRWLockExclusive(&g_radial_late_lock);
     memset(&g_radial_late,0,sizeof g_radial_late);
@@ -322,6 +353,8 @@ static void radial_game_resolve(const LiveImage *image) {
     g_radial_game.image.read=radial_live_read; g_radial_game.image.ctx=NULL;
 }
 static void radial_game_install(void) {
+    if (g_b.log) g_b.log("  radial native pause/sound: %s\r\n",
+        g_radial_pause.level ? "retail witnesses verified":"unavailable");
     const char *why="unresolved";
     if (g_radial_game.phase.valid)
         g_radial_game.live=dg_detour_install(&g_radial_game.detour,

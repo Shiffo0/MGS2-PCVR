@@ -12,6 +12,7 @@
 #include "dg_ik.h"
 #include "dg_weapon_aim.h"
 
+
 #define CAPACITY DG_DIAGNOSTIC_CAPACITY(4096u)
 #define MODELS 16u
 enum { CAP_OK=0, CAP_ANCHOR=100, CAP_READ, CAP_SELECTION,
@@ -104,18 +105,20 @@ static int anchors(uint64_t base,uint64_t *subglobal,uint64_t *armglobal) {
     /* Cross-check this known revision's relative layout as well as opcodes. */
     return *subglobal==base+0x17df688 && *armglobal==base+0x17df698;
 }
-/* Retail 2.1.0.0 layouts, independently checked against the stored image.
-   The spray actor publishes weapon (+0x60), not weapon_sub (+0xa0).
-   See weapons_run1_retail.py for constructor/body/unit/global evidence. */
+#include "dg_nikita_binding.inl"
+
+
+
 typedef struct { unsigned object, body, unit, effect, trigger; } CAP_LAYOUT;
 static int layout(uint64_t base, int weapon, uint64_t subobject, CAP_LAYOUT *out) {
     unsigned char code[14];
+    if(weapon==6)return 0; /* separate native-body Nikita witness, never pistol fallback */
     if(!dg_weapon_hand_aim(weapon) && weapon!=12 && weapon!=20) return 0; /* observation only */
     out->object=0xa0; out->body=0x248; out->unit=0x2e8;
     out->effect=0x2c0; out->trigger=0;
-    /* Native USP GetResources uses GM_InitObject for AKS/M4 (including
-       suppressed AKS), not WeaponEfInitObject. actor+0x2c0 is unused there.
-       Keep body/unit/root/owner/model guards; never fall back on read failure. */
+
+
+
     if(weapon==15 || weapon==18) out->effect=0;
     if(weapon==13) {
         unsigned char slots[21]; unsigned offset;
@@ -260,7 +263,7 @@ static int geometry(uint64_t base,CAP_RECORD *r) {
     r->input.selected_unit=(uint64_t)selected_unit; r->input.observed_unit=(uint64_t)actor_unit;
     r->input.selected_root=r->weapon_id==7?r->subobjs:expected_root; r->input.observed_root=root;
     r->input.expected_arm_body=r->arm; r->input.observed_arm_body=actor_body;
-    r->input.weapon_type=(uint32_t)r->weapon_id; /* explicit weapon ID, not WeaponSet.type */
+    r->input.weapon_type=(uint32_t)r->weapon_id;
     r->input.flags|=DG_AIM_PROBE_HAVE_HAND|DG_AIM_PROBE_HAVE_ROOT;
     r->refusal="ok";return CAP_OK;
 }
@@ -318,13 +321,24 @@ int dg_aim_capture_hand_selection(uintptr_t base, uint64_t expected_arm,
     int i,j;
     if(!selection) return 0;
     memset(selection,0,sizeof *selection);
+    {
+        DG_NIKITA_BINDING n;
+        if(dg_aim_capture_nikita_binding(base,expected_arm,&n)) {
+            selection->arm=n.arm;selection->hand=n.hand;
+            selection->subobject=n.subject_object;selection->subobjs=n.subject_objs;
+            selection->model=n.subject_model;selection->weapon_id=6;
+            return 1;
+        }
+    }
     memset(&r,0,sizeof r);
-    if(!expected_arm || geometry((uint64_t)base,&r)!=CAP_OK ||
-       r.arm!=expected_arm || !dg_weapon_hand_aim(r.weapon_id) ||
-       r.parent[0]!=-1) return 0;
+    r.weapon_id=-1;
+    if(!expected_arm) return 0;
+    if(geometry((uint64_t)base,&r)!=CAP_OK) {                                            return 0; }
+    if((r.arm!=expected_arm) || (!dg_weapon_hand_aim(r.weapon_id)) ||
+       (r.parent[0]!=-1)) return 0;
     if(r.weapon_id==13) {
         double basis[3][3],q[4];
-        if(!blade_attached((uint64_t)base,r.subobjs))return 0;
+        if((!blade_attached((uint64_t)base,r.subobjs)))return 0;
         for(i=0;i<3;i++) for(j=0;j<3;j++)basis[i][j]=r.model_world[0].m[i][j];
         if(!dg_ik_basis_quat(basis,q))return 0;
         if(!same_ptr(r.subobject,r.subobjs) || !same_ptr(r.subobjs+0x40,r.hand) ||
@@ -333,14 +347,30 @@ int dg_aim_capture_hand_selection(uintptr_t base, uint64_t expected_arm,
         double basis[3][3],q[4];
         /* A valid older rigid render matrix need not equal the current hand.
            Keep finite/rotation checks and all geometry ownership checks. */
-        if(!((r.weapon_id==14 || r.weapon_id==12)?coolant_attached((uint64_t)base,r.subobjs):rifle_rigid((uint64_t)base,r.subobjs)))return 0;
+        if((!((r.weapon_id==14 || r.weapon_id==12)?coolant_attached((uint64_t)base,r.subobjs):rifle_rigid((uint64_t)base,r.subobjs))))return 0;
         for(i=0;i<3;i++) for(j=0;j<3;j++)basis[i][j]=r.model_world[0].m[i][j];
         if(!dg_ik_basis_quat(basis,q))return 0;
         if(!same_ptr(r.subobject,r.subobjs) || !same_ptr(r.subobjs+0x40,r.hand) ||
            !((r.weapon_id==14 || r.weapon_id==12)?coolant_attached((uint64_t)base,r.subobjs):rifle_rigid((uint64_t)base,r.subobjs)))return 0;
+    } else if(r.weapon_id==7) {
+        /* Stinger: geometry() already requires the object root to carry the live
+           hand rotation exactly. Model 0 is the rendered copy, one frame behind a
+           moving VR hand, so exact equality flapped and reset the arm map several
+           times a second. Require a real rotation within 20 degrees of the root. */
+        double basis[3][3],rootb[3][3],qm[4],qr[4],dot;
+        for(i=0;i<3;i++) for(j=0;j<3;j++) {
+            basis[i][j]=r.model_world[0].m[i][j];
+            rootb[i][j]=r.input.weapon_root_world[i][j]; /* float in the probe record */
+        }
+        if((!dg_ik_basis_quat(basis,qm)))return 0;
+        if((!dg_ik_basis_quat(rootb,qr)))return 0;
+        dot=fabs(qm[0]*qr[0]+qm[1]*qr[1]+qm[2]*qr[2]+qm[3]*qr[3]);
+        if(dot>1)dot=1;
+        if((2.0*acos(dot)>20.0*3.14159265358979323846/180.0))return 0;
+        if((!same_ptr(r.subobject,r.subobjs)))return 0;
     } else {
         for(i=0;i<3;i++) for(j=0;j<3;j++)
-            if(fabs(r.model_world[0].m[i][j]-r.input.weapon_root_world[i][j])>0.002)
+            if((fabs(r.model_world[0].m[i][j]-r.input.weapon_root_world[i][j])>0.002))
                 return 0;
     }
     selection->arm=r.arm; selection->subobject=r.subobject;
@@ -559,3 +589,58 @@ long dg_aim_capture_dump(const char *path) {
 return 0;
 
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

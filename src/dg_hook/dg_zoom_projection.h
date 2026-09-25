@@ -38,8 +38,22 @@ static double dg_zoom_projection_step(DG_ZOOM_PROJECTION *s,uint64_t id,int vali
     }
     s->last_eye=eye;s->have_eye=1;return s->gain;
 }
+/* PSG uses native focal length 8..60. Normalize to its wide stop, without
+ * requiring the player to visit that stop before zoom can become visible. */
+static double dg_psg_projection_step(DG_ZOOM_PROJECTION *s,uint64_t id,int valid,
+    float angle,int stereo,int eye) {
+    int boundary=!stereo || !s->have_eye || (eye==0 && s->last_eye!=0);
+    if(!valid || !id || !(angle>=8 && angle<=60)) {
+        memset(s,0,sizeof *s);return 1;
+    }
+    if(id!=s->identity) {
+        memset(s,0,sizeof *s);s->identity=id;boundary=1;
+    }
+    if(boundary)s->gain=angle/8.0;
+    s->last_eye=eye;s->have_eye=1;return s->gain;
+}
 static void dg_zoom_projection_apply(MAT *m,double gain) {
-    if(gain>1 && gain<=4) {
+    if(gain>1 && gain<=7.5) {
         m->m[0][0]=(float)(m->m[0][0]*gain);
         m->m[1][1]=(float)(m->m[1][1]*gain);
     }

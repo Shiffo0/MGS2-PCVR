@@ -42,7 +42,7 @@ enum {
 };
 
 enum {
-    DG_FPS_MOVE_NATIVE = 0,     /* leave gBP_1stPersonCamera_Move alone */
+    DG_FPS_MOVE_NATIVE = 0,
     DG_FPS_MOVE_OFF = 1,        /* hold it at 0 while we hold first person */
     DG_FPS_MOVE_ON = 2          /* hold it at 1, which is what places the arm */
 };
@@ -92,13 +92,13 @@ typedef struct {
     int arm_show;               /* 0 = observe only, 1 = force visible */
 
     int work_probe;             /* 0 = don't touch it, 1 = read and report */
-    /* The FPS-aim actuator probe (FPS_AIM_ACTUATOR_ONDERZOEK.md par. 6):
-       while on, every follow write also reads the six per-tick deciders
-       off the PlayerWork (flag, turn/rot yaw, camdir, acts) into a ring
-       the heartbeat drains, and the follow's aim-time stand-down is
-       DELIBERATELY bypassed so the diagnostic run generates writes while
-       aiming - the very situation the hypotheses disagree about. Off for
-       normal play. */
+
+
+
+
+
+
+
     int turn_probe;             /* 0 = off, 1 = measure (and write in aim),
                                    2 = dense: also one sample per aim tick */
     /* Grip roll (vr_arm_uproll). The chain's twist about the forearm axis is
@@ -116,60 +116,60 @@ typedef struct {
        live root, which under organic comp put the body yaw on the hand's
        right side too - a cant growing with the turn (run 9, 2026-09-02). */
     int arm_hand_basis;         /* 0 = root (old), 1 = world */
-    /* F5 step 1. Bend one joint of the subjective arm by a fixed angle, using
-       the engine's own per-joint quaternion channel (MOTION_CONTROL.adjust plus
-       one bit of adjust_flag) rather than by writing world matrices - the
-       engine's hierarchy pass then carries the change into every child, hand
-       and weapon included. Zero degrees means no write at all.
-       Fixed rather than controller-driven on purpose: it answers whether a
-       write at the camera seam reaches the model, and it answers it visibly.
-       Joint 6 is refused; SetPos writes that one every frame. */
+
+
+
+
+
+
+
+
     int arm_bend_deg;           /* degrees about the joint's X axis, 0 = off */
     int arm_bend_joint;         /* HUMAN21_* index, default 5 = right forearm */
 
     int skel_probe;             /* 0 = off, 1 = measure and report */
     int skel_base;              /* first joint of the reported window */
-    /* F5 step 3. The IK solver produces world-space orientations; the engine
-       accepts per-joint quaternions in MOTION_CONTROL.adjust. What sits between
-       them is unknown: adjust is a DELTA on the animated pose (identity means
-       untouched, which is how the release path works), but whether it
-       pre- or post-multiplies, and in whose frame, has never been measured.
-       Guessing it would make every one of the solver's eight test categories
-       worthless at the point of writing.
 
-       So measure it. The probe alternates identity and a known rotation on the
-       joint every other frame and reports the full world matrices of the joint,
-       its parent and its child for both cases. Input known, output measured,
-       convention solvable offline.
 
-       Alternating rather than comparing against a separate run is deliberate:
-       consecutive frames have almost the same animation, so the difference
-       isolates the rotation instead of the walk cycle. */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     int adjust_probe;           /* 0 = off, 1 = alternate and report */
     int adjust_probe_joint;     /* which joint to perturb, default 5 */
     int adjust_probe_deg;       /* rotation magnitude, default 30 */
     int adjust_probe_axis;      /* 0 = X, 1 = Y, 2 = Z */
-    /* F5 step 3a: the ArmCamRotateShift calibration probe.
 
-       Three things about that channel are reasoned rather than measured, and
-       one fixed write measures all three at once.
 
-         - Does the game's smoothing actually run? ArmMove pulls the SVECTOR a
-           quarter of the way toward WeaponCamRotateShift[wpr] each frame, and
-           for every weapon that entry is {0,0,0}. Writing X and reading back
-           0.75*X says the pull is real and gives the exact factor; reading
-           back X says there is nothing to compensate for. A zero-to-zero
-           observation, which is all the last run could offer, cannot tell
-           those apart.
-         - Is the tick seam early enough? Only a write that lands before
-           SetPos reads is worth anything.
-         - Is our understanding of the conversion right? The probe computes
-           GM_RotToQuat itself from the value it reads back and compares that
-           against what SetPos actually left in adjust[6]. A match pins the
-           4096-unit scale, the XYZ Euler order and the vy branch together.
 
-       Off by default and a fixed value on purpose: a probe that moves is a
-       probe whose disagreements have two explanations. */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     int hand_probe;             /* 0 = off, 1 = write hand_probe_rot */
     int hand_probe_rot[3];      /* the constant, in PS2 units, 4096 per turn */
     /* The trigger. DRY evaluates the whole contract every tick and writes
@@ -200,20 +200,20 @@ typedef struct {
        deflection before the byte mapping, thousandths. */
     int turn_mode;
     int turn_gain_mils;
-    /* 2026-09-11: the left stick outside first person, and prone crawling.
-       move_third: walk the character in third person (the game's own
-       StandRun/PadTo path) when we do NOT hold first person, the game's own
-       first-person look (PLAYER_WATCH) is off and PL_SubjectMove reads 0.
-       move_prone: while PLAYER_GROUND, write pad->dir as well and cap the
-       deflection at move_prone_max so a full stick stays on the ordinary
-       crawl. move_dir_offset/sign correct the camera-yaw convention pad->dir
-       is derived from, without a rebuild. All fail-closed. */
+
+
+
+
+
+
+
+
     int move_third;             /* 0 = off, 1 = on */
     int move_prone;             /* 0 = off, 1 = on */
     int move_prone_max;         /* byte deflection cap, 34..127; default 120 */
     int move_dir_offset;        /* added to the camera yaw, 0..4095 */
     int move_dir_sign;          /* +1, or -1 to mirror the camera yaw */
-    int move_dir_org;           /* 0 = camera yaw (PadOrg), 1 = body yaw rot.vy */
+    int move_dir_org;
     /* Body-follows-aim. When the yaw between the published hand demand and
        the character's animated base exceeds thresh, the body is turned
        toward the aim through the same subjective-turn bytes as the stick,
@@ -321,10 +321,10 @@ typedef struct {
        Fail-closed: unknown words parse as OFF, an unarmed bridge or a stale
        camera seam reports no verdict, and everything then behaves as today. */
     int theater_mode;           /* DG_THEATER_*; default OFF */
-    /* UI-U1 (UI_LEESBAARHEID_ONDERZOEK.md fase U1): the same quad route,
-       driven by the full-menu bits (MENU_WEAPON_OPEN|MENU_ITEM_OPEN) as a
-       second, separately gated judgment. The codec is already the theater's
-       (MENU_RADIO_ON). Off by default. */
+
+
+
+
     int theater_ui;             /* 0 = off, 1 = menu panel judgment feeds it */
 
     int hud_mode;               /* 0 = leave the HUD alone, 1 = hide it */
@@ -460,7 +460,7 @@ enum {
 enum {
     DG_FPS_REASON_NONE = 0,
     DG_FPS_REASON_MODE_OFF,
-    DG_FPS_REASON_MASK_ZERO,        /* PL_PAD_SUBJECT == 0: no edge exists */
+    DG_FPS_REASON_MASK_ZERO,
     DG_FPS_REASON_LEVEL_LOAD,       /* subject-move pad pattern after a load */
     DG_FPS_REASON_MGSHDFIX_OWNER,   /* someone else already holds Override */
     DG_FPS_REASON_UNSAFE,           /* not controllable gameplay */
@@ -468,35 +468,35 @@ enum {
     DG_FPS_REASON_NATIVE_EXIT       /* preserve explicit VR preference */
 };
 
-/* At most one of these per tick. There is deliberately no write for Active or
-   for PL_SubjectMove: both are the engine's to set, from CheckWatch. */
+
+
 enum {
     DG_FPS_WRITE_NONE = 0,
-    DG_FPS_WRITE_OVERRIDE,          /* gBP_1stPersonCamera_Override */
-    DG_FPS_WRITE_TOGGLE,            /* gBP_1stPersonCamera_Toggle */
-    DG_FPS_WRITE_SUBJECT_EDGE,      /* one PlayerPad.pad.press subject edge */
-    DG_FPS_WRITE_MOVE               /* gBP_1stPersonCamera_Move, opt-in only */
+    DG_FPS_WRITE_OVERRIDE,
+    DG_FPS_WRITE_TOGGLE,
+    DG_FPS_WRITE_SUBJECT_EDGE,
+    DG_FPS_WRITE_MOVE
 };
 
-/* Everything the decision depends on, read once per game tick. Values, not
-   booleans, where the value matters: PL_SubjectMove is 0..3 and selects a pad
-   pattern, so collapsing it to a flag would lose the level-load evidence. */
+
+
+
 typedef struct {
     int mode;
-    int native_override;            /* gBP_1stPersonCamera_Override */
-    int native_toggle;              /* gBP_1stPersonCamera_Toggle */
-    int native_active;              /* gBP_1stPersonCamera_Active */
+    int native_override;
+    int native_toggle;
+    int native_active;
     int native_camera_missing;      /* camera off or replaced rig needs native entry */
-    int native_move;                /* gBP_1stPersonCamera_Move */
-    int subject_move;               /* PL_SubjectMove, 0..3 */
-    unsigned int pad_subject_mask;         /* PL_PAD_SUBJECT, read at runtime */
-    unsigned int pad_stop_aim_mask;        /* PL_PAD_STOP_AIM */
+    int native_move;
+    int subject_move;
+    unsigned int pad_subject_mask;
+    unsigned int pad_stop_aim_mask;
     int safe_gameplay;
-    /* Raw (GM_GameStatus | GM_GameStatusScn), carried for telemetry only. The
-       decision is already folded into safe_gameplay; this is here so a live run
-       can show WHICH bit refused, instead of only that something did. */
+
+
+
     unsigned int game_status;
-    unsigned int menu_status;       /* raw (GM_MenuStatus | ...Scn), likewise */
+    unsigned int menu_status;
     int mgshdfix_owner;
     int toggle_request;             /* one user request, DG_FPS_MODE_TOGGLE */
     int level_load;                 /* a load happened with subject move on */
@@ -557,22 +557,22 @@ typedef struct {
     int  fps_suspend_reason;
     int  fps_native_active;
     int  mgshdfix_fps_owner;
-    int  override_value;            /* gBP_1stPersonCamera_Override snapshot */
-    int  toggle_value;              /* gBP_1stPersonCamera_Toggle snapshot */
-    int  move_value;                /* gBP_1stPersonCamera_Move snapshot */
-    int  subject_move_value;        /* PL_SubjectMove snapshot, 0..3 */
+    int  override_value;
+    int  toggle_value;
+    int  move_value;
+    int  subject_move_value;
     long subject_move_ticks;        /* ...and ticks it was non-zero, all session */
-    int  subject_toggle_value;      /* PL_SubjectToggle snapshot */
+    int  subject_toggle_value;
     unsigned int pad_subject_mask;
     unsigned int pad_stop_aim_mask;
     unsigned __int64 player_status;  /* raw, so the live gate can settle its bits */
-    unsigned int game_status;        /* raw GM_GameStatus | GM_GameStatusScn */
-    unsigned int menu_status;        /* raw GM_MenuStatus | GM_MenuStatusScn */
-    /* F4 observation. GM_PlayerArmBody and one level down into it; read on the
-       game thread, published here, never written. arm_flag is the DG object
-       visibility word, where 0x1000 is DG_FLAG_INVISIBLE0 shifted by channel -
-       so this is the field that answers whether the subjective arm is drawn,
-       and in which eye. */
+    unsigned int game_status;
+    unsigned int menu_status;
+
+
+
+
+
     unsigned __int64 arm_body;
     unsigned __int64 arm_objs;
     unsigned int arm_flag;
@@ -594,9 +594,9 @@ typedef struct {
     float hand_probe_adjust6[4];
     float hand_probe_predicted[4];
     float hand_probe_worst_diff;
-    /* The GM_PlayerBody candidate, same three fields, all zero unless the probe
-       is on. Read the flag against arm_flag, not on its own: the finding is the
-       DIFFERENCE between the two objects in the same frame. */
+
+
+
     unsigned __int64 body_cand;
     unsigned __int64 body_objs;
     unsigned int body_flag;
@@ -626,12 +626,12 @@ typedef struct {
        run where it was always stale looked exactly like one where it was
        always fresh, which makes the whole fold unobservable. */
     long late_status_stale;
-    /* UI-U1: the same words at the PRESENT seam, and its sample count. The
-       tick seam and the camera seam are both asleep for the whole life of a
-       menu - the game pauses the actor system and the camera daemon skips its
-       camera block - so MENU_WEAPON_OPEN/ITEM_OPEN/RADIO_ON/NODE_ON can only
-       ever be seen here. A bit present here and absent in the two masks above
-       is the expected reading, not a contradiction. */
+
+
+
+
+
+
     /* Which branch the upper arm's roll took: anchored to the pose (the
        fix) against fallen back to continuity (the mechanism that
        accumulates roll every lap). A fallback share that is not ~zero
@@ -667,13 +667,13 @@ typedef struct {
     long start_consumed;
     long pad_context_refused;
     long menu_writes;
-    /* The game's OWN pad bits at the seam. PAD_OK is a runtime assignment in
-       this build, so this is the only way to see which bit confirms. */
+
+
     unsigned int menu_seen_status;
     unsigned int menu_seen_press;
-    /* Distinct press words seen in the front-end record, with counts.
-       PAD_OK is a runtime assignment in this build, so counting which
-       word a deliberate keypress produces is the only way to find it. */
+
+
+
     unsigned int menu_press_word[DG_PAD_PRESS_RING];
     long menu_press_count[DG_PAD_PRESS_RING];
     unsigned int menu_press_seq[DG_PAD_PRESS_SEQ];
@@ -776,7 +776,7 @@ typedef struct {
     long arm_hand_written;      /* pairs that published a hand command */
     long arm_hand_refused;      /* hand solve failed; joints 4/5 still written */
     long arm_hand_measured;     /* residual samples behind the two figures below */
-    long arm_hand_tick_writes;  /* early-tick ArmCamRotateShift writes */
+    long arm_hand_tick_writes;
     long arm_hand_tick_no_command;
     long arm_hand_tick_stale;
     long arm_hand_tick_no_player;
@@ -784,9 +784,9 @@ typedef struct {
     long arm_hand_tick_bad_weapon;
     long arm_hand_tick_mic;
     long arm_hand_no_setpos;    /* adjust[6] was all-zero: SetPos did not run */
-    /* Release zeros written into ArmCamRotateShift. One per stream restart is
-       healthy; zero with restarts > 0 means the ratchet is back - the next
-       rest capture is reading our own stale wrist as the animation. */
+
+
+
     long arm_hand_zeroed;
     /* F9 walking. writes counts ticks the pad was actually written; yielded
        counts ticks the player's own movement input silenced us, which is the
@@ -800,7 +800,7 @@ typedef struct {
     long move_published;
     int  move_mode;
     float move_deadzone;
-    long move_not_subject;      /* refused: PL_SubjectMove was 0 that tick */
+    long move_not_subject;
     /* Third person / prone (2026-09-11). */
     int  move_third, move_prone;
     long move_third_writes;     /* walk bytes written while not in first person */
@@ -826,9 +826,9 @@ typedef struct {
     unsigned long mp_c_gv_flag;
     unsigned long mp_c_wp_status;       /* status/dir/bytes read THROUGH work->pad */
     long mp_c_wp_dir, mp_c_wp_bytes;
-    /* Retail StandStill (0x51A790) decides on workL->padTo (+0x510), WallTo
-       (+0x4F8), Liable (+0x50C), padForce (+0x514) and work->data (+0xCA0),
-       data2 (+0xCA4); workL is the pointer at RVA 0x17DF780. */
+
+
+
     unsigned long long mp_c_workl;
     long mp_c_padto, mp_c_wallto, mp_c_liable, mp_c_padforce, mp_c_data, mp_c_data2;
     int  move_dir_org;
@@ -899,11 +899,11 @@ typedef struct {
        a composition/order error. Only consecutive measured pairs count. */
     float arm_hand_off_drift_deg;
     float arm_hand_off_drift_worst_deg;
-    /* Pairs where the hierarchy was supposed to carry our joint-4/5 adjusts
-       but the engine's adjust_flag no longer had our bits - the removal then
-       un-rotates an animation that was never rotated, which is the harness-
-       proven recipe for 175-degree-per-pair hand chaos. Zero while standing
-       still is expected; nonzero while walking names the culprit. */
+
+
+
+
+
     long arm_adjust_bits_lost;
     /* The SVECTOR channel's reach (run 13, 2026-09-03). The engine pulls the
        shift angle along the SHORT ARC of the turn, so after the 4/3
@@ -971,9 +971,9 @@ typedef struct {
     unsigned int arm_pose_flags;
     int  arm_bend_joint;
     int  arm_bend_deg;
-    /* The head of the arm's MOTION_CONTROL, ten qwords from +0x00. Present so
-       a refused gate can say WHICH field is not where it was expected, rather
-       than only that something was not. */
+
+
+
     unsigned __int64 arm_mctrl;
     unsigned __int64 arm_mctrl_head[10];
     /* ...and the OBJECT it came from, dumped before any gate, so a refusal
@@ -988,9 +988,9 @@ typedef struct {
     int  skel_stride;
     int  skel_stride_score;
     int  skel_stride_tried;         /* candidates rejected before the hit */
-    int  skel_n_models;             /* DG_OBJS.n_models, the joint count */
+    int  skel_n_models;
     int  skel_parents_read;         /* how many of skel_parents are valid */
-    short skel_parents[DG_SKEL_MAX];/* DG_OBJ.parent, the real topology */
+    short skel_parents[DG_SKEL_MAX];
     /* Walked up from joint 6, the one proven index: hand, then its parent, and
        so on to the root. This is the answer to "which indices are the arm". */
     short skel_chain[DG_SKEL_CHAIN];
@@ -1002,12 +1002,12 @@ typedef struct {
     /* ...and of a configurable window, for reading the rest of the rig. */
     int  skel_base;
     float skel_window_pos[DG_SKEL_WINDOW][3];
-    /* MOTION_CONTROL.trans (+0x60): the per-joint translation channel. adjust
-       is rotation only, so if this one is live it is a cheaper route to wrist
-       position than solving for it - and if it is null we know that before
-       building an IK that assumes otherwise. */
+
+
+
+
     unsigned __int64 skel_mctrl_trans;
-    unsigned __int64 skel_objs;     /* the DG_OBJS the above was read from */
+    unsigned __int64 skel_objs;
     unsigned int skel_region_end;   /* bytes of the committed region past objs */
     /* F5 step 3, the adjust-space measurement. The world matrices are read one
        frame AFTER the write that produced them - the camera seam runs after the
@@ -1024,7 +1024,7 @@ typedef struct {
        read (1): tick, ok, rot.vy, turn.vy, camdir.vy - raw int16 words. */
     long  adj_probe_words[DG_ADJ_CASES][2][5];
     unsigned int seen_pad_status;   /* every pad bit seen down this session */
-    unsigned int pad_weapon_mask;   /* PL_PAD_WEAPON, resolved at runtime */
+    unsigned int pad_weapon_mask;
     long weapon_presses;            /* rising edges of it */
     long weapon_presses_in_fps;     /* ...of which, while first person was up */
     int  weapon_vk[4];              /* keys down at the last weapon edge */
@@ -1049,18 +1049,18 @@ typedef struct {
     long fire_wrote_release;
     long fire_wrote_pressure;
     long fire_pressure_kept;        /* the game's own byte was already higher */
-    long fire_no_index;             /* PL_PAD_PRESS_WEAPON outside pressure[] */
+    long fire_no_index;
     long fire_yielded;              /* ticks stood down under the player's own
                                        weapon button */
-    int  fire_press_index;          /* live PL_PAD_PRESS_WEAPON, into
-                                       pressure[12] - not a mask */
-    unsigned int weapon_state_seen; /* 1<<value, BP_PlayerPad.weaponState */
-    unsigned int button_state_seen; /* 1<<value, BP_PlayerPad.buttonState */
+    int  fire_press_index;
+
+    unsigned int weapon_state_seen;
+    unsigned int button_state_seen;
     int  weapon_state;              /* the last of each, for the heartbeat */
     int  button_state;
     int  fire_state;                /* DG_FIRE_* right now */
     int  fire_pressure;             /* what the last tick would have written */
-    unsigned int fire_wtype;        /* live WeaponSet.type of the held weapon */
+    unsigned int fire_wtype;
     int  recoil_climb_mdeg;         /* as configured */
     int  recoil_push_um;
     long recoil_kicks;              /* shots that reached the spring */
@@ -1086,12 +1086,12 @@ typedef struct {
     long thea_exit_held;            /* clean samples the exit hysteresis sat out */
     /* Per-bit occupancy while sampling, so one run decides the semantics of
        each mask bit separately instead of as a lump. */
-    long thea_bit_demo;             /* STATE_DEMO      0x10000000 */
-    long thea_bit_scn;              /* STATE_SCN_DEMO  0x08000000 */
-    long thea_bit_pad;              /* STATE_PAD_DEMO  0x40000000 */
-    long thea_bit_radio;            /* MENU_RADIO_ON   0x00000400 */
-    long thea_bit_weapon;           /* MENU_WEAPON_OPEN 0x100 */
-    long thea_bit_item;             /* MENU_ITEM_OPEN   0x200 */
+    long thea_bit_demo;
+    long thea_bit_scn;
+    long thea_bit_pad;
+    long thea_bit_radio;
+    long thea_bit_weapon;
+    long thea_bit_item;
     int  thea_verdict;              /* raw published bits, unmasked by mode */
     int  thea_mode;                 /* DG_THEATER_* as configured */
     int  thea_ui_on;
@@ -1126,12 +1126,12 @@ void dg_bridge_start_now(void);
 int dg_bridge_menu_context_ready(void); /* read-only anchor value, no object dereference */
 int dg_bridge_menu_gameover_now(void); /* independent of flat/camera handoff */
 
-/* U2: one frame's worth of synthesized front-end input. `status` is the
-   GV_PAD status bits to arm; 0 means "nothing this frame", which is also
-   the release, exactly as dg_move's silence is. `allow` is the caller's
-   judgment that a FRONT-END screen is up - not merely that the flat quad
-   is showing, because that is also true while a weapon or item menu is
-   open and those are deliberately out of scope. */
+
+
+
+
+
+
 typedef struct DG_BRIDGE_MENU {
     unsigned int status;
 
@@ -1211,27 +1211,34 @@ typedef struct {
 
 void dg_bridge_move_now(const DG_BRIDGE_MOVE *cmd);
 
-/* Single game-tick owner. Provider and stop must be bounded and must NOT
-   reenter controls APIs or legacy fire_now/move_now (the ownership lock is
-   held). Context revocation waits for callback+both consumers to finish.
-   allowed includes a 100 ms renewed context lease, tick safety, armed,
-   non-menu-only and late safety. FPS_ACTIVE and PlayerPad.enable apply only
-   to GAMEPLAY admission; otherwise safe tracking turn stays admitted. SubjectMove
-   remains move_tick's own gate: stationary first-person fire is permitted.
-   This deliberately gates softwareturn before its producer-side side effect.
-   Provider still runs with allowed=0 to preserve an already active fire
-   gesture. Only an idle fire owner may reject a new gesture for radial UI.
-   Register/unregister only from a control thread, never a VEH callback. */
+
+
+
+
+
+
+
+
+
+
+
 #include "dg_m9_runtime.h"
 #include "dg_blade.h"
+#include "dg_stinger_mode.h"
+#include "dg_nikita_mode.h"
 int dg_bridge_blade_enabled(void);
 int dg_bridge_stinger_enabled(void);
+
+
 
 
 
 typedef struct {
     DG_M9_SAMPLE m9;
     DG_BLADE_SAMPLE blade;
+    DG_STINGER_INPUT stinger;
+    DG_NIKITA_INPUT nikita;
+    DG_NIKITA_STEER_INPUT nikita_steer;
     DG_BRIDGE_FIRE fire;
     DG_BRIDGE_MOVE move;
     DG_INTERACT_SAMPLE interact;
@@ -1244,6 +1251,9 @@ enum { DG_CONTROLS_NONE=0, DG_CONTROLS_GAMEPLAY=1, DG_CONTROLS_TURN_ONLY=2,
        DG_CONTROLS_DOWNED=DG_IA_DOWNED_CONTEXT };
 #include "dg_action_owner.h"
 int dg_bridge_zoom_now(uint64_t *identity,float *angle);
+/* Controls provider only: caller holds the controls snapshot lock. */
+int dg_bridge_psg_scope_active(void);
+int dg_bridge_psg_zoom_now(uint64_t *identity,float *angle);
 int dg_bridge_camera_stick_owned(void);
 typedef void (*DG_ACTION_PROVIDER)(DG_ACTION_SAMPLE *sample);
 void dg_bridge_action_register(DG_ACTION_PROVIDER provider);
@@ -1287,14 +1297,14 @@ typedef struct {
     unsigned char byte;        /* the right_dx that was written (128 = none) */
     unsigned char wrote;       /* 1 = this tick wrote the byte, 0 = dense idle */
     long fire_state;           /* DG_FIRE_* at that tick */
-    int pw_ok;                 /* 0 = PlayerWork unreadable; fields below 0 */
-    unsigned long long flags;  /* PlayerWork+0xAC0; bit 0x8 = HORIZON_LIMIT */
+    int pw_ok;
+    unsigned long long flags;
     short turn_vy;             /* +0x8A - the stick's own consumer */
     short rot_vy;              /* +0x82 - the body yaw it eases into */
     short cam_vy;              /* +0xD22 - windowed-aim yaw */
     short cam_pad;             /* +0xD26 - window centre */
     unsigned long long action; /* +0xC60 - base act */
-    unsigned long long action2;/* +0xC78 - overlay act (ShootBullet) */
+    unsigned long long action2;
     /* The follow's own loop, so the 2026-09-01 par. 9 instability (bursts
        alternating up to +-180 deg while aiming, converging when not) can be
        read per tick: what the follow steered on, what it measured, and how
@@ -1347,6 +1357,8 @@ int dg_bridge_theater_verdict(void);
 /* Read current status and ownership words at the camera seam. No cached
    heartbeat/fps verdict is sufficient for this gate. */
 int dg_bridge_camera_gate_now(DG_CAMERA_GATE *out);
+/* Central head camera, never a per-eye or controller matrix. NULL revokes. */
+void dg_bridge_psg_camera(const float world[4][4]);
 long dg_bridge_fps_entry_generation(void);
 /* Confirmed safe view, independent of weapon/arm pose eligibility.
    1 = first person, 2 = an explicit return to third person, 0 = not ready. */

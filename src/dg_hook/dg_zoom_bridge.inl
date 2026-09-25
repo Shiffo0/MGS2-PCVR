@@ -2,7 +2,7 @@
 #include "dg_zoom_resolve.inl"
 static DG_ZOOM_ANCHORS g_zoom_a;
 static DG_DETOUR g_zoom_detour;
-static DG_CAMERA_ZOOM g_zoom_owner;
+static DG_CAMERA_ZOOM g_zoom_owner,g_psg_zoom_owner;
 static volatile LONG g_zoom_direction,g_zoom_applied;
 int dg_bridge_camera_stick_owned(void) {
     dg_radial_inventory_snapshot inv;
@@ -55,16 +55,43 @@ static int zoom_observe(uint64_t expected,uint64_t now,uint64_t *manager_out,
  * R12 -104, R13 -112. Write only these local restored register values. */
 static void zoom_consumer(void *original_rsp) {
     unsigned char *sp=original_rsp;uint64_t work,manager=0,cam=0,actor=0;unsigned om=0,imask=0,shutter=0,status=0;
-    DG_ACTION_SAMPLE p={0};int allowed=0,hatch=0,direction;uint64_t now=GetTickCount64();
+    DG_ACTION_SAMPLE p={0};int allowed=0,hatch=0,direction,psg=0;uint64_t now=GetTickCount64();
     if(!TryAcquireSRWLockExclusive(&g_action_lock)){InterlockedExchange(&g_action_lost,1);return;}
     if(g_action_provider)g_action_provider(&p);
+
+
+
     if(interact_read(NULL,(uint64_t)(ULONG_PTR)sp-56,&work,8) &&
+       psg_zoom_observe(work,&manager,&cam,&om,&imask)) {
+        psg=1;allowed=p.valid&&!p.denied&&!p.shutter_denied;
+
+
+
+
+
+
+
+
+    }
+    if(!psg && interact_read(NULL,(uint64_t)(ULONG_PTR)sp-56,&work,8) &&
        zoom_observe(work,now,&manager,&cam,&om,&imask) && action_observe(&actor,&hatch) && !hatch &&
        interact_read(NULL,g_camera_a.mask,&shutter,4) &&
        interact_read(NULL,g_camera_a.pad+4,&status,4))
         allowed=p.valid&&p.zoom_active&&!p.denied&&!p.shutter_denied&&!p.shutter_down&&!(status&shutter);
     if(InterlockedExchange(&g_action_lost,0))allowed=0;
-    direction=dg_camera_zoom_step(&g_zoom_owner,p.sample,p.source,manager,now,p.age_ms,allowed,p.zoom_y);
+    direction=psg ? dg_psg_zoom_step(&g_psg_zoom_owner,p.sample,p.source,manager,now,p.age_ms,
+                        allowed,(float)p.psg_grip_zoom)
+                  : dg_camera_zoom_step(&g_zoom_owner,p.sample,p.source,manager,now,p.age_ms,
+                        allowed,p.zoom_y);
+    if(!psg)memset(&g_psg_zoom_owner,0,sizeof g_psg_zoom_owner);
+    /* Retail out_mask branch ADDS focal length; in_mask SUBTRACTS it.
+       Grip-in means greater magnification, regardless of those legacy names. */
+    if(psg)direction=-direction;
+
+
+
+
+
     if(direction){
         dg_camera_zoom_merge(direction,om,imask,(uint64_t*)(sp-48),(uint64_t*)(sp-112),(uint64_t*)(sp-104));
         InterlockedIncrement(&g_zoom_applied);

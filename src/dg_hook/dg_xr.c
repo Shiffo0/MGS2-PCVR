@@ -29,6 +29,10 @@ void dg_xr_set_capture_observer(DG_XR_CAPTURE_OBSERVER observer) {
 
 #include <d3d11.h>
 #include <d3d11_4.h>                    /* ID3D11Multithread - see g_mt */
+#include "dg_context_trace.h"
+
+
+
 #include <dxgi.h>
 #define XR_USE_PLATFORM_WIN32
 #define XR_USE_GRAPHICS_API_D3D11
@@ -770,6 +774,7 @@ void dg_xr_turn_step(double ref_q[2], double ref_p[2],
 
 
 
+
 /* ---- dynamically resolved entry points ---------------------------------
    The loader is loaded by name rather than linked, so a machine with no
    OpenXR at all produces a clean "unavailable" log line instead of a game
@@ -918,7 +923,7 @@ typedef struct {
     DG_PROJ_FOV fov;
     int valid;
     uint64_t capture_id, capture_ms;
-    DG_MODEL_ARM model_arm;
+    DG_MODEL_ARM model_arm, right_model_arm;
 } DG_CAPTURE_STORE;
 static DG_CAPTURE_STORE g_store[2];
 static ID3D11Multithread *g_mt;
@@ -984,6 +989,7 @@ static volatile LONG g_bad_pose_logged;
 #include "dg_xr_radial.inl"
 static XrSwapchain health_radar_swap(void);
 #include "dg_xr_health.inl"
+static void ammo_teardown(void);
 #include "dg_xr_grip_debug.inl"
 static void radar_teardown(void);      /* dg_xr_radar.inl, included ahead of the frame loop */
 static double g_ref_qy, g_ref_qw;      /* yaw-only quaternion, (0,qy,0,qw) */
@@ -1418,10 +1424,17 @@ static int xr_init(void) {
             g_dev->lpVtbl->GetImmediateContext(g_dev, &g_ctx);
             /* Two threads will drive this context. Say so explicitly. */
             if (SUCCEEDED(g_ctx->lpVtbl->QueryInterface(g_ctx, &IID_ID3D11Multithread,
-                                                        (void **)&g_mt)) && g_mt)
+                                                        (void **)&g_mt)) && g_mt) {
+                dg_context_trace_emit(g_log,"xr_before_enable",g_dev,g_ctx,g_mt,DG_ENABLE_DIAGNOSTICS);
                 g_mt->lpVtbl->SetMultithreadProtected(g_mt, TRUE);
-            else
+                dg_context_trace_emit(g_log,"xr_after_enable",g_dev,g_ctx,g_mt,DG_ENABLE_DIAGNOSTICS);
+
+
+
+            } else {
+                dg_context_trace_emit(g_log,"xr_multithread_unavailable",g_dev,g_ctx,g_mt,DG_ENABLE_DIAGNOSTICS);
                 g_log("  xr: ID3D11Multithread unavailable - context sharing is unsafe\r\n");
+            }
             g_log("  xr: adopted the game's D3D11 device\r\n");
         } else {
             g_log("  xr: game device is on a different adapter - staying pose-only\r\n");
@@ -1460,13 +1473,16 @@ static int xr_init(void) {
 }
 
 static void xr_teardown(void) {
+
+
+
     int stopped=!g_session_running;
     sm_teardown();
     pixel_probe_teardown();
     if (g_session_running && pfn_EndSession) stopped=pfn_EndSession(g_sess)==XR_SUCCESS;
     radial_stop(stopped);
     health_stop(stopped);gripdbg_stop(stopped);
-    radar_teardown();
+    radar_teardown();ammo_teardown();
     g_session_running = 0;
     InterlockedExchange(&g_submitting, 0);
     InterlockedExchange(&g_have_capture, 0);
@@ -1729,6 +1745,7 @@ void dg_xr_capture_measured(void *swapchain, int eye, const DG_XR_RAW_POSE *raw,
         sp_capture(back,store->texture,mono?DG_EYE_MONO:eye,store->capture_id);
         sm_producer(3,mono?DG_EYE_MONO:eye,raw,fov,meta,store->capture_id);
         dg_bridge_model_arm_snapshot(&store->model_arm);
+        dg_bridge_right_model_arm_snapshot(&store->right_model_arm);
         {
             DG_XR_CAPTURE_OBSERVER observer=(DG_XR_CAPTURE_OBSERVER)
                 InterlockedCompareExchangePointer(&g_capture_observer,NULL,NULL);
@@ -2325,7 +2342,7 @@ typedef struct {
     uint32_t width, height;
     DG_XR_RAW_POSE raw[2];
     DG_PROJ_FOV fov[2];
-    DG_MODEL_ARM model_arm[2];
+    DG_MODEL_ARM model_arm[2], right_model_arm[2];
 } DG_SUBMIT_CAPTURE;
 
 static void submit_capture_lock(void *unused) {
@@ -2379,6 +2396,7 @@ static void submit_capture_copy(void *ctx, int eye) {
     cap->raw[eye] = g_store[eye].raw;
     cap->fov[eye] = g_store[eye].fov;
     cap->model_arm[eye] = g_store[eye].model_arm;
+    cap->right_model_arm[eye] = g_store[eye].right_model_arm;
     g_ctx->lpVtbl->CopyResource(g_ctx,
         (ID3D11Resource *)g_images[eye][cap->idx[eye]].texture,
         (ID3D11Resource *)g_store[eye].texture);
@@ -2438,6 +2456,7 @@ static int submit_capture_images(DG_SUBMIT_CAPTURE *capture, const char **fatal)
 }
 
 #include "dg_xr_radar.inl"
+#include "dg_xr_ammo.inl"
 static XrSwapchain health_radar_swap(void) { return g_radar_swap; }
 
 static const char *xr_frame_loop(void) {
@@ -2448,12 +2467,12 @@ static const char *xr_frame_loop(void) {
         XrFrameEndInfo fei;
         XrCompositionLayerProjectionView pview[2];
         XrCompositionLayerProjection proj;
-        XrCompositionLayerQuad quad, radial_quad, radar_quad, health_quad;
+        XrCompositionLayerQuad quad, radial_quad, radar_quad, health_quad, ammo_quad;
         const XrCompositionLayerBaseHeader *layers[10];
         XrCompositionLayerQuad grip_quads[6];
         XrView view[2];
         DG_XR_FRAME published;
-        DG_MODEL_ARM submitted_arm={0};
+        DG_MODEL_ARM submitted_arm={0},submitted_right_arm={0};
         int published_status;
         int views_valid = 0;
         int screen_on, radar_ready;
@@ -2672,6 +2691,8 @@ static const char *xr_frame_loop(void) {
                               g_screen_anchor_dist);
                 } else if (copied) {
                     submitted_arm=capture.model_arm[0];
+                    submitted_right_arm=capture.right_model_arm[0];
+                    if(stereo && capture.right_model_arm[1].ms>submitted_right_arm.ms)submitted_right_arm=capture.right_model_arm[1];
                     if(stereo && capture.model_arm[1].ms>submitted_arm.ms)
                         submitted_arm=capture.model_arm[1];
                     for (i = 0; i < 2; i++) {
@@ -2721,6 +2742,8 @@ static const char *xr_frame_loop(void) {
         if (radar_ready) radar_insert(&fei,layers,4,&radar_quad);
         health_append(&fei,layers,4,&health_quad,fs.shouldRender,screen_on,views_valid,
                       fs.predictedDisplayTime,GetTickCount64());
+        if(ammo_prepare(&fei,&ammo_quad,fs.shouldRender,screen_on,&published,published_status,GetTickCount64(),&submitted_right_arm))
+            ammo_insert(&fei,layers,5,&ammo_quad);
         gripdbg_append(&fei,layers,10,grip_quads,fs.shouldRender,screen_on,views_valid,
                        fs.predictedDisplayTime,GetTickCount64());
         if (!fei.layerCount) capture_diag_inc(CD_ZERO);

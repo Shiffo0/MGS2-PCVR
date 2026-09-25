@@ -1200,12 +1200,12 @@ int dg_ik_quat_to_ps_angles(const double q[4], short out[3], unsigned *flags)
     vy = ps_round_units(pitch);
     vz = ps_wrap_units(ps_round_units(yaw));
 
-    /* A vy of 0 is not a small angle to this engine, it is a different
-       conversion: GM_RotToQuat is only called when vy != 0, and the else branch
-       (GM_RotToQuatXAfterY) forces quat.vy = 0 and drops a whole degree of
-       freedom. One unit is 0.088 degrees, which is below the quantisation error
-       we are already accepting, so the branch is worth far more than the
-       angle. */
+
+
+
+
+
+
     if (vy == 0) {
         vy = (sin_p < 0.0) ? -1 : 1;
         f |= DG_IK_PS_VY_CLAMPED;

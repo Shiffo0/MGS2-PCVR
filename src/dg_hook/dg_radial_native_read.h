@@ -1,15 +1,15 @@
 #ifndef DG_RADIAL_NATIVE_READ_H
 #define DG_RADIAL_NATIVE_READ_H
 #include "dg_radial_inventory.h"
-/* Read-only retail no-use/catalog observer. Never calls native functions.
- * kind index: 0 weapon, 1 item. These are semantic enum bounds, cross-checked
- * against the supported retail name/type profiles, NOT physical storage lengths.
- * Caller supplies approved image identity and serialized, fault-contained reads.
- * phase_fresh must mean AFTER this tick's SetNoUse and before equip checks.
- * NONE (ID 0) skips stock checks but retains exact type and no-use checks.
- * Eligibility is inventory+no-use only, never the complete engine-ready gate.
- * No output authorizes a write; root phase/ownership/commit policy is separate.
- */
+
+
+
+
+
+
+
+
+
 enum { DG_RN_WEAPONS=22, DG_RN_ITEMS=41 };
 typedef struct dg_radial_native_anchors {
     int valid;

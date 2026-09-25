@@ -31,6 +31,24 @@ static int dg_camera_zoom_step(DG_CAMERA_ZOOM *s,uint64_t sample,uint64_t source
     s->source=source;s->manager=manager;s->seen=1;s->y=y;
     return s->direction;
 }
+
+
+
+
+static int dg_psg_zoom_step(DG_CAMERA_ZOOM *s,uint64_t sample,uint64_t source,
+    uint64_t manager,uint64_t now,unsigned age,int allowed,float grip) {
+    int identity=!s->seen || source!=s->source || manager!=s->manager;
+    int valid=allowed && sample && source && manager && age<=100 &&
+        (grip==-1.0f || grip==0.0f || grip==1.0f) && now>=s->time &&
+        (identity || sample>=s->sample);
+    if(identity)s->blocked=1;
+    if(grip==0.0f)s->blocked=0;
+    s->direction=(valid && !s->blocked)?(grip>0?1:grip<0?-1:0):0;
+    if(identity || sample>s->sample)s->sample=sample;
+    if(now>s->time)s->time=now;
+    s->source=source;s->manager=manager;s->seen=1;s->y=grip;
+    return s->direction;
+}
 /* Only add a local synthetic direction when physical native input is neutral.
  * No global pad writes, no synthetic invocation of the native actor. */
 static void dg_camera_zoom_merge(int direction,unsigned out_mask,unsigned in_mask,

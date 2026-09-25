@@ -7,6 +7,7 @@ extern "C" {
 void dg_draw_trial_attach(ID3D11Device *device,void (*log)(const char*,...));
 void dg_draw_trial_poll(const char *session_marker);
 void dg_draw_trial_present(void);
+void dg_draw_trial_xr_ready(ID3D11Device*,ID3D11DeviceContext*);
 void dg_draw_trial_stop(void);
 void dg_blit_boundary_control(const char *dir,int active,unsigned mark,unsigned present,int eye);
 /* Constant-buffer capture (dg_cb_probe.inl): the camera seam publishes the

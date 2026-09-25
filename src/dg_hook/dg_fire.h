@@ -16,17 +16,28 @@
    the current pressure against work->sv2.vx, which it stores each tick). Three
    costs nothing and survives a tick where the stance did not run. */
 #define DG_FIRE_ABORT_TICKS     3
+/* Hard cap on the cancel window. A pistol draw becomes cancel-ready within
+   about 8 ticks; a weapon whose native handler never reports it (Nikita,
+   25 Sep 2026: state 4, pressure 12 held for minutes, radial blocked because
+   fire_idle stayed 0) must still let go of the button. 60 ticks = 1 s. */
+#define DG_FIRE_ABORT_MAX_TICKS 60
 
 /* Separate aim travel (XR click) from the deliberate firing detent. */
 #define DG_FIRE_TRIGGER_SHOOT   0.85
 #define DG_FIRE_TRIGGER_REARM   0.70
 
-/* WeaponSet.type bits, read live from work->wp_set->type rather than kept in a
-   table here - the game already carries that table and ours could drift. */
-/* Coolant uses held status in JetSpray, not the pistol release contract. */
+
+
+
 #define DG_FIRE_WP_COOLANT      0x00008062u
 #define DG_FIRE_WP_PRESSURE     0x0080u
 #define DG_FIRE_WP_CONSECUTIVE  0x0010u
+
+
+
+
+
+#define DG_FIRE_WP_NIKITA       0x08084682u
 
 /* How old a controller sample may be, in game ticks, and still describe now.
  *
@@ -83,16 +94,16 @@ typedef struct {
     int sample_age;
     int input_ok;           /* tracked, active, this hand is the driven one */
     int can_write;          /* every bridge gate: FPS, safety, player, weapon */
-    int physical_down;      /* the game's own PL_PAD_WEAPON status bit */
-    unsigned int wtype;     /* live WeaponSet.type */
-    int native_ready;      /* ShootBullet: PLAYER_HOLD, ftime2 >= 8, data3 == 0 */
+    int physical_down;
+    unsigned int wtype;
+    int native_ready;
     int native_cancel_ready; /* ftime2 >= 8: pressure is consumed also at walls */
 } DG_FIRE_IN;
 
 typedef struct {
-    int press;              /* OR PL_PAD_WEAPON into pad.press */
-    int status;             /* OR PL_PAD_WEAPON into pad.status */
-    int release;            /* OR PL_PAD_WEAPON into pad.release */
+    int press;
+    int status;
+    int release;
     int pressure;           /* store into pad.pressure[idx]; -1 = do not touch */
     int state;
     unsigned int flags;
@@ -107,6 +118,7 @@ typedef struct {
     int started;
     int full_pull;                     /* automatic firing detent latch */
     unsigned int weapon_type;          /* abort if the live weapon changes type */
+    int abort_ticks;                   /* ticks spent in ABORT, capped */
 } DG_FIRE;
 
 void dg_fire_reset(DG_FIRE *f);

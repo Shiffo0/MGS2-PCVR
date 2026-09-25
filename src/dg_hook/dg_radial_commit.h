@@ -24,6 +24,7 @@ enum dg_radial_commit_phase { DG_RADIAL_COMMIT_IDLE, DG_RADIAL_COMMIT_PENDING,
     DG_RADIAL_COMMIT_AWAIT_ACK, DG_RADIAL_COMMIT_BLOCKED };
 typedef struct dg_radial_commit_intent {
     int kind, id;
+    int thermal_toggle, expected_item; /* additional native toggle revalidation */
     uint64_t epoch, context, version, seq;
 } dg_radial_commit_intent;
 typedef struct dg_radial_commit_state {

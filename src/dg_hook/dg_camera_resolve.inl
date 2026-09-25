@@ -41,8 +41,8 @@ static int camera_resolve_image(const LiveImage *im,uint64_t pad,uint64_t mask,D
         if(q[0x152]!=0xe8)continue;
         timer=da_rel(im,c+0x152,5,q+0x153);
         if(!timer || !da_code(im,(DWORD)(timer-im->base),0x37))continue;
-        /* DIRECT_TICK(30): mode one yields (5*30+1)/6 = 25;
-         * otherwise returns 30. The mode query is read by native code. */
+
+
         {const unsigned char *t=im->bytes+(DWORD)(timer-im->base);
          if(!da_eq(t,"\x40\x53\x48\x83\xec\x20\x8b\xd9\xe8",9) ||
             !da_eq(t+0xd,"\x83\xf8\x01\x75\x1d\x8d\x0c\x9d\x01\0\0\0\xb8\xab\xaa\xaa\x2a\x03\xcb\xf7\xe9\x8b\xc2\xc1\xe8\x1f\x03\xc2\x48\x83\xc4\x20\x5b\xc3\x8b\xc3\x48\x83\xc4\x20\x5b\xc3",42))continue;}

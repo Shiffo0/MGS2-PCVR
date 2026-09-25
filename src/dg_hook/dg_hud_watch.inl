@@ -140,9 +140,9 @@ static void hud_debug_registers(CONTEXT *c,int arm) {
 
 
 }
-/* Same getter signatures and bounded layout traversal as the verified reader.
- * Only a non-empty SP_POLY cursor is eligible; SP_EMPTY fields are not pointers.
- */
+
+
+
 
 
 

@@ -48,6 +48,7 @@ static int held(const DG_FIRE_IN *in)
 
 static void enter(DG_FIRE *f, int state)
 {
+    if (state != DG_FIRE_ABORT) f->abort_ticks = 0;
     f->state = state;
     f->ticks = 0;
 }
@@ -86,7 +87,9 @@ void dg_fire_step(DG_FIRE *f, const DG_FIRE_IN *in, DG_FIRE_OUT *out)
 
     current = fresh(in);
     threshold_weapon = ((in->wtype | (f->state != DG_FIRE_IDLE ? f->weapon_type : 0)) &
-                        (DG_FIRE_WP_PRESSURE | DG_FIRE_WP_CONSECUTIVE)) != 0;
+                        (DG_FIRE_WP_PRESSURE | DG_FIRE_WP_CONSECUTIVE)) != 0 &&
+                       in->wtype != DG_FIRE_WP_NIKITA &&
+                       !(f->state != DG_FIRE_IDLE && f->weapon_type == DG_FIRE_WP_NIKITA);
     if (current) f->gap = 0;
     else if (f->gap < DG_FIRE_GRACE_TICKS + 1) f->gap++;
 
@@ -224,6 +227,16 @@ void dg_fire_step(DG_FIRE *f, const DG_FIRE_IN *in, DG_FIRE_OUT *out)
 
     case DG_FIRE_ABORT:
     abort_tick:
+        /* Never hold the button forever: after the cap, stand down without
+           waiting for a native confirmation that is not coming. */
+        if (++f->abort_ticks > DG_FIRE_ABORT_MAX_TICKS) {
+            f->abort_ticks = 0;
+            out->release = 1;
+            out->pressure = 0;
+            out->flags |= DG_FIRE_F_ABORTING;
+            enter(f, DG_FIRE_IDLE);
+            break;
+        }
         out->status = 1;
         out->pressure = DG_FIRE_ABORT_PRESSURE;
         out->flags |= DG_FIRE_F_ABORTING;
