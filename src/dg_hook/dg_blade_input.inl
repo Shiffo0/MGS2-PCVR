@@ -15,6 +15,14 @@ static void blade_sample_from_frame(const DG_XR_FRAME *f,int allowed,
     s->source=g_arm_pose_stream_id;s->sequence=p->sample_seq;s->context=context;
     s->time_ns=p->xr_time;s->now_ms=now;s->allowed=allowed;
     s->grip=f->right_hand.squeeze_click!=0;
+    {   const DG_XR_HAND_POSE *l=&f->left_hand.grip;
+        s->left_grip=f->left_hand.squeeze_click!=0;
+        if(l->active && l->tracked && l->position_valid && l->pose_age_ms<=100 &&
+           l->sample_seq==p->sample_seq) {
+            s->left[0]=l->raw_local.px;s->left[1]=l->raw_local.py;s->left[2]=l->raw_local.pz;
+            s->left_valid=1;
+        }
+    }
     if(!p->active || !p->tracked || !p->position_valid || !p->orientation_valid ||
        !a->active || !a->tracked || !a->orientation_valid ||
        p->pose_age_ms>100 || a->pose_age_ms>100 || !p->sample_seq ||

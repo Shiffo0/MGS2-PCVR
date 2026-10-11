@@ -1,11 +1,18 @@
 {
-  "version": "v0.4.0",
-  "build": "AEF2EC93",
-  "binary_sha256": "AEF2EC9304365DF292263C5041B10BDA6AC9EBA36884AF65BD72BF3DFE9D8A23",
-  "base_version": "v0.3.5",
-  "gameplay_source_base": "05F4F9F6",
-  "playtest_build": "05F4F9F6",
+  "version": "v0.5.0",
+  "build": "F267E7C0",
+  "binary_sha256": "F267E7C0A50BF7F3DDB5D1FC760B7DFBF04560F56CD66B3BA0CBF3A87CF0C8E0",
   "diagnostics_enabled": false,
-  "source_profile": "player-only",
-  "headset_acceptance": "Gameplay code accepted on playtest build 05F4F9F6; not established for this rebuilt binary"
+  "defaults": {
+    "stereo": "1",
+    "vr_second_eye": "0",
+    "vr_observer": "1",
+    "vr_observer_mode": "1",
+    "stereo_test": "2"
+  },
+  "experimental": [
+    "Two Eye rendering (VR Rendering: BOTH EYES (EXP))",
+    "Both Eyes desktop observer"
+  ],
+  "requires_for_two_eye_rendering": "MGSHDFix"
 }

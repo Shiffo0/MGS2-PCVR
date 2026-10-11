@@ -1,6 +1,6 @@
 // dg_ui2d.inl - per-eye placement of the game's flat 2D sprites (2026-09-18).
 //
-// Measured with dg_cb_probe (artifacts/cb_probe_20260918): the camera
+
 // viewfinder overlay and the HUD are passes of non-indexed 4-vertex quads
 // whose vertex-shader register bank holds PS2 screen-space constants and no
 // view-projection:
@@ -260,6 +260,13 @@ const char *ui2dTexName(void *p) { return !p ? "null" : p == ui2dTraceTarget[0] 
 
 
 
+#define UI2D_COPY_HAZARD(c, dst) batchHazard(c, FL_WRITE, dst)
+#define UI2D_COPY_CENSUS(c, k, dst, src) ((void)0)
+
+
+
+
+
 
 
 
@@ -406,6 +413,9 @@ bool ui2dSceneTexture(ID3D11DeviceContext *c) {
 }
 void *ui2dUpload(void *dst, const void *src, size_t n) {
     memcpy(dst, src, n);
+
+    cbShadowUpload(dst, src, n);                             // second eye: the CPU copy of this bank
+
     InterlockedIncrement(&ui2dUploads);
     ui2dBank = src; ui2dBankLen = n;
     InterlockedExchange(&ui2dGpuPatched, 0);                 // the game's own bytes are on the GPU now

@@ -315,6 +315,23 @@ static int geometry(uint64_t base,CAP_RECORD *r) {
 
 
 
+/* Stinger selection window (see the weapon 7 branch below). */
+#define DG_STINGER_TIGHT_DEG 20.0
+#define DG_STINGER_LOOSE_DEG 60.0
+#define DG_STINGER_HOLD_MS   300   /* after the last accepted selection */
+#define DG_STINGER_EQUIP_MS  1000  /* after the Stinger is picked up */
+#define DG_STINGER_GAP_MS    500   /* no selection call this long: a new pick-up */
+static ULONGLONG (WINAPI *g_stinger_clock)(void)=GetTickCount64;
+static struct { uint64_t subobject; ULONGLONG seen_ms, equip_ms, accepted_ms; int accepted_once; } g_stinger_sel;
+
+
+
+
+
+
+void dg_aim_capture_stinger_clock(ULONGLONG (WINAPI *clock)(void)) {
+    g_stinger_clock=clock?clock:GetTickCount64;memset(&g_stinger_sel,0,sizeof g_stinger_sel);
+}
 int dg_aim_capture_hand_selection(uintptr_t base, uint64_t expected_arm,
                                 DG_AIM_SELECTION *selection) {
     CAP_RECORD r;
@@ -356,8 +373,11 @@ int dg_aim_capture_hand_selection(uintptr_t base, uint64_t expected_arm,
         /* Stinger: geometry() already requires the object root to carry the live
            hand rotation exactly. Model 0 is the rendered copy, one frame behind a
            moving VR hand, so exact equality flapped and reset the arm map several
-           times a second. Require a real rotation within 20 degrees of the root. */
-        double basis[3][3],rootb[3][3],qm[4],qr[4],dot;
+           times a second. Require a real rotation within 20 degrees of the root;
+           within 60 while the Stinger is being raised (first second after the
+           pick-up) or while the same object was accepted in the last 300 ms. */
+        double basis[3][3],rootb[3][3],qm[4],qr[4],dot,deg,limit;
+        ULONGLONG now=g_stinger_clock();
         for(i=0;i<3;i++) for(j=0;j<3;j++) {
             basis[i][j]=r.model_world[0].m[i][j];
             rootb[i][j]=r.input.weapon_root_world[i][j]; /* float in the probe record */
@@ -366,8 +386,36 @@ int dg_aim_capture_hand_selection(uintptr_t base, uint64_t expected_arm,
         if((!dg_ik_basis_quat(rootb,qr)))return 0;
         dot=fabs(qm[0]*qr[0]+qm[1]*qr[1]+qm[2]*qr[2]+qm[3]*qr[3]);
         if(dot>1)dot=1;
-        if((2.0*acos(dot)>20.0*3.14159265358979323846/180.0))return 0;
+        deg=2.0*acos(dot)*180.0/3.14159265358979323846;
+        if(r.subobject!=g_stinger_sel.subobject || now<g_stinger_sel.seen_ms ||
+           now-g_stinger_sel.seen_ms>DG_STINGER_GAP_MS) {
+            memset(&g_stinger_sel,0,sizeof g_stinger_sel);
+            g_stinger_sel.subobject=r.subobject;g_stinger_sel.equip_ms=now;
+
+
+
+        }
+        g_stinger_sel.seen_ms=now;
+        limit=DG_STINGER_TIGHT_DEG;
+        if(now-g_stinger_sel.equip_ms<=DG_STINGER_EQUIP_MS ||
+           (g_stinger_sel.accepted_ms && now-g_stinger_sel.accepted_ms<=DG_STINGER_HOLD_MS))
+            limit=DG_STINGER_LOOSE_DEG;
+        if((deg>limit)) {
+
+
+
+            return 0;
+        }
         if((!same_ptr(r.subobject,r.subobjs)))return 0;
+
+
+
+
+
+
+
+
+        g_stinger_sel.accepted_once=1;g_stinger_sel.accepted_ms=now;
     } else {
         for(i=0;i<3;i++) for(j=0;j<3;j++)
             if((fabs(r.model_world[0].m[i][j]-r.input.weapon_root_world[i][j])>0.002))
@@ -589,6 +637,10 @@ long dg_aim_capture_dump(const char *path) {
 return 0;
 
 }
+
+
+
+
 
 
 

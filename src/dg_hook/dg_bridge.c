@@ -24,6 +24,7 @@
 #include <string.h>
 
 #include "dg_bridge.h"
+static LONG f2l(float f);
 #include "dg_model_arm.h"
 #include "dg_interact_adapter.inl"
 #include "dg_radial_inventory.h"
@@ -2142,10 +2143,15 @@ static void unarmed_prone_stop(void);
 static void blade_resolve(const LiveImage *im);
 static void blade_install(int requested);
 static void blade_stop(void);
+static void fake_go_resolve(const LiveImage *im);
+static void fake_go_install(void);
+static void fake_go_stop(void);
 static void blade_tick(int safe);
+static void blade_guard_pad(int safe);
 static void stinger_tick(int safe);
 static void stinger_revoke(void);
 static int blade_claim(void);
+static int blade_brace_claim(void);
 #include "dg_native_hud.inl"
 static void mobile_resolve(const LiveImage *im);
 static void nikita_visual_release(void);
@@ -2166,6 +2172,12 @@ static void coolant_install(void);
 static void coolant_stop(void);
 #include "dg_shared_motion.inl"
 #include "dg_pistol_reload.inl"
+static void reload_highlight_resolve(const LiveImage *image);
+static void reload_highlight_install(void);
+static void reload_highlight_stop(void);
+static void aim_blend_resolve(const LiveImage *image);
+static void aim_blend_install(void);
+static void aim_blend_stop(void);
 #include "dg_mod_menu_bridge.inl"
 static void controls_clear_legacy(void) {
     InterlockedExchange(&g_b.fire_valid,0);
@@ -2570,6 +2582,7 @@ static void bridge_tick_body(void)
     g_b.tick_status = status;
     move_tick(in.safe_gameplay);
     interact_tick(in.safe_gameplay);
+    blade_guard_pad(in.safe_gameplay);
     mod_menu_pad(in.safe_gameplay);
     controls_end();
     InterlockedExchange(&g_b.s_status_lo, (LONG)(DWORD)status);
@@ -2882,6 +2895,7 @@ int dg_bridge_start(void (*log)(const char *fmt, ...),
     move_resolve_workl(&image);
     m9_resolve(&image);
     blade_resolve(&image);
+    fake_go_resolve(&image);
     stinger_resolve(&image);
     nikita_sight_resolve(&image);
     nikita_steer_resolve(&image);
@@ -2891,6 +2905,8 @@ int dg_bridge_start(void (*log)(const char *fmt, ...),
     coolant_resolve(&image);
     mobile_resolve(&image);
     reload_resolve(&image);
+    aim_blend_resolve(&image);
+    reload_highlight_resolve(&image);
     /* The anchor addresses are image-relative; the copy is about to go away. */
     free_live_image(&image);
 
@@ -2943,7 +2959,10 @@ int dg_bridge_start(void (*log)(const char *fmt, ...),
     psg_install();
     unarmed_prone_install(cfg && cfg->unarmed_prone_enabled);
     blade_install(cfg && cfg->hf_blade);
+    fake_go_install();
     reload_install(1);
+    aim_blend_install();
+    reload_highlight_install();
     g_reload.enabled=cfg && cfg->pistol_reload;
     InterlockedExchange(&g_m9_enabled,cfg && cfg->m9_slide ? 1:0);
     dg_bridge_mod_menu_request((cfg && cfg->pistol_reload?2u:0u)|(cfg && cfg->m9_slide?4u:0u));
@@ -3402,6 +3421,8 @@ void dg_bridge_stop(void)
         g_radial_game.live=0;
     }
     dg_bridge_action_register(NULL);
+    reload_highlight_stop();
+    aim_blend_stop();
     reload_stop();
     psg_stop();
     stinger_stop();
@@ -3413,6 +3434,7 @@ void dg_bridge_stop(void)
     coolant_stop();
     m9_stop();
     blade_stop();
+    fake_go_stop();
     dg_detour_remove(&g_action_detour);
     dg_detour_remove(&g_camera_detour);
     dg_detour_remove(&g_b.detour);
@@ -4868,6 +4890,7 @@ static int resolve_hand_player(ULONGLONG *a, ULONGLONG *p, LONG *w)
 #include "dg_nikita_steer.inl"
 
 #include "dg_blade_bridge.inl"
+#include "dg_fake_gameover.inl"
 #include "dg_stinger_bridge.inl"
 #include "dg_psg_bridge.inl"
 #include "dg_psg_zoom.inl"
@@ -4877,6 +4900,7 @@ static int resolve_hand_player(ULONGLONG *a, ULONGLONG *p, LONG *w)
 
 static void interact_grip_claims(DG_INTERACT_SAMPLE *sample) {
     if(blade_claim() || stinger_claim() || g_nikita_claim)sample->suppressed|=DG_IA_CODEC;
+    if(blade_brace_claim())sample->suppressed|=DG_IA_CAPTURE;
 }
 static void interact_tick(int safe_gameplay)
 {
@@ -5545,7 +5569,13 @@ static void move_tick(int safe_gameplay)
         else
             cam_dir = -1;
     }
-    if ((third_ok || in.max_deflect) && cam_dir >= 0) {
+    if(blade_claim()) {
+        int heading;
+        /* Blade actions consume world pad.dir even while the VR FPS owner
+         * is active. The native pre-VR camera origin is insufficient here. */
+        if(!blade_heading_now(&heading))return;
+        in.dir_wanted=1;in.dir_org=(heading+2048)&4095;
+    } else if ((third_ok || in.max_deflect) && cam_dir >= 0) {
 
         LONG sign = InterlockedCompareExchange(&g_b.move_dir_sign, 0, 0);
         LONG off = InterlockedCompareExchange(&g_b.move_dir_offset, 0, 0);
@@ -5646,7 +5676,7 @@ static void move_tick(int safe_gameplay)
     }
     if (third_ok) InterlockedIncrement(&g_b.c_move_third_writes);
     if (in.max_deflect) InterlockedIncrement(&g_b.c_move_prone_writes);
-    if (third_ok || in.max_deflect) {
+    if (third_ok || in.max_deflect || blade_claim()) {
         InterlockedExchange(&g_b.mp_w_tick, now);
         InterlockedExchange(&g_b.mp_w_dir, out.dir_write ? out.dir : -2);
         InterlockedExchange(&g_b.mp_w_status,
@@ -5893,7 +5923,7 @@ static void fire_tick(int safe_gameplay)
         else if (in.physical_down) InterlockedIncrement(&g_b.c_fire_yielded);
         else fire_write(&out, wmask, pidx);
     }
-    coolant_trace_tick(safe_gameplay,mode,&in,&out,0); /* actual post-write pad */
+
     if(weapon==14 && mode==DG_FIRE_MODE_ON && in.can_write && in.input_ok &&
        !in.physical_down && !reload_block && !m9_block && !g_mod_capture &&
        out.status && wmask && pidx>=0 && pidx<DG_PAD_PRESSURE_COUNT) {
@@ -7491,6 +7521,9 @@ refuse_unpaired:
 
 #include "dg_left_arm.inl"
 #include "dg_hand_pose.inl"
+#include "dg_aim_blend.inl"
+#include "dg_reload_highlight.inl"
+#include "dg_magwell_bridge.inl"
 #include "dg_unarmed_rest.inl"
 
 /* ------------------------------------------- F5 step 3: the adjust space --- */
@@ -7502,9 +7535,9 @@ refuse_unpaired:
    written last time. Pairing a matrix with this frame's input instead of last
    frame's is the one error that would produce a confident wrong answer, which
    is why the case index is carried across frames rather than recomputed. */
-/* The heading words for Meetplan A' (ROLL_ONTWERP_V5.1 par. 3), stored beside
-   the case they bracket. An unresolvable player leaves ok = 0 and the words
-   at 0, so a run with no player never fabricates a heading. */
+
+
+
 static void adj_probe_words(int c, int phase)
 {
     ULONGLONG pwork = 0, pend = 0;
@@ -8303,12 +8336,15 @@ void dg_bridge_arm_seam_now(const DG_BRIDGE_ARM_TARGET *target)
         unsigned long left_before=g_left.accepted;
         memset(&g_hand_capture,0,sizeof g_hand_capture);
         arm_ik_now(arm, target);
+        if (g_b.c_arm_pairs_accepted != accepted_before)
+            g_aim_blend_lease_ms = GetTickCount64();
         /* Every tick, as in the tested Nikita-arm build: the lease is released
            at the top of every seam, so an accepted-pair gate here dropped the
            visual on each tick without a new pair. nikita_visual_apply keeps
            its own write/hand/aim/position/owner guards. */
         nikita_visual_apply(arm, target);
         left_arm_now(arm, target, g_b.c_arm_pairs_accepted != accepted_before);
+        left_blade_observe(arm,target);
         hand_profile_commit(target,g_b.c_arm_pairs_accepted != accepted_before &&
             g_left.active && g_left.accepted!=left_before && g_left.wrist_world_valid);
         if(g_b.c_arm_pairs_accepted != accepted_before) hand_pose_now(arm,target);
@@ -8350,6 +8386,9 @@ int dg_bridge_theater_verdict(void)
     int door;
     if (!InterlockedCompareExchange(&g_b.armed, 0, 0)) return 0;
     door=dg_bridge_hatch_now()?4:0;
+    /* Fission Mailed is not theater: its overlay is suppressed and play
+       continues in stereo (dg_fake_gameover.inl). DG_THEATER_V_FAKE stays
+       defined for the consumers that ignore it. */
     bits = InterlockedCompareExchange(&g_b.s_theater, 0, 0);
     if (!bits) return door;
     /* Freshness before modes: a stale publication is refused whatever the
@@ -8537,7 +8576,7 @@ int dg_bridge_turn_probe_take(DG_TURN_PROBE_SAMPLE *out)
 
 void dg_bridge_stats(DG_BRIDGE_STATS *out)
 {
-    coolant_trace_flush();
+
     if(g_b.log && g_mobile_tools.live)g_b.log("  mobile tools: turn_calls=%ld step_calls=%ld pose_changes=%ld anchor_changes=%ld (consumer counts, not movement acceptance)\r\n",g_mobile_tools.turns,g_mobile_tools.steps,g_mobile_tools.poses,g_mobile_tools.anchors);
     memset(out, 0, sizeof(*out));
     out->ticks = g_b.c_ticks;
@@ -9060,6 +9099,8 @@ void dg_bridge_stats(DG_BRIDGE_STATS *out)
 }
 
 /* ====================================================== desk tests ======= */
+
+
 
 
 

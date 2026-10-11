@@ -1,20 +1,43 @@
 #include "dg_render_link.h"
 static SRWLOCK g_link_lock=SRWLOCK_INIT;
 static DG_RENDER_LINK g_link;
-static volatile LONG g_link_epoch,g_link_requested,g_render_link_active;
+static volatile LONG g_link_epoch,g_link_requested,g_render_link_active,g_link_probe_requested;
+static volatile LONG g_second_eye;             /* vr_second_eye (diagnostic build) */
+/* The marker sets the start value; the Home menu overrides it for the rest of
+   the session (-1 = follow the marker), like the desktop observer. */
+static volatile LONG g_mod_second_eye_override=-1;
+static int second_eye_wanted(void){
+    LONG o=InterlockedCompareExchange(&g_mod_second_eye_override,0,0);
+    return o>=0?o!=0:InterlockedCompareExchange(&g_second_eye,0,0)!=0;
+}
+/* Wanted AND the render link that supplies the camera pairs is armed. */
+int dg_second_eye_enabled(void){
+    return second_eye_wanted()&&InterlockedCompareExchange(&g_render_link_active,0,0)!=0;
+}
 static LONG g_link_seen_epoch;
 static volatile LONG g_link_hits,g_link_stage_hits,g_link_consumer_hits;
 static volatile LONG g_link_accepted,g_link_refused,g_link_contention;
-static volatile LONG g_link_register_mismatch;
+static volatile LONG g_link_register_mismatch,g_link_rearmed;
 static LONG g_link_last_hits;
-static void render_link_camera(const CONTEXT *c,ULONG64 stage,ULONG64 consumer) {
-    if(g_render_link_active&&(c->Dr2!=stage||(c->Dr3!=consumer
+/* Live 27 Sep: switching the link on at runtime (arm_all/SetThreadContext) can be
+   lost on the render thread when it is inside an exception at that moment - the
+   exception's saved context is restored on continue. The camera trap therefore
+   re-arms the stage/consumer breakpoints in its own context record, which does
+   persist. The lost events still invalidate the current pair (epoch). */
+static void render_link_camera(CONTEXT *c,ULONG64 stage,ULONG64 consumer) {
+    int pp=0;
 #ifdef DG_PAIR_PROBE_H
-        && !pp_pending_context(c)
+    pp=pp_pending_context(c);
 #endif
-        )||
+    if(g_render_link_active&&(c->Dr2!=stage||(c->Dr3!=consumer && !pp)||
         (c->Dr7&0xff0000f0ull)!=0x50)) {
         InterlockedIncrement(&g_link_register_mismatch);InterlockedIncrement(&g_link_epoch);
+        if(stage&&consumer) {
+            c->Dr2=stage;
+            if(!pp){c->Dr3=consumer;c->Dr7=(c->Dr7&~0xff0000f0ull)|0x50ull;}
+            else c->Dr7=(c->Dr7&~0x0f000030ull)|0x10ull;
+            InterlockedIncrement(&g_link_rearmed);
+        }
     }
 }
 static void render_link_reset(void){InterlockedIncrement(&g_link_epoch);}
@@ -43,6 +66,7 @@ static void render_link_event(unsigned bit,const CONTEXT *c) {
         if(!handoff_read(&h))h.valid=0;
         after=InterlockedCompareExchange(&g_handoff_seq,0,0);
         if(before!=after||(after&1))h.valid=0;
+        dg_bridge_magwell_snapshot(&h.magwell);
         buffer=c->Rdx<=1?(int)c->Rdx:-1;
         dg_link_stage(&g_link,buffer,GetCurrentThreadId(),frame,ms,&h,(int)after);
     } else {
@@ -63,4 +87,40 @@ static int render_link_take(DG_HOOK_HANDOFF *h,int *sequence) {
     }
     if(!ok)memset(h,0,sizeof *h);
     return ok;
+}
+static volatile LONG g_link_pair_reason,g_link_pair_eye=-1;
+
+int dg_render_second_camera_eye(void){return (int)InterlockedCompareExchange(&g_link_pair_eye,0,0);}
+/* 0 ok, 1 link inactive, 2 lock contention, 3..7 dg_link_pair_reason, 8 epoch. */
+int dg_render_second_camera_reason(void){return (int)InterlockedCompareExchange(&g_link_pair_reason,0,0);}
+int dg_render_second_camera(float source[16],float target[16],int *sequence) {
+    int ok=0,reason=1;
+    if(!source||!target||!sequence)return 0;
+    memset(source,0,16*sizeof(float));memset(target,0,16*sizeof(float));*sequence=0;
+    if(g_armed&&g_source==SRC_XR&&g_stereo&&g_render_link_active) {
+        if(render_link_lock()) {
+            uint32_t tid=GetCurrentThreadId(),frame=(uint32_t)g_present_frame;uint64_t ms=GetTickCount64();
+            ok=dg_link_draw_pair(&g_link,tid,frame,ms,source,target,sequence);
+            if(ok)InterlockedExchange(&g_link_pair_eye,g_link.pending.payload.eye);
+            if(!ok)reason=dg_link_pair_reason(&g_link,tid,frame,ms);
+            if(g_link_seen_epoch!=InterlockedCompareExchange(&g_link_epoch,0,0)){ok=0;reason=8;}
+            ReleaseSRWLockExclusive(&g_link_lock);
+        } else reason=2;
+    }
+    InterlockedExchange(&g_link_pair_reason,ok?0:reason);
+    if(!ok){memset(source,0,16*sizeof(float));memset(target,0,16*sizeof(float));*sequence=0;}
+    return ok;
+}
+
+int dg_render_magwell(DG_MAGWELL *out,int sequence) {
+    int ok=0;memset(out,0,sizeof *out);
+    if(g_render_link_active && render_link_lock()) {
+        if(g_link.pending.sequence==sequence &&
+           dg_link_pair_reason(&g_link,GetCurrentThreadId(),(uint32_t)g_present_frame,GetTickCount64())==9) {
+            *out=g_link.pending.payload.magwell;ok=out->valid;
+        }
+        if(g_link_seen_epoch!=InterlockedCompareExchange(&g_link_epoch,0,0))ok=0;
+        ReleaseSRWLockExclusive(&g_link_lock);
+    }
+    if(!ok)memset(out,0,sizeof *out);return ok;
 }

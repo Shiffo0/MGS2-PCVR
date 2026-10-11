@@ -7,6 +7,9 @@ void dg_bridge_mod_menu_capture(int capture);
 void dg_bridge_mod_menu_request(unsigned values);
 void dg_bridge_mod_menu_status(unsigned *actual,unsigned *available);
 #include <stdint.h>
+#include "dg_magwell.h"
+int dg_bridge_magwell_snapshot(DG_MAGWELL *out);
+int dg_bridge_magwell_allowed(void);
 #include "dg_position_target.h"
 #include "dg_m9_runtime.h"
 #include "dg_free_wrist.h"
@@ -291,10 +294,10 @@ typedef struct {
        with it (run 5 of 2026-09-02: full comp cancelled every stick turn
        for the hand, the arm stood reversed after a 180). */
     int arm_comp;
-    /* vr_adjust_frame: 0 = legacy (the 2026-08-18 constant, byte for byte
-       today's behaviour), 1 = live (conjugate every adjust<->world conversion
-       with the actor's measured heading, ROLL_ONTWERP_V5.1). Default 0;
-       rollback is this one word. */
+
+
+
+
     int adjust_frame;
     int recoil_climb_mdeg;      /* muzzle climb at the wrist, milli-degrees */
     int recoil_push_um;         /* hand driven back toward the shoulder, um */
@@ -355,7 +358,8 @@ enum {
 /* Verdict bits reported by dg_bridge_theater_verdict(). */
 enum {
     DG_THEATER_V_DEMO = 1,      /* demo/codec theater judgment is standing */
-    DG_THEATER_V_UI = 2         /* full-menu panel judgment is standing */
+    DG_THEATER_V_UI = 2,        /* full-menu panel judgment is standing */
+    DG_THEATER_V_FAKE = 8       /* Fission Mailed: flat screen + native camera, controls stay on */
 };
 
 enum {
@@ -1156,6 +1160,8 @@ void dg_bridge_rec_camera(const MAT *eye, const MAT *pers);
    engine's direction units, or -1 when the seam had no rigid camera. Feeds
    pad->dir for the third-person and prone walks. */
 void dg_bridge_pad_origin_now(LONG dir4096);
+/* Final VR camera heading for blade locomotion and native guard geometry. */
+void dg_bridge_blade_camera(const float world[4][4]);
 /* Camera seam: sample the pad record and the player's act/yaw words after
    the player routine, for the move probe (diagnostic only). */
 void dg_bridge_move_probe_now(ULONGLONG image_base);
@@ -1324,10 +1330,10 @@ int dg_bridge_turn_probe_take(DG_TURN_PROBE_SAMPLE *out); /* 1 = got one */
    Y image's vertical component as the cycle's own quality stamp - a cycle
    read while the body or the animation moved shows angles off 30 and a Y
    image off vertical, and is dropped at the desk, not trusted. */
-/* The adjust frame a conversion between the arm's adjust space and the world
-   conjugates with (ROLL_ONTWERP_V5.1): legacy = the 2026-08-18 constant, live
-   = the actor's measured yaw-only heading. Defined here because the bridge
-   state carries the current pair's frame; the helpers are dg_bridge.c's. */
+
+
+
+
 typedef struct {
     int    live;               /* 0 = the constant, 1 = conjugate with q */
     int    valid;              /* 0 = no heading acquired; conversions refuse */
@@ -1354,6 +1360,9 @@ int dg_bridge_adj_cycle_take(DG_ADJ_CYCLE *out);        /* 1 = got one */
    that is the entire difference between measuring and switching. Safe from
    any thread; interlocked reads only. */
 int dg_bridge_theater_verdict(void);
+int dg_bridge_fake_gameover_now(void);
+int dg_bridge_blade_braced(void);
+long dg_bridge_fake_gameover_frames(void);
 /* Read current status and ownership words at the camera seam. No cached
    heartbeat/fps verdict is sufficient for this gate. */
 int dg_bridge_camera_gate_now(DG_CAMERA_GATE *out);

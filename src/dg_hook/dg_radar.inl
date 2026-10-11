@@ -1,6 +1,6 @@
 // dg_radar.inl - wrist radar, draw-hook half (2026-09-18).
 //
-// Measured (artifacts/radar_wrist_research_20260918): once per frame the game
+
 // composites the Soliton radar map onto the HUD with ONE non-indexed 4-vertex
 // draw whose viewport does not start at (0,0) - 690x501 at (2865,265) on a
 // 3840x2160 target, i.e. 92*W/512 by 104*H/448 - depth test off, and pixel-

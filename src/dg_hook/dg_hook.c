@@ -365,6 +365,22 @@ static int  g_obj_prev;
    really rendered with (object-shader sign, mapping learned while no skipping
    is going on), using that eye's own last handoff. 0 only counts. */
 static volatile LONG g_draw_skip_mode, g_feedback_skip = 1;
+static int g_left_snap_logged;   /* blade brace: left hand drawn on the blade */
+/* Desktop-only tangent-space 16:9 crop, after both headset captures.
+   Marker vr_observer_mode: 0 left, 1 right (default), 2 both (experimental). Home cycles
+   off -> right -> both -> off for the rest of the session. */
+static volatile LONG g_observer_cfg = 1, g_mod_observer_override = -1;
+static volatile LONG g_observer_mode = 1, g_mod_observer_mode_override = -1;
+static int observer_mode(void) {
+    LONG o=InterlockedCompareExchange(&g_mod_observer_mode_override,0,0);
+    return o>=0?(int)o:(int)InterlockedCompareExchange(&g_observer_mode,0,0);
+}
+static volatile LONG g_second_eye_frame = -100; /* last Present that stored B */
+static volatile LONG g_second_eye_swapped;       /* Presents stored with the eye held */
+static int observer_on(void) {
+    LONG o = InterlockedCompareExchange(&g_mod_observer_override, 0, 0);
+    return o >= 0 ? o != 0 : InterlockedCompareExchange(&g_observer_cfg, 0, 0) != 0;
+}
 static long g_draw_ema, g_draw_hist[4], g_draw_skipped, g_draw_held, g_draw_relabelled, g_draw_recent;
 static long g_draw_map[2][2];              /* [label eye][sign < 0], learned only while nothing is being skipped */
 static DG_HOOK_HANDOFF g_draw_last[2]; static int g_draw_have[2];
@@ -415,6 +431,8 @@ static volatile LONG g_eye_shift_applied, g_eye_shift_fallback;
 static volatile LONG g_eye_shift_half_x100; /* last half separation, 0.01 mm */
 static volatile LONG g_handoff_seq;
 static DG_HOOK_HANDOFF g_handoff;
+static MAT g_pair_ep_pending[2];
+static int g_pair_pending_valid;
 
 static MAT     g_src_eye_inv, g_src_eye;
 static volatile LONG g_reapplied;       /* rebuilt over a camera the game left alone */
@@ -788,16 +806,23 @@ static DG_PROJ_FOV mirror_fov_x(DG_PROJ_FOV fov) {
 
 static void phase_record(int kind,int buffer);
 static void handoff_write(int valid, int eye, const DG_XR_RAW_POSE *raw,
-                          const DG_PROJ_FOV *fov) {
+                          const DG_PROJ_FOV *fov, const DG_XR_RAW_POSE *other_raw,
+                          const DG_PROJ_FOV *other_fov) {
     InterlockedIncrement(&g_handoff_seq);       /* odd: reader must retry */
     g_handoff.near_meta = g_near_pending;
     if (!valid) g_handoff.near_meta.valid = 0;
     g_handoff.valid = valid;
     g_handoff.eye = eye;
+    g_handoff.pair_valid = valid && g_pair_pending_valid;
+    if(g_handoff.pair_valid)memcpy(g_handoff.pair_ep,g_pair_ep_pending,sizeof g_pair_ep_pending);
+    else memset(g_handoff.pair_ep,0,sizeof g_handoff.pair_ep);
     if (raw) g_handoff.raw = *raw;
     else memset(&g_handoff.raw, 0, sizeof(g_handoff.raw));
     if (fov) g_handoff.fov = *fov;
     else memset(&g_handoff.fov, 0, sizeof(g_handoff.fov));
+    g_handoff.other_valid = valid && other_raw && other_fov;
+    if (g_handoff.other_valid) { g_handoff.other_raw = *other_raw; g_handoff.other_fov = *other_fov; }
+    else { memset(&g_handoff.other_raw, 0, sizeof(g_handoff.other_raw)); memset(&g_handoff.other_fov, 0, sizeof(g_handoff.other_fov)); }
     InterlockedIncrement(&g_handoff_seq);       /* even: publish the record */
     if (valid) { phase_record(1,-1); dg_ui2d_eye(eye); }
 }
@@ -818,6 +843,7 @@ static int handoff_read(DG_HOOK_HANDOFF *out) {
 #include "dg_pair_probe.h"
 #include "dg_capture_identity.inl"
 #include "dg_render_link.inl"
+#include "dg_crash_trace.inl"
 #include "dg_stereo_phase_probe.inl"
 #include "dg_zoom_projection.h"
 static DG_ZOOM_PROJECTION g_zoom_projection,g_psg_projection;
@@ -840,6 +866,9 @@ static int psg_head_camera(const MAT *base, const POSE *offset,
 /* Runs on the game's thread with the camera complete and nothing having read
    it yet. Convention is settled bitwise (2.12): eye_pers = eye_inv * pers. */
 static void apply_transform(void) {
+    /* Union FOV (stereo_test=2) only while Two Eye rendering is wanted; AER keeps per-eye FOVs. */
+    LONG stereo_mode = g_stereo_test;
+    if (stereo_mode == 2 && !second_eye_wanted()) stereo_mode = 0;
     dg_bridge_psg_camera(NULL);
     /* Raw gameplay context closes this before theater's display hysteresis.
        No D3D calls here: restoration belongs to the next native draw. */
@@ -855,6 +884,9 @@ static void apply_transform(void) {
     int have_target = 0, eye_idx = DG_EYE_LEFT, probe_frame_flags = 0;
     int probe_view_kind = -1;
     int eye_shift = 0;
+    MAT pair_head_eye,pair_head_inv;
+    double pair_zoom_gain=1.0;
+    int stereo_now = g_stereo;
     double eye_half = 0.0;
     DG_XR_FRAME frame;
     const DG_XR_RAW_POSE *use_raw = NULL;
@@ -906,17 +938,25 @@ static void apply_transform(void) {
 
     /* Invalidate before every attempt, so a rejected camera update cannot
        cause Present to label an older image with this frame's eye. */
-    handoff_write(0, DG_EYE_MONO, NULL, NULL);
+    g_pair_pending_valid=0;
+    handoff_write(0, DG_EYE_MONO, NULL, NULL, NULL, NULL);
+    dg_bridge_blade_camera(NULL);
 
     {
         DG_CAMERA_GATE radar_gate;
         dg_radar_view(g_source==SRC_XR && camera_gate_now(&radar_gate));
     }
-    if (dg_bridge_theater_verdict()) {
-        dg_radar_view(0);
-        camera_yaw_anchor_reset();
-        InterlockedIncrement(&g_thea_cam_released);
-        return;
+    {
+        int verdict = dg_bridge_theater_verdict();
+        /* Fission Mailed keeps the head camera (the game still plays), but
+           mono: the theater panel shows one image, not alternating eyes. */
+        stereo_now = g_stereo && !(verdict & DG_THEATER_V_FAKE);
+        if (verdict & ~DG_THEATER_V_FAKE) {
+            dg_radar_view(0);
+            camera_yaw_anchor_reset();
+            InterlockedIncrement(&g_thea_cam_released);
+            return;
+        }
     }
 
     camera_anchor = InterlockedCompareExchange(&g_camera_yaw_anchor_mode, 0, 0) == 1;
@@ -962,7 +1002,7 @@ static void apply_transform(void) {
             }
             eye_idx = (InterlockedCompareExchange(&g_current_eye, 0, 0) == DG_EYE_RIGHT)
                 ? DG_EYE_RIGHT : DG_EYE_LEFT;
-            if (g_stereo) {
+            if (stereo_now) {
                 /* Stereo changes two things at once - where each eye is, and
                    what frustum it renders - and double vision can come from
                    either. stereo_test isolates them so one launch answers it
@@ -971,7 +1011,7 @@ static void apply_transform(void) {
                      2 = per-eye POSITION only, both at S4c's union FOV
                    The layer pose must follow whichever was used, or the image
                    is submitted from somewhere it was not drawn. */
-                LONG mode = g_stereo_test;
+                LONG mode = stereo_mode;
                 if (mode == 1) {
                     xp = frame.head;
                     use_raw = &frame.head_raw;
@@ -1099,9 +1139,10 @@ static void apply_transform(void) {
             int psg=g_source==SRC_XR && dg_bridge_psg_zoom_now(&identity,&angle);
             int valid=!psg && g_source==SRC_XR && dg_bridge_zoom_now(&identity,&angle);
             double gain=dg_zoom_projection_step(&g_zoom_projection,identity,valid,angle,
-                fabs((double)base_pers.m[0][0]),fabs((double)base_pers.m[1][1]),g_stereo,eye_idx);
-            double psg_gain=dg_psg_projection_step(&g_psg_projection,identity,psg,angle,g_stereo,eye_idx);
+                fabs((double)base_pers.m[0][0]),fabs((double)base_pers.m[1][1]),stereo_now,eye_idx);
+            double psg_gain=dg_psg_projection_step(&g_psg_projection,identity,psg,angle,stereo_now,eye_idx);
             if(psg)gain=psg_gain;
+            pair_zoom_gain=gain;
             dg_zoom_projection_apply(pers,gain);dg_zoom_projection_apply(pers2,gain);
             dg_zoom_projection_apply(raise_pers,gain);dg_zoom_projection_apply(raise_pers2,gain);
             dg_zoom_projection_apply(pers_no_offset,gain);
@@ -1131,6 +1172,7 @@ static void apply_transform(void) {
             dg_bridge_psg_camera(central.m);
     }
 
+    pair_head_eye=n_eye;pair_head_inv=n_eye_inv;
     if (eye_shift) {
         stereo_eye_shift(&n_eye, &n_eye_inv, eye_idx, eye_half,
                          (int)InterlockedCompareExchange(&g_stereo_eye_x_sign, 0, 0));
@@ -1149,10 +1191,34 @@ static void apply_transform(void) {
 
     *eye_inv = n_eye_inv;
     *eye     = n_eye;
+    if(g_source==SRC_XR && (probe_frame_flags&1))
+        dg_bridge_blade_camera(n_eye.m);
+    /* Derive the companion from this exact head sample and native projection.
+       Fallback per-eye poses are deliberately excluded until their ownership
+       and asymmetric orientation are supported. No second simulation update. */
+    if(g_source==SRC_XR && stereo_now && have_target && (probe_frame_flags&3)==3 &&
+       (eye_shift || stereo_mode==1)) {
+        int e,ok=1;
+        int sign=(int)InterlockedCompareExchange(&g_stereo_eye_x_sign,0,0);
+        int mirror=(int)InterlockedCompareExchange(&g_stereo_proj_x_sign,0,0)<0;
+        for(e=0;e<2;e++) {
+            MAT ew=pair_head_eye,ei=pair_head_inv,pr=base_pers;
+            DG_PROJ_FOV f=stereo_mode==2?frame.union_fov:frame.eye[e].fov;
+            if(stereo_mode!=2 && mirror)f=mirror_fov_x(f);
+            dg_proj_retarget(&pr,&old_fov,&f);
+            dg_zoom_projection_apply(&pr,pair_zoom_gain);
+            if(eye_shift)stereo_eye_shift(&ew,&ei,e,eye_half,sign);
+            mat_mul(&g_pair_ep_pending[e],&ei,&pr);
+            if(!finite_mat(&g_pair_ep_pending[e]))ok=0;
+        }
+
+        if(memcmp(&g_pair_ep_pending[eye_idx],eye_pers,sizeof(MAT)))ok=0;
+        g_pair_pending_valid=ok;
+    }
     /* Constant-buffer capture (2026-09-18): the matrices exactly as the game
        will read them from here on, so the desk analysis can search the
        vertex-shader constant buffers for them. Read-only side channel. */
-    dg_cb_probe_camera(g_stereo ? eye_idx : -1, (const float *)eye_pers->m,
+    dg_cb_probe_camera(stereo_now ? eye_idx : -1, (const float *)eye_pers->m,
                        (const float *)pers->m, (const float *)n_eye_inv.m,
                        (const float *)n_eye.m);
 
@@ -1189,23 +1255,16 @@ static void apply_transform(void) {
     InterlockedExchange(&g_have_mine, 1);
     InterlockedIncrement(&g_applied);
 
-    memset(&g_near_pending, 0, sizeof(g_near_pending));
-    if (g_source == SRC_XR && have_target && (probe_frame_flags & 3) == 3) {
-        LARGE_INTEGER q;
-        QueryPerformanceCounter(&q);
-        g_near_pending.camera_qpc = (uint64_t)q.QuadPart;
-        g_near_pending.camera_world = n_eye;
-        g_near_pending.projection = *pers;
-        g_near_pending.head_raw = frame.head_raw;
-        g_near_pending.grip = frame.right_hand.grip;
-        g_near_pending.aim = frame.right_hand.aim;
-        g_near_pending.valid = 1;
-    }
+
     if (g_source == SRC_XR && have_target) {
-        if (g_stereo)
-            handoff_write(1, eye_idx, use_raw, &submit_fov);
-        else
-            handoff_write(1, DG_EYE_MONO, NULL, &new_fov);
+        if (stereo_now) {
+            /* The other eye of this same head sample, as the pair's target was built. */
+            int other = eye_idx == DG_EYE_RIGHT ? DG_EYE_LEFT : DG_EYE_RIGHT;
+            DG_PROJ_FOV other_fov = stereo_mode == 2 ? frame.union_fov : frame.eye[other].fov;
+            handoff_write(1, eye_idx, use_raw, &submit_fov,
+                          stereo_mode == 1 ? NULL : &frame.eye[other].raw, &other_fov);
+        } else
+            handoff_write(1, DG_EYE_MONO, NULL, &new_fov, NULL, NULL);
     }
 }
 
@@ -2426,6 +2485,8 @@ static int arm_pose_target(DG_BRIDGE_ARM_TARGET *target)
         DG_XR_REL_POSE lr;
         const DG_XR_HAND_POSE *lp = &f.left_hand.grip;
         const DG_XR_HAND_POSE *rp = &f.right_hand.grip;
+        DG_XR_RAW_POSE left_raw;
+        int snapped = 0;
         double dx, dy, dz;
         int coherent_now;
         unsigned long left_stream=target->left_stream_id ? target->left_stream_id : target->stream_id;
@@ -2442,8 +2503,30 @@ static int arm_pose_target(DG_BRIDGE_ARM_TARGET *target)
             lp->position_valid && lp->orientation_valid && lp->pose_age_ms <= 100 &&
             lp->hand == DG_XR_HAND_LEFT && lp->kind == DG_XR_POSE_GRIP &&
             lp->sample_seq && lp->xr_time > 0;
+        /* Blocking: the left hand rests on the blade. One adjusted position
+           feeds both the arm mapping and the absolute hand target. */
+        left_raw = lp->raw_local;
+        if (li.valid && dg_bridge_blade_braced() &&
+            f.right_hand.grip.position_valid && f.right_hand.aim.orientation_valid) {
+            const DG_XR_RAW_POSE *q = &f.right_hand.aim.raw_local;
+            double grip[3], fwd[3], left[3];
+            grip[0]=f.right_hand.grip.raw_local.px; grip[1]=f.right_hand.grip.raw_local.py;
+            grip[2]=f.right_hand.grip.raw_local.pz;
+            fwd[0]=-2*(q->qx*q->qz+q->qw*q->qy);
+            fwd[1]=-2*(q->qy*q->qz-q->qw*q->qx);
+            fwd[2]=-(1-2*(q->qx*q->qx+q->qy*q->qy));
+            left[0]=left_raw.px; left[1]=left_raw.py; left[2]=left_raw.pz;
+            if (dg_blade_brace_snap(grip, fwd, left)) {
+                left_raw.px=left[0]; left_raw.py=left[1]; left_raw.pz=left[2];
+                snapped = 1;
+            }
+        }
+        if (snapped != g_left_snap_logged) {
+            g_left_snap_logged = snapped;
+            logf_("  blade brace: left hand %s\r\n", snapped ? "snap input active" : "follows the controller");
+        }
         if (li.valid) {
-            arm_hand_to_view(&f.head_raw, &lp->raw_local, &cfg, &lr, li.pos);
+            arm_hand_to_view(&f.head_raw, &left_raw, &cfg, &lr, li.pos);
             arm_player_shoulder_view(&f.head_raw, &cfg, -1,
                                      target->left_shoulder_view);
         }
@@ -2486,9 +2569,9 @@ static int arm_pose_target(DG_BRIDGE_ARM_TARGET *target)
             g_left_sample.position.view[4]=g_aim_camera.view.px;
             g_left_sample.position.view[5]=g_aim_camera.view.py;
             g_left_sample.position.view[6]=g_aim_camera.view.pz;
-            g_left_sample.position.grip[0]=lp->raw_local.px;
-            g_left_sample.position.grip[1]=lp->raw_local.py;
-            g_left_sample.position.grip[2]=lp->raw_local.pz;
+            g_left_sample.position.grip[0]=left_raw.px;
+            g_left_sample.position.grip[1]=left_raw.py;
+            g_left_sample.position.grip[2]=left_raw.pz;
         }
         target->free_left=g_left_sample.wrist;
         if(!li.valid || !g_aim_camera.valid || !target->unarmed_hand_write)
@@ -2712,6 +2795,8 @@ static void script_primary_command(void)
 #include "dg_hud_watch.inl"
 static void capture_observed(int eye,uint64_t id) {hud_capture(eye,id);ci_published(eye,id);}
 
+static void chanl1_step(void);   /* dg_chanl_probe.inl */
+static void nocull_step(void);   /* dg_chanl_probe.inl */
 static LONG CALLBACK veh(EXCEPTION_POINTERS *ep) {
     CONTEXT *c;
 
@@ -2765,6 +2850,8 @@ static LONG CALLBACK veh(EXCEPTION_POINTERS *ep) {
     void *pol_pass = dg_policy_pass_begin();
     camera_pass_begin();
     if (g_armed) apply_transform();
+    if (g_armed) chanl1_step();   /* vr_chanl1 (diagnostic): engine channel 1 */
+    if (g_armed) nocull_step();   /* vr_nocull (diagnostic): engine bound check off */
     /* F4, and later F5. This fires during render setup, so it is after every
        actor has run - which the Action() seam is not: the first probe wrote
        the arm's visibility 1329 times and read it back set on every following
@@ -2782,37 +2869,9 @@ static LONG CALLBACK veh(EXCEPTION_POINTERS *ep) {
            completed under, and a diff of consecutive records shows exactly
            which frames advanced it. Duplicate frames (this seam runs several
            times per published XR frame) fold away inside dg_rec_capture. */
-        if (record_on) {
-            DG_XR_FRAME rf;
-            memset(&rf, 0, sizeof rf);
-            if (g_arm_absolute_aim && g_aim_camera.valid) {
-                rf = g_aim_camera.frame;
-                record_frame = 1;
-            } else record_frame = (input_get_frame(&rf) & 1) != 0;
-            {
-                LARGE_INTEGER q;
-                QueryPerformanceCounter(&q);
-                dg_rec_pack(&rf, q.QuadPart,
-                            (unsigned int)g_arm_pose_stream_id,
-                            (unsigned int)g_arm_pose_pair_id,
-                            (unsigned int)InterlockedCompareExchange(
-                                &g_present_frame, 0, 0),
-                            (unsigned int)InterlockedCompareExchange(
-                                &g_current_eye, 0, 0),
-                            &r);
-                /* The game-side half, taken here for the same reason the
-                   identity fields are: what the bridge holds right now is
-                   what the PREVIOUS pair solved with, so one record pairs
-                   an input with the state that consumed it rather than
-                   with a solve that has not happened yet. */
-                dg_bridge_rec_pair(&r.pair);
-            }
-        }
+
         have_target = arm_pose_target(&target);
-        if (record_on) {
-            r.absolute = g_absolute_record;
-            if (DG_ENABLE_DIAGNOSTICS && (record_frame || r.absolute.present)) dg_rec_capture(&g_rec, &r);
-        }
+
         dg_bridge_arm_seam_now(have_target ? &target : NULL);
         if (DG_ENABLE_DIAGNOSTICS && InterlockedCompareExchange(&g_camera_telemetry_valid, 0, 0))
             dg_bridge_rec_camera(&g_camera_telemetry_eye_world,
@@ -2943,12 +3002,12 @@ static int parse_config(char *buf, POSE *p, double *seconds,
     xc->x_sign = xc->y_sign = xc->z_sign = 1.0;
     xc->scale = 1000.0;
     xc->positional = 1;
-    xc->stereo = 0;
-    xc->stereo_test = 0;
+    xc->stereo = 1;
+    xc->stereo_test = 2;
     xc->scene_blur_fix = 1;
-    xc->stereo_phase_fix = 1;
+    xc->stereo_phase_fix = 0;
     xc->stereo_eye_x_sign = -1;
-    xc->ui2d = 0; xc->ui2d_scale_mils = 750; xc->ui2d_conv_e5 = 1200; xc->ui2d_sign = 1; xc->ui2d_hold = 0; xc->feedback_skip = 1;
+    xc->ui2d = 0; xc->ui2d_scale_mils = 750; xc->ui2d_conv_e5 = 1200; xc->ui2d_sign = 1; xc->ui2d_hold = 0; xc->feedback_skip = 1; xc->observer = 1; xc->observer_mode = 1;
     /* Wrist radar: off, HUD radar left alone. The offset is a guess for a
        Touch Plus left controller (grip +Y runs back toward the forearm, +X
        out of the palm), meant to be tuned live. */
@@ -3095,6 +3154,22 @@ static int parse_config(char *buf, POSE *p, double *seconds,
                 s = e2; if (*s == ',') s++;
             }
             continue;
+        }
+        if (_stricmp(key,"vr_second_camera_probe")==0) {
+            char *e=s;while(*e && *e!=' ' && *e!='\t' && *e!='\r' && *e!='\n')e++;
+            if(e-s!=1 || (*s!='0' && *s!='1'))return 0;
+
+
+
+            s=e;continue;
+        }
+        if (_stricmp(key,"vr_second_eye")==0) {
+            char *e=s;while(*e && *e!=' ' && *e!='\t' && *e!='\r' && *e!='\n')e++;
+            if(e-s!=1 || (*s!='0' && *s!='1'))return 0;
+#if 1
+            xc->second_eye=*s=='1';
+#endif
+            s=e;continue;
         }
         if (_stricmp(key,"vr_stereo_phase_fix")==0) {
             char *e=s;
@@ -3884,6 +3959,8 @@ static int parse_config(char *buf, POSE *p, double *seconds,
         else if (_stricmp(key, "vr_ui2d") == 0) xc->ui2d = (v != 0.0);
         else if (_stricmp(key, "vr_eye_truth") == 0) { if (v == 0.0 || v == 1.0 || v == 2.0 || v == 3.0) xc->eye_truth = (int)v; }
         else if (_stricmp(key, "vr_feedback_skip") == 0) xc->feedback_skip = (v != 0.0);
+        else if (_stricmp(key, "vr_observer_mode") == 0) { if (v == 0.0 || v == 1.0 || v == 2.0) xc->observer_mode = (int)v; }
+        else if (_stricmp(key, "vr_observer") == 0) xc->observer = (v != 0.0);
         else if (_stricmp(key, "vr_draw_skip") == 0) { if (v == 0.0 || v == 1.0 || v == 2.0) xc->draw_skip = (int)v; }
         else if (_stricmp(key, "vr_ui2d_scale") == 0) { if (v >= 0.3 && v <= 1.0) xc->ui2d_scale_mils = (int)(v * 1000.0 + 0.5); }
         else if (_stricmp(key, "vr_ui2d_conv") == 0) { if (v >= 0.0 && v <= 0.1) xc->ui2d_conv_e5 = (int)(v * 100000.0 + 0.5); }
@@ -5133,6 +5210,8 @@ static const char *run_once(const char *marker) {
     InterlockedExchange(&g_stereo, xc.stereo != 0);
     InterlockedExchange(&g_scene_blur_enabled, xc.scene_blur_fix);
     InterlockedExchange(&g_link_requested, xc.stereo_phase_fix);
+    InterlockedExchange(&g_link_probe_requested,xc.second_camera_probe||xc.second_eye);
+    InterlockedExchange(&g_second_eye,xc.second_eye);
     render_link_reset();
     InterlockedExchange(&g_stereo_test, xc.stereo_test);
     InterlockedExchange(&g_stereo_proj_x_sign, xc.stereo_proj_x_sign);
@@ -5141,11 +5220,13 @@ static const char *run_once(const char *marker) {
     InterlockedExchange(&g_eye_truth_mode, xc.eye_truth);
     InterlockedExchange(&g_draw_skip_mode, xc.draw_skip);
     InterlockedExchange(&g_feedback_skip, xc.feedback_skip);
+    InterlockedExchange(&g_observer_cfg, xc.observer);
+    InterlockedExchange(&g_observer_mode, xc.observer_mode);
     dg_ui2d_hold(xc.ui2d_hold);
     dg_radar_configure(xc.radar_mode != 0, xc.radar_hud == 0);
     dg_bridge_native_hud_configure(xc.radar_mode != 0 && xc.radar_hud == 0);
     InterlockedExchange(&g_current_eye, DG_EYE_LEFT);
-    handoff_write(0, DG_EYE_MONO, NULL, NULL);
+    handoff_write(0, DG_EYE_MONO, NULL, NULL, NULL, NULL);
     InterlockedExchange(&g_source, source);
 
     InterlockedExchange(&g_applied, 0);
@@ -5367,33 +5448,13 @@ static const char *run_once(const char *marker) {
     }
 
     phase_init();
-    {
-        char probe_marker[MAX_PATH], probe_output[MAX_PATH], *leaf;
-        SYSTEMTIME stamp;
-        strcpy_s(probe_marker,sizeof probe_marker,marker);
-        leaf=strrchr(probe_marker,'\\');
-        if (leaf) strcpy_s(leaf+1,sizeof(probe_marker)-(leaf+1-probe_marker),"dg_pair_probe.on");
-        else strcpy_s(probe_marker,sizeof probe_marker,"dg_pair_probe.on");
-        GetSystemTime(&stamp);
-        strcpy_s(probe_output,sizeof probe_output,g_logpath);
-        leaf=strrchr(probe_output,'\\');
-        if (leaf) *leaf=0;
-        else strcpy_s(probe_output,sizeof probe_output,".");
-        {
-            size_t len=strlen(probe_output);
-            _snprintf_s(probe_output+len,sizeof(probe_output)-len,_TRUNCATE,
-                "\\pair_probe_%04u%02u%02u_%02u%02u%02u_%lu_%lu.csv",
-                stamp.wYear,stamp.wMonth,stamp.wDay,stamp.wHour,stamp.wMinute,
-                stamp.wSecond,GetCurrentProcessId(),GetTickCount());
-        }
-        pp_prepare((menu_session||!g_phase_stage_addr||!g_phase_consume_addr)?0:g_base,probe_marker,probe_output);
-        pp_poll(logf_);
-    }
 
-    InterlockedExchange(&g_render_link_active,g_link_requested&&source==SRC_XR&&
+
+    InterlockedExchange(&g_render_link_active,(g_link_requested||g_link_probe_requested)&&source==SRC_XR&&
         g_phase_stage_addr&&g_phase_consume_addr);
     logf_("  render link: requested %ld anchors %s (buffer-linked pose/FOV; no guessed fallback)\r\n",
         g_link_requested,g_phase_stage_addr?"verified":"UNAVAILABLE");
+    logf_("  second camera observer: %ld capture_phase_fix %ld active %ld\r\n",g_link_probe_requested,g_link_requested,g_render_link_active);
     if(source==SRC_XR)hand_profile_worker();
     InterlockedIncrement(&g_auto_recenter_session);
     InterlockedExchange(&g_armed, 1);
@@ -5443,10 +5504,24 @@ static const char *run_once(const char *marker) {
             logf_("  render link: disabled by trap-rate guard; stereo captures refused\r\n");
         }
         g_link_last_hits=g_link_hits;
-        if(elapsed%10==0&&g_link_requested)
-            logf_("  render link: active %ld stage %ld consumer %ld linked-attempts %ld refused %ld contention %ld register-mismatch %ld\r\n",
+        if(source==SRC_XR) {   /* Home menu SECOND EYE switched: (dis)arm the link */
+            LONG want=g_xrcfg.second_camera_probe||second_eye_wanted();
+            if(want!=InterlockedCompareExchange(&g_link_probe_requested,0,0)) {
+                InterlockedExchange(&g_link_probe_requested,want);
+                InterlockedExchange(&g_render_link_active,(g_link_requested||want)&&
+                    g_phase_stage_addr&&g_phase_consume_addr);
+                render_link_reset();arm_all(1);
+                logf_("  second eye: %s by Home menu, render link active %ld\r\n",
+                    second_eye_wanted()?"on":"off",g_render_link_active);
+            }
+        }
+        if(elapsed%10==0&&(g_link_requested||g_link_probe_requested))
+            logf_("  render link: active %ld stage %ld consumer %ld linked-attempts %ld refused %ld contention %ld register-mismatch %ld rearmed %ld\r\n",
                 g_render_link_active,g_link_stage_hits,g_link_consumer_hits,g_link_accepted,
-                g_link_refused,g_link_contention,g_link_register_mismatch);
+                g_link_refused,g_link_contention,g_link_register_mismatch,g_link_rearmed);
+        if(elapsed%10==0&&second_eye_wanted())
+            logf_("  second eye: held-eye presents %ld (native to the slot opposite its camera eye)\r\n",
+                g_second_eye_swapped);
         if (menu_session) script_menu_sample_context();
         if (script_menu_blocked()) {
             reason = "script menu ended: player context appeared or became unavailable";
@@ -5689,8 +5764,12 @@ static const char *run_once(const char *marker) {
                 g_xrcfg = xc2;
                 InterlockedExchange(&g_stereo, xc2.stereo != 0);
                 InterlockedExchange(&g_scene_blur_enabled, xc2.scene_blur_fix);
-                if(InterlockedExchange(&g_link_requested,xc2.stereo_phase_fix)!=xc2.stereo_phase_fix) {
-                    InterlockedExchange(&g_render_link_active,g_link_requested&&g_source==SRC_XR&&
+                LONG prior_link=InterlockedExchange(&g_link_requested,xc2.stereo_phase_fix);
+                InterlockedExchange(&g_second_eye,xc2.second_eye);
+                LONG want_probe=xc2.second_camera_probe||second_eye_wanted();
+                LONG prior_probe=InterlockedExchange(&g_link_probe_requested,want_probe);
+                if(prior_link!=xc2.stereo_phase_fix || prior_probe!=want_probe) {
+                    InterlockedExchange(&g_render_link_active,(g_link_requested||g_link_probe_requested)&&g_source==SRC_XR&&
                         g_phase_stage_addr&&g_phase_consume_addr);
                     arm_all(1);
                 }
@@ -5702,6 +5781,8 @@ static const char *run_once(const char *marker) {
                 InterlockedExchange(&g_eye_truth_mode, xc2.eye_truth);
                 InterlockedExchange(&g_draw_skip_mode, xc2.draw_skip);
                 InterlockedExchange(&g_feedback_skip, xc2.feedback_skip);
+                InterlockedExchange(&g_observer_cfg, xc2.observer);
+                InterlockedExchange(&g_observer_mode, xc2.observer_mode);
                 dg_ui2d_hold(xc2.ui2d_hold);
                 dg_radar_configure(xc2.radar_mode != 0, xc2.radar_hud == 0);
                 dg_bridge_native_hud_configure(xc2.radar_mode != 0 && xc2.radar_hud == 0);
@@ -6015,9 +6096,14 @@ static void eye_dump_step(IDXGISwapChain *sc, int eye)
 
 }
 
+#include "dg_chanl_probe.inl"
+#include "dg_xr_sim.inl"       /* vr_xr_sim=1: Meta XR Simulator for this process (diagnostic build) */
 static void on_present_body(IDXGISwapChain *sc) {
+    chanl_probe_present();   /* read-only DG channel probe (diagnostic build) */
+    chanl1_present();        /* vr_chanl1 marker key and its log lines */
     DG_HOOK_HANDOFF handoff;
     int keep_eye = 0;
+
     DG_HOOK_HANDOFF linked_handoff;
     int linked_seq=0,linked_have=render_link_take(&linked_handoff,&linked_seq);
     int stereo = InterlockedCompareExchange(&g_stereo, 0, 0) != 0;
@@ -6053,6 +6139,15 @@ static void on_present_body(IDXGISwapChain *sc) {
 
     start_command();
     screen = dg_bridge_theater_verdict();
+    {   /* Fission Mailed flanks, for the log. */
+        static int fake_logged;
+        int fake=(screen & DG_THEATER_V_FAKE)!=0;
+        if (fake != fake_logged) {
+            fake_logged = fake;
+            logf_("  fission mailed: %s (actor frames %ld)\r\n", fake ? "ENTER theater" : "EXIT theater",
+                  dg_bridge_fake_gameover_frames());
+        }
+    }
 
     /* Camera silence, counted. `have` is false for every frame the camera
        hook did not vouch for, and on the title and load screens that is
@@ -6069,7 +6164,7 @@ static void on_present_body(IDXGISwapChain *sc) {
         if (InterlockedCompareExchange(&g_script_menu_active, 0, 0))
             have = 0; /* Incidental title/intro camera visits are not gameplay. */
     }
-    if (have || dg_bridge_radial_context_held()) {
+    if (have || dg_bridge_radial_context_held() || (screen & DG_THEATER_V_FAKE)) {
         InterlockedExchange(&g_flat_silent, 0);
     } else if (armed && (stereo || g_source == SRC_SCRIPT)) {
         if (InterlockedCompareExchange(&g_flat_silent, 0, 0) <
@@ -6112,20 +6207,25 @@ static void on_present_body(IDXGISwapChain *sc) {
 
 
 
+
+
+
     /* U2. `flat` IS the front-end condition - a title or load screen is an
        image with no game camera behind it, which is exactly what the block
        above just established. Called every Present, including the ones where
        it is false, so the module sees the window close. Reads only. */
     {
         LONG camera_now=InterlockedCompareExchange(&g_traps,0,0);
-        int raw_gameplay=armed && !flat && !screen &&
+        /* Fission Mailed is shown like a cutscene, but the game still plays. */
+        int ctl_screen=screen & ~DG_THEATER_V_FAKE;
+        int raw_gameplay=armed && !flat && !ctl_screen &&
             !InterlockedCompareExchange(&g_script_menu_active,0,0) &&
             dg_bridge_controller_gameplay_now();
         dg_ui2d_gameplay(raw_gameplay && have && stereo && g_source==SRC_XR);
-        int raw_special=(armed && !flat && !screen &&
+        int raw_special=(armed && !flat && !ctl_screen &&
             !InterlockedCompareExchange(&g_script_menu_active,0,0)) ?
             dg_bridge_controller_special_now():0;
-        int raw_radial=armed && (dg_bridge_radial_context_held() || (!flat && !screen)) &&
+        int raw_radial=armed && (dg_bridge_radial_context_held() || (!flat && !ctl_screen)) &&
             !InterlockedCompareExchange(&g_script_menu_active,0,0) &&
             dg_bridge_controller_radial_now();
         dg_bridge_action_context(action_present_allowed(armed,flat,
@@ -6309,7 +6409,31 @@ static void on_present_body(IDXGISwapChain *sc) {
         handoff.near_meta.present_id = (unsigned)g_present_frame;
         ci_record(3,-1,-1,&handoff,0); /* exact arguments, not latest mailbox */
         eye_dump_step(sc, handoff.eye);
-        dg_xr_capture_measured(sc, handoff.eye, &handoff.raw, &handoff.fov, &handoff.near_meta);
+        {
+            /* Accepted stereo stores an image drawn with camera eye E in slot
+               !E: at Present the handoff already names the next camera call,
+               which alternates (live 27 Sep, F27ED954: holding the eye made
+               slot == E and swapped both eyes). So the slots follow the render
+               eye of this frame's draws, not the handoff label. */
+            int native_slot = handoff.eye, b_slot = -1;
+            const DG_XR_RAW_POSE *native_raw = &handoff.raw, *b_raw = NULL;
+            const DG_PROJ_FOV *native_fov = &handoff.fov, *b_fov = NULL;
+            if (dg_second_eye_enabled() && handoff.other_valid &&
+                (handoff.eye == DG_EYE_LEFT || handoff.eye == DG_EYE_RIGHT)) {
+                int other = handoff.eye == DG_EYE_RIGHT ? DG_EYE_LEFT : DG_EYE_RIGHT;
+                if (dg_render_second_camera_eye() == handoff.eye) {   /* eye held */
+                    native_slot = other; native_raw = &handoff.other_raw; native_fov = &handoff.other_fov;
+                    b_slot = handoff.eye; b_raw = &handoff.raw; b_fov = &handoff.fov;
+                    InterlockedIncrement(&g_second_eye_swapped);
+                } else {
+                    b_slot = other; b_raw = &handoff.other_raw; b_fov = &handoff.other_fov;
+                }
+            }
+            dg_xr_capture_measured(sc, native_slot, native_raw, native_fov, &handoff.near_meta);
+            if (b_slot >= 0 && dg_second_eye_publish(b_slot, b_raw, b_fov))
+                InterlockedExchange(&g_second_eye_frame, InterlockedCompareExchange(&g_present_frame, 0, 0));
+
+        }
     }
     else if (have && !stereo)
         dg_xr_capture(sc, DG_EYE_MONO, NULL, &handoff.fov);
@@ -6345,7 +6469,26 @@ static void on_present_body(IDXGISwapChain *sc) {
        ignores the counter, but advancing it there keeps a live stereo toggle
        aligned to the real frame sequence too. */
 present_done:
+    {   /* Correct aspect on every desktop gameplay frame, after XR capture. */
+        static int observer_logged = -1, observer_mode_logged = -1;
+        int on = observer_on();
+        if (on != observer_logged || observer_mode_logged != observer_mode()) {
+            observer_logged = on; observer_mode_logged = observer_mode();
+            logf_("  desktop observer: %s\r\n", !on ? "off" : observer_mode()==2 ? "both eyes (16:9, right dominant)" : observer_mode()==1 ? "right eye (16:9)" : "left eye (16:9)");
+        }
+        /* Every eye needs aspect correction, including native right frames. */
+        if (on && armed && stereo && !screen)
+            dg_xr_observer_fill(sc, observer_mode());
+    }
     InterlockedIncrement(&g_present_frame);
+    /* Second eye: the native eye stays put and B fills the other one, so each
+       eye always shows the same kind of image (no native/replay flicker per
+       eye). Only while B was stored in the last two Presents - if the replay
+       stops, the eyes alternate again instead of one freezing. */
+    if (dg_second_eye_enabled() &&
+        (LONG)(InterlockedCompareExchange(&g_present_frame, 0, 0) -
+               InterlockedCompareExchange(&g_second_eye_frame, 0, 0)) <= 2)
+        keep_eye = 1;
     if (!keep_eye) InterlockedExchange(&g_current_eye, next_eye(eye));
 }
 
@@ -6400,6 +6543,7 @@ static DWORD WINAPI worker(LPVOID unused) {
     g_hook_addr = g_base + HOOK_RVA;
     g_chan0     = g_base + DG_CHANLS_RVA;
 
+    crash_trace_start();
     logf_("\r\n=== dg_hook ready ===\r\n"
           "  module base   %016llX\r\n"
           "  hook          %016llX (rva 0x%llX)\r\n"
@@ -6459,6 +6603,7 @@ static DWORD WINAPI worker(LPVOID unused) {
         xc.positional = 1;
         xc.stereo = 0;
         xc.stereo_test = 0;
+        xr_sim_env(marker, logf_);      /* before dg_xr_start loads openxr_loader.dll */
         if (!adopt_game_device()) {
             logf_("  xr submission: game device never appeared\r\n");
         } else {
@@ -10393,6 +10538,16 @@ static DWORD WINAPI worker(LPVOID unused) {
 
 
 
+
+
+
+
+
+
+
+
+
+
 BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved) {
     if (reason == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(inst);
@@ -10406,9 +10561,15 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved) {
        file write. FreeLibrary (reserved NULL) takes the same path. */
     if (reason == DLL_PROCESS_DETACH) {
         static LONG once;
+
+
+
+
+
         if (InterlockedExchange(&once, 1) == 0 &&
             InterlockedCompareExchange(&g_rec_on, 0, 0))
             rec_dump(reserved ? "process exit" : "library unload");
     }
     return TRUE;
 }
+

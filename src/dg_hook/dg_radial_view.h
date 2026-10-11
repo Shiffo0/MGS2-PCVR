@@ -5,7 +5,8 @@
 #define DG_RADIAL_VIEW_SIZE 256u
 #define DG_RADIAL_VIEW_PIXELS (256u * 256u)
 /* Caller supplies a coherent, fresh snapshot. Empty label = empty slot.
-   kind 0 weapons, 1 items, 2 Home settings (three labels and three values).
+   kind 0 weapons, 1 items, 2 Home settings (count 3 to 5: labels, then
+   their values at labels[i+count]).
    Only ASCII A-Z/a-z, digits, space, dot and '-' accepted.
    No inventory, lifetime, ownership or engine acknowledgement is inferred. */
 typedef struct {
@@ -14,7 +15,7 @@ typedef struct {
     int selected;
     unsigned eligible;
     unsigned kind;
-    char labels[8][17];
+    char labels[10][17];
 } dg_radial_view;
 /* Exactly 256x256 RGBA8 bytes, row-major, straight alpha (0 or 255).
    uint32_t storage is only alignment/storage: do not interpret native integers.

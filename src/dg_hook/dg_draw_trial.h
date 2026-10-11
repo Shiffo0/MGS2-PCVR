@@ -1,6 +1,7 @@
 #ifndef DG_DRAW_TRIAL_H
 #define DG_DRAW_TRIAL_H
 #include <d3d11.h>
+#include "dg_magwell.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -9,6 +10,16 @@ void dg_draw_trial_poll(const char *session_marker);
 void dg_draw_trial_present(void);
 void dg_draw_trial_xr_ready(ID3D11Device*,ID3D11DeviceContext*);
 void dg_draw_trial_stop(void);
+/* Exact consumed-list camera pair. False on missing/ambiguous ownership. */
+int dg_render_second_camera(float source[16],float target[16],int *sequence);
+int dg_render_second_camera_reason(void); /* why the last call failed, 0 = ok */
+int dg_render_magwell(DG_MAGWELL *out,int sequence);
+int dg_bridge_magwell_allowed(void);
+int dg_render_second_camera_eye(void);
+int dg_second_eye_enabled(void);          /* vr_second_eye */
+/* Present: hand the replayed other eye of this frame to the headset store.
+   raw/fov: DG_XR_RAW_POSE / DG_PROJ_FOV of the other eye, same head sample. */
+int dg_second_eye_publish(int slot,const void *raw,const void *fov); /* 1 = B stored in slot */
 void dg_blit_boundary_control(const char *dir,int active,unsigned mark,unsigned present,int eye);
 /* Constant-buffer capture (dg_cb_probe.inl): the camera seam publishes the
    matrices it just wrote so the desk analysis can look for them in the

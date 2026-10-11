@@ -93,6 +93,8 @@ typedef struct {
     int life_disabled;
     int grip_debug; /* read-only M9 hit-test visualization */       /* vr_life=off; default wrist + event LIFE */
     int    scene_blur_fix;      /* hook-only: suppress scene-history alpha in VR */
+    int    second_camera_probe; /* hook-only observer; never changes Present selection */
+    int    second_eye;          /* vr_second_eye: the replayed other eye goes to the headset (diagnostic) */
     int    stereo_phase_fix;   /* hook-only: bind capture to consumed render buffer */
     int    stereo_eye_x_sign;  /* hook-only: -1 = right eye at camera -x (default, headset-proven 2026-09-09); +1 swaps */
     /* hook-only, 2026-09-18: per-eye placement of the flat 2D sprites
@@ -104,6 +106,8 @@ typedef struct {
     int    ui2d_hold;          /* hook-only: camera-less frames 0 leave, 1 (default) hold, 2 opposite */
     int    ui2d_vs_count;
     int    feedback_skip;      /* hook-only: 1 (default) = do not forward the previous-frame feedback sprite in stereo */
+    int    observer_mode;      /* desktop only: 0 left, 1 right, 2 both (default), 16:9 crop */
+    int    observer;           /* hook-only: enable aspect-correct desktop observer in stereo gameplay */
     int    draw_skip;          /* hook-only: 0 observe, 1 hold skipped Presents, 2 also label drawn frames by their rendered eye */
     int    eye_truth;          /* hook-only: 0 observe, 1 drop mislabelled frames, 2 relabel them */
     /* 2026-09-18: the Soliton radar on the inside of the left wrist (dg_radar.inl, dg_xr_radar.inl). */
@@ -248,6 +252,14 @@ void dg_xr_radar_stats(char *out, size_t n);
  * camera and labelling it as an eye. */
 void dg_xr_capture(void *swapchain, int eye,
                    const DG_XR_RAW_POSE *raw, const DG_PROJ_FOV *fov);
+/* Desktop observer: aspect-correct 16:9 crop. mode 0 left, 1 right, 2 both
+   (right dominant; falls back to one eye for incompatible pairs). Call after
+   ALL captures. Maximum store age below; returns 1 when rendered. */
+#define DG_OBSERVER_MAX_AGE_MS 250
+int dg_xr_observer_fill(void *swapchain, int mode);
+
+
+
 
 typedef struct {
     MAT camera_world, projection;
@@ -260,6 +272,11 @@ typedef struct {
 #include "dg_stereo_measure.h"
 void dg_xr_capture_measured(void *sc, int eye, const DG_XR_RAW_POSE *raw,
                            const DG_PROJ_FOV *fov, const DG_NEAR_META *meta);
+/* Second eye (vr_second_eye): a replayed other-eye image (multisampled or not) into
+   that eye's store, with the pose and FOV it was drawn for. 1 stored, 0 refused. */
+int dg_xr_capture_texture(void *texture, int eye, const DG_XR_RAW_POSE *raw, const DG_PROJ_FOV *fov);
+/* Diagnostics: private copies of both eye stores (index = DG_EYE_LEFT/RIGHT); returns the count. */
+int dg_xr_snapshot_stores(void *out[2]);
 int  dg_xr_submitting(void);        /* 1 once real layers are going out */
 
 /* The theater/panel screen switch, called from Present with the bridge's

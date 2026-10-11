@@ -31,7 +31,7 @@ void dg_xr_set_capture_observer(DG_XR_CAPTURE_OBSERVER observer) {
 #include <d3d11_4.h>                    /* ID3D11Multithread - see g_mt */
 #include "dg_context_trace.h"
 
-
+#include "dg_draw_trial.h"
 
 #include <dxgi.h>
 #define XR_USE_PLATFORM_WIN32
@@ -775,6 +775,14 @@ void dg_xr_turn_step(double ref_q[2], double ref_p[2],
 
 
 
+
+
+
+
+
+
+
+
 /* ---- dynamically resolved entry points ---------------------------------
    The loader is loaded by name rather than linked, so a machine with no
    OpenXR at all produces a clean "unavailable" log line instead of a game
@@ -924,13 +932,27 @@ typedef struct {
     int valid;
     uint64_t capture_id, capture_ms;
     DG_MODEL_ARM model_arm, right_model_arm;
+
+
+
+
+
 } DG_CAPTURE_STORE;
 static DG_CAPTURE_STORE g_store[2];
+
+
+
 static ID3D11Multithread *g_mt;
 static volatile LONG g_have_capture;
 static volatile LONG g_submitting;
 static CRITICAL_SECTION g_cap_cs;
 static volatile LONG g_cap_cs_ready;
+
+
+
+
+
+
 
 /* The theater screen. g_screen_req is Present's word (the bridge verdict,
    one interlocked flag); everything else is the frame loop's own and touched
@@ -1429,7 +1451,7 @@ static int xr_init(void) {
                 g_mt->lpVtbl->SetMultithreadProtected(g_mt, TRUE);
                 dg_context_trace_emit(g_log,"xr_after_enable",g_dev,g_ctx,g_mt,DG_ENABLE_DIAGNOSTICS);
 
-
+                dg_draw_trial_xr_ready(g_dev,g_ctx);
 
             } else {
                 dg_context_trace_emit(g_log,"xr_multithread_unavailable",g_dev,g_ctx,g_mt,DG_ENABLE_DIAGNOSTICS);
@@ -1472,9 +1494,11 @@ static int xr_init(void) {
     return 1;
 }
 
+#include "dg_xr_observer.inl"
+
 static void xr_teardown(void) {
 
-
+    dg_draw_trial_xr_ready(NULL,NULL);
 
     int stopped=!g_session_running;
     sm_teardown();
@@ -1488,6 +1512,7 @@ static void xr_teardown(void) {
     InterlockedExchange(&g_have_capture, 0);
     if (g_cap_cs_ready) {
         EnterCriticalSection(&g_cap_cs);
+        observer_free();
         near_probe_free();
         if (g_store[0].texture) {
             g_store[0].texture->lpVtbl->Release(g_store[0].texture);
@@ -1742,6 +1767,12 @@ void dg_xr_capture_measured(void *swapchain, int eye, const DG_XR_RAW_POSE *raw,
         store->valid = 1;
         store->capture_id = (uint64_t)InterlockedIncrement64(&g_cd_count[CD_STORED]);
         store->capture_ms = GetTickCount64();
+
+
+
+
+
+
         sp_capture(back,store->texture,mono?DG_EYE_MONO:eye,store->capture_id);
         sm_producer(3,mono?DG_EYE_MONO:eye,raw,fov,meta,store->capture_id);
         dg_bridge_model_arm_snapshot(&store->model_arm);
@@ -1761,6 +1792,78 @@ void dg_xr_capture_measured(void *swapchain, int eye, const DG_XR_RAW_POSE *raw,
 
 void dg_xr_capture(void *sc, int eye, const DG_XR_RAW_POSE *raw, const DG_PROJ_FOV *fov) {
     dg_xr_capture_measured(sc, eye, raw, fov, NULL);
+}
+
+/* Second eye (vr_second_eye): the replayed other-eye image, resolved into that
+   eye's store with the pose and FOV it was drawn for. The store must already
+   exist with the same size (the native capture of that eye created it); the
+   texture's format family must match the store (B8G8R8A8). Same context and
+   lock as the native capture. */
+/* Diagnostics (second eye, 29 Sep): private copies of the two eye stores - exactly what the headset
+   is given - for a look at the desk. Same lock as the captures; the caller releases them and must
+   not hold the D3D multithread lock (lock order, see dg_second_eye_publish). */
+int dg_xr_snapshot_stores(void *out[2]) {
+    int eye, n = 0;
+    if (!out) return 0;
+    out[0] = out[1] = NULL;
+    if (!g_dev || !g_ctx || !g_cap_cs_ready) return 0;
+    EnterCriticalSection(&g_cap_cs);
+    for (eye = 0; eye < 2; eye++) {
+        DG_CAPTURE_STORE *st = &g_store[eye];
+        D3D11_TEXTURE2D_DESC dsc;
+        ID3D11Texture2D *copy = NULL;
+        if (!st->texture || !st->valid) continue;
+        st->texture->lpVtbl->GetDesc(st->texture, &dsc);
+        dsc.BindFlags = 0; dsc.CPUAccessFlags = 0; dsc.MiscFlags = 0; dsc.Usage = D3D11_USAGE_DEFAULT;
+        if (SUCCEEDED(g_dev->lpVtbl->CreateTexture2D(g_dev, &dsc, NULL, &copy)) && copy) {
+            g_ctx->lpVtbl->CopyResource(g_ctx, (ID3D11Resource *)copy, (ID3D11Resource *)st->texture);
+            out[eye] = copy; n++;
+        }
+    }
+    LeaveCriticalSection(&g_cap_cs);
+    return n;
+}
+int dg_xr_capture_texture(void *texture, int eye, const DG_XR_RAW_POSE *raw, const DG_PROJ_FOV *fov) {
+    ID3D11Texture2D *src = (ID3D11Texture2D *)texture;
+    D3D11_TEXTURE2D_DESC sd, cd;
+    DG_CAPTURE_STORE *store;
+    int ok = 0;
+    if (!src || !raw || !fov || !g_ctx || !g_cap_cs_ready ||
+        (eye != DG_EYE_LEFT && eye != DG_EYE_RIGHT)) return 0;
+    src->lpVtbl->GetDesc(src, &sd);
+    store = &g_store[eye];
+    EnterCriticalSection(&g_cap_cs);
+    if (store->texture) {
+        store->texture->lpVtbl->GetDesc(store->texture, &cd);
+        if (cd.Width == sd.Width && cd.Height == sd.Height && cd.SampleDesc.Count == 1 &&
+            (cd.Format == DXGI_FORMAT_B8G8R8A8_UNORM || cd.Format == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB)) {
+            if (sd.SampleDesc.Count > 1)
+                g_ctx->lpVtbl->ResolveSubresource(g_ctx, (ID3D11Resource *)store->texture, 0,
+                                                  (ID3D11Resource *)src, 0, cd.Format);
+            else
+                g_ctx->lpVtbl->CopyResource(g_ctx, (ID3D11Resource *)store->texture, (ID3D11Resource *)src);
+            store->raw = *raw;
+            store->fov = *fov;
+            store->valid = 1;
+            store->capture_id = (uint64_t)InterlockedIncrement64(&g_cd_count[CD_STORED]);
+            store->capture_ms = GetTickCount64();
+
+
+
+
+            dg_bridge_model_arm_snapshot(&store->model_arm);
+            dg_bridge_right_model_arm_snapshot(&store->right_model_arm);
+            {
+                DG_XR_CAPTURE_OBSERVER observer=(DG_XR_CAPTURE_OBSERVER)
+                    InterlockedCompareExchangePointer(&g_capture_observer,NULL,NULL);
+                if(observer)observer(eye,store->capture_id);
+            }
+            InterlockedExchange(&g_have_capture, 1);
+            ok = 1;
+        }
+    }
+    LeaveCriticalSection(&g_cap_cs);
+    return ok;
 }
 
 /* Session-state names for the log. Run 15 (2026-09-05) ended with the
@@ -2191,6 +2294,9 @@ static void sample_hand(unsigned int hand, int index, XrTime when,
 }
 
 static void union_fov(const XrView *views, DG_PROJ_FOV *out);
+#include "dg_xr_subrect.h"
+static XrFovf g_eye_fov_seen[2]; static int g_eye_fov_have[2];   /* the runtime's own per-eye FOV, last seen */
+static volatile LONG g_subrect_used, g_subrect_logged;
 
 static void sample_pose(XrTime when, const XrView *views, int views_valid) {
     XrSpaceLocation loc;
@@ -2723,6 +2829,29 @@ static const char *xr_frame_loop(void) {
                         pview[i].subImage.imageRect.offset.y = 0;
                         pview[i].subImage.imageRect.extent.width = (int32_t)capture.width;
                         pview[i].subImage.imageRect.extent.height = (int32_t)capture.height;
+                        /* stereo_test=2: rendered with the union FOV (culling covers both eyes), presented as
+                           the runtime's own per-eye FOV and the matching rectangle of the image
+                           (dg_xr_subrect.h). Mode 0 is untouched: there the stored FOV is the eye's own. */
+                        if (stereo && g_cfg.stereo_test == 2) {
+                            if (views_valid) { g_eye_fov_seen[i] = view[i].fov; g_eye_fov_have[i] = 1; }
+                            if (g_eye_fov_have[i]) {
+                                DgFov st = { fov.left, fov.right, fov.up, fov.down }, ey, got; DgRect rc;
+                                ey.left = g_eye_fov_seen[i].angleLeft; ey.right = g_eye_fov_seen[i].angleRight;
+                                ey.up = g_eye_fov_seen[i].angleUp; ey.down = g_eye_fov_seen[i].angleDown;
+                                if (dgEyeSubRect(&st, &ey, (int)capture.width, (int)capture.height, &rc, &got)) {
+                                    pview[i].fov.angleLeft = (float)got.left; pview[i].fov.angleRight = (float)got.right;
+                                    pview[i].fov.angleUp = (float)got.up; pview[i].fov.angleDown = (float)got.down;
+                                    pview[i].subImage.imageRect.offset.x = rc.x; pview[i].subImage.imageRect.offset.y = rc.y;
+                                    pview[i].subImage.imageRect.extent.width = rc.w; pview[i].subImage.imageRect.extent.height = rc.h;
+                                    InterlockedIncrement(&g_subrect_used);
+                                    if (!InterlockedCompareExchange(&g_subrect_logged, 1, 0))
+                                        g_log("  xr: union render, per-eye presentation: eye %d rect %d,%d %dx%d of %ux%u, fov L%.2f R%.2f U%.2f D%.2f deg (stored L%.2f R%.2f)\r\n",
+                                              i, rc.x, rc.y, rc.w, rc.h, capture.width, capture.height,
+                                              got.left * 57.29578, got.right * 57.29578, got.up * 57.29578, got.down * 57.29578,
+                                              fov.left * 57.29578, fov.right * 57.29578);
+                                }
+                            }
+                        }
                     }
                     memset(&proj, 0, sizeof(proj)); proj.type = XR_TYPE_COMPOSITION_LAYER_PROJECTION;
                     proj.space = g_local_space; proj.viewCount = 2; proj.views = pview;

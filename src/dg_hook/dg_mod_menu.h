@@ -4,6 +4,9 @@
 #include <string.h>
 enum { DG_MM_HOME=1, DG_MM_UP=2, DG_MM_DOWN=4, DG_MM_ENTER=8,
        DG_MM_LEFT=16, DG_MM_RIGHT=32 };
+#define DG_MM_ITEMS 5 /* view, pistol reload, M9 slide, desktop observer, second eye */
+/* Returns -1 off, 1 right, 2 both. Kept separate from checkbox policy. */
+static int dg_mod_observer_next(int on,int mode) { return !on?1:mode==2?-1:2; }
 typedef struct {
     unsigned keys, requested, overridden;
     int open, selected, capture, neutral_ticks;
@@ -17,8 +20,8 @@ static unsigned dg_mod_menu_step(DG_MOD_MENU *m,unsigned keys,int allowed,
     else if(edge&DG_MM_HOME) m->open=!m->open;
     if(m->open) {
         m->capture=1;m->neutral_ticks=0;
-        if(edge&DG_MM_UP)m->selected=(m->selected+2)%3;
-        if(edge&DG_MM_DOWN)m->selected=(m->selected+1)%3;
+        if(edge&DG_MM_UP)m->selected=(m->selected+DG_MM_ITEMS-1)%DG_MM_ITEMS;
+        if(edge&DG_MM_DOWN)m->selected=(m->selected+1)%DG_MM_ITEMS;
         bit=1u<<m->selected;
         if((edge&(DG_MM_ENTER|DG_MM_LEFT|DG_MM_RIGHT)) && (available&bit)) {
             m->requested^=bit;m->overridden|=bit;changed=bit;

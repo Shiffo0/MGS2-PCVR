@@ -1,15 +1,17 @@
-# Mod source and build instructions
+# MGS2 PCVR v0.5.0 — mod source
 
-Corresponding release mod source for **v0.4.0**, build **AEF2EC93**. This directory contains the mod's shipping dependency closure and build script.
+This folder contains the source of the mod itself. It contains no Metal Gear Solid 2 source code and no game assets.
 
-## Build
+## Building
 
-Use Windows x64, Visual Studio 2022 C++ Build Tools with the Windows SDK, and [OpenXR SDK headers](https://github.com/KhronosGroup/OpenXR-SDK), baseline 1.1.59.
+Requirements: Windows x64, Visual Studio 2022 C++ Build Tools with the Windows SDK, and the OpenXR SDK headers (1.1.59 was used for this release).
 
-Open an x64 Native Tools Command Prompt. Set `OPENXR_INCLUDE_DIR` to your SDK directory containing `openxr/openxr.h`, then run `src\build.bat`. Output: `src/dg_hook/dg_hook.asi`.
+1. Open an **x64 Native Tools Command Prompt for VS 2022**.
+2. Set `OPENXR_INCLUDE_DIR` to the directory that contains `openxr\openxr.h`.
+3. Run `src\build.bat`.
 
-The build selects `DG_ENABLE_DIAGNOSTICS=0`. Diagnostic branches, development measurements and unused measurement helpers have been removed. This is a player-only source snapshot; diagnostic builds are not supported. Ordinary error handling, bounded support logging, frame synchronization and OpenXR frame transfer remain. Some inert compatibility entry points retain their original names.
+The output is `src\dg_hook\dg_hook.asi`. The build sets `DG_ENABLE_DIAGNOSTICS=0`, so development diagnostics are compiled out. Two Eye rendering does not depend on them.
 
-The mod builds without additional private include directories. SDK headers are external dependencies with their own licenses. Compiler/linker versions and timestamps may change a local rebuild's hash; byte-identical reproduction is not claimed.
+`dg_hook\dg_cb_retarget_cs.h` is a precompiled compute shader; its source is `dg_hook\dg_cb_retarget.hlsl`. The colour correction in `dg_hook\dg_hdfix_colour.inl` adapts MGSHDFix's colour shader; see `THIRD_PARTY_NOTICES.md`.
 
-The MIT license applies to the mod contributors' own code; third-party dependencies retain their respective licenses.
+Compiler and linker timestamps differ between builds, so a rebuilt binary is not byte-identical to the released one.

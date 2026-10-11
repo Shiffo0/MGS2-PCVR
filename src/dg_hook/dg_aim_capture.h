@@ -13,6 +13,8 @@ typedef struct {
 } DG_AIM_SELECTION;
 int dg_aim_capture_hand_selection(uintptr_t image_base, uint64_t expected_arm,
                                 DG_AIM_SELECTION *selection);
+/* Tests only: the clock of the Stinger selection window (NULL restores it). */
+void dg_aim_capture_stinger_clock(unsigned long long (__stdcall *clock)(void));
 
 /* Nikita keeps native player-body ownership outside FPS aim. This separate
    witness admits only the measured one-piece launcher and its two objects.

@@ -1,18 +1,22 @@
-# MGS2 PCVR — v0.4.0
+# MGS2 PCVR — v0.5.0
 
 Play **METAL GEAR SOLID 2: Sons of Liberty — Master Collection Version** in PC VR, with headset tracking and motion-controller controls.
 
-**Supports PS VR2 / SteamVR and Meta Quest 3 PC VR.** Earlier releases were tested on those setups; this rebuilt release still needs headset validation. This unofficial mod uses **OpenXR** and **AER (Alternate Eye Rendering)**. It runs on a Windows gaming PC; it is not a standalone Quest app.
+**Supports PS VR2 / SteamVR and Meta Quest 3 PC VR.** This unofficial mod uses **OpenXR**, with **AER (Alternate Eye Rendering)** by default and the new **Two Eye rendering (Experimental)** as an option. It runs on a Windows gaming PC; it is not a standalone Quest app.
 
-**[Download v0.4.0](https://github.com/Shiffo0/MGS2-PCVR/releases/tag/v0.4.0)** · [Installation](#installation) · [Controls](#controls) · [Known limitations](#known-limitations) · [Report a problem](https://github.com/Shiffo0/MGS2-PCVR/issues)
+**[Download v0.5.0](https://github.com/Shiffo0/MGS2-PCVR/releases/tag/v0.5.0)** · [Installation](#installation) · [Controls](#controls) · [Known limitations](#known-limitations) · [Report a problem](https://github.com/Shiffo0/MGS2-PCVR/issues)
 
 The **Tanker chapter with Snake** is the focus of this beta. Switch between VR and Third Person as needed, and check your wrist for radar and LIFE information. **Plant / Raiden support is still in development** and is not ready for a complete VR playthrough.
 
-## New in v0.4.0
+## New in v0.5.0
 
-**Huge performance increase in VR:** stereo VR now reaches a steady 60 fps (previously 43–56 fps). PSG-1 scope zoom now works by holding a grip, the Nikita can be used from your hand, and the Stinger stays in your hand. Thermal goggles can be activated by holding the left grip button near your left ear.
+**A huge performance increase with second-eye rendering.** The new **Two Eye rendering (Experimental)** mode draws the second eye from the same game frame instead of waiting for the next one. Both eyes then receive a fresh image every game frame: up to **60 images per second per eye**, where AER gives each eye about 30. Motion looks much smoother, with less judder and ghosting. Effects such as rain, light pools and the sky are drawn at the correct depth in both eyes, and the second eye gets the same colour correction as the first.
 
-See [the release notes](RELEASE_NOTES.md) for changes since v0.3.5 and validation limits. This source-cleaned rebuild is **AEF2EC93**.
+**AER (Alternate Eye Rendering) remains the default.** Two Eye rendering is **Experimental** and opt-in: switch it on with **Home → VR Rendering → BOTH EYES (EXP)**, where `(EXP)` means **Experimental**. To start with it every time, set `vr_second_eye=1` in `dg_hook.on`.
+
+**MGSHDFix is required for Two Eye rendering, and also to get 4K resolution in the headset.** Install [MGSHDFix](https://github.com/ShizCalev/MGSHDFix#installation) separately. For 4K, set the resolution to **3840 × 2160** in the MGSHDFix Config Tool (in the game's `plugins` folder), and set Internal Resolution and Internal Upscaling to Default in the game's launcher.
+
+Two Eye rendering can still show the occasional flickering surface or stray quad. Switch back to AER if this bothers you. See the [release notes](RELEASE_NOTES.md).
 
 ## Requirements
 
@@ -20,18 +24,17 @@ See [the release notes](RELEASE_NOTES.md) for changes since v0.3.5 and validatio
 - A Windows gaming PC capable of running the game and PC VR.
 - **PS VR2 with Sense controllers and a supported PC connection**, or **Meta Quest 3 with Touch Plus controllers**, connected to PC VR.
 - An active OpenXR runtime for your PC VR setup.
+- **[MGSHDFix](https://github.com/ShizCalev/MGSHDFix)** for **Two Eye rendering** and **4K headset rendering**; install separately.
 
-Other headsets and game versions have not been validated. Device support does not imply a full regression test of this exact release.
-
-The retained v0.3.3 fix addresses the SteamVR gameplay “Waiting” problem caused by graphics-device initialization. It also retains unlimited sessions and recovery when the game changes rendering resolution.
+Other headsets and game versions have not been validated.
 
 ## Installation
 
 1. Launch the unmodified game once, then close it.
 2. Connect your headset and start your PC VR software. For **PS VR2**, use **SteamVR** and select it under **SteamVR Settings → OpenXR**. For **Quest Link / Air Link**, select Meta as active under **Meta Quest Link → Settings → General → OpenXR Runtime**. Close the game before switching runtimes.
-3. Download **`MGS2-PCVR-v0.4.0-AEF2EC93.zip`** from the [release page](https://github.com/Shiffo0/MGS2-PCVR/releases/tag/v0.4.0). Choose the mod ZIP under **Assets**, not GitHub's automatic **Source code** downloads.
+3. Download **`MGS2-PCVR-v0.5.0.zip`** from the [release page](https://github.com/Shiffo0/MGS2-PCVR/releases/tag/v0.5.0). Choose the mod ZIP under **Assets**, not GitHub's automatic **Source code** downloads.
 4. In Steam, right-click the game → **Manage → Browse local files**. Extract the ZIP into the folder containing **`METAL GEAR SOLID2.exe`**, keeping its folder structure.
-5. Back up any existing files before replacing them. If other mods already provide `winmm.dll` or `openxr_loader.dll`, start with a clean mod setup; compatibility with other mods has not been validated.
+5. Back up any existing files before replacing them. If other mods already provide `winmm.dll` or `openxr_loader.dll`, start with a clean mod setup. MGSHDFix and this mod both use the Ultimate ASI Loader (`winmm.dll`), so one copy serves both.
 6. Launch the game through Steam with your headset connected. The control table below uses **Quest button names**; for PS VR2, check the corresponding actions in SteamVR controller bindings.
 7. Start with **Tanker**, and check the controls and limitations below.
 
@@ -69,7 +72,7 @@ Controls below use **Quest button names** and the **default right-handed layout*
 
 **Menus:** use the right stick to navigate, **A or right trigger** to confirm, and **B** to go back. Gameplay actions depend on context and are not all available in menus or scripted scenes.
 
-**Mod settings (keyboard):** with the game focused during gameplay, press **Home** to open or close the settings panel. Use **Up/Down** to select View (stereo/mono), VR Pistol Reload or M9 Slide; use **Enter** or **Left/Right** to toggle an available option. After closing, release the buttons and center both sticks to resume control.
+**Mod settings (keyboard):** with the game focused during gameplay, press **Home** to open or close the settings panel. Use **Up/Down** to select View (stereo/mono), VR Pistol Reload, M9 Slide, Desktop Observer or VR Rendering; use **Enter** or **Left/Right** to toggle an available option. Desktop Observer starts at **Right Eye**; **Both Eyes (EXP)** is experimental. VR Rendering starts at **AER**; **Both Eyes (EXP)** is Two Eye rendering (Experimental, requires MGSHDFix). Changes here last for the session. After closing, release the buttons and center both sticks to resume control.
 
 **Photo camera:** begin at minimum zoom and let it settle briefly before zooming. Its zoom is controlled with the right stick. Security-camera traversal remains a separate limitation.
 
@@ -83,6 +86,9 @@ Keep this file when updating. To restore defaults, close the game, rename `dg_ha
 
 ## Known limitations
 
+- **Two Eye rendering (Experimental):** occasional flickering surfaces or stray quads can appear. Use the default AER renderer if affected. Requires MGSHDFix. The Both Eyes desktop observer is also experimental.
+- **USP magazine-opening cue:** only shown with Two Eye rendering, and its alignment is not final.
+
 - **First-person locker entry:** the problem reported in v0.3.4 has not been verified as fixed; use Third Person if affected.
 - **Camera tanker:** The camera is not creating a picture from the correct location in FPS mode, this needs to be fixed in future updates.
 
@@ -90,23 +96,26 @@ Keep this file when updating. To restore defaults, close the game, rename `dg_ha
 - **Hanging and moving while hanging:** still experimental; use **Third Person** for these actions.
 - **Plant / Raiden:** incomplete. Experimental weapon features are included, but a full VR campaign is not supported yet.
 
-## AER and performance
+## AER, Two Eye rendering and performance
 
-**AER (Alternate Eye Rendering)** renders the left and right eye on alternating game frames. At 60 game frames per second, each eye receives roughly **30 fresh images per second**. Increasing the headset refresh rate does not increase that number.
+**AER (Alternate Eye Rendering, default)** renders the left and right eye on alternating game frames. At 60 game frames per second, each eye receives roughly **30 fresh images per second**. Increasing the headset refresh rate does not increase that number, and you may notice ghosting or judder during motion.
 
-You may notice ghosting or judder during motion. Keep the game's frame rate stable and use settings your PC can sustain. Comfort varies between players.
+**Two Eye rendering (Experimental)** gives both eyes a fresh image from every game frame: up to **60 images per second per eye**. The game draws one eye as usual, and the mod redraws that same frame from the other eye's position. This avoids the cost of running the game twice. It requires MGSHDFix and stays opt-in while the remaining visual issues are being fixed.
+
+Keep the game's frame rate stable and use settings your PC can sustain. Comfort varies between players.
 
 ## What's next?
 
-Future work focuses on **Raiden and the Plant chapter**, including further coolant validation, scope and sniper-rifle support, further Stinger work (lock-on validation) and HF-blade support. There is no release date for complete Raiden support yet.
+Future work focuses on **Raiden and the Plant chapter**, including further coolant validation, scope and sniper-rifle support, further Stinger work (lock-on validation) and further HF-blade validation. There is no release date for complete Raiden support yet.
 
 ## Troubleshooting and feedback
 
 - **No VR image:** check your PC VR connection, active OpenXR runtime and installation folder. The mod files must sit beside the game executable. Make sure the `.on` files have not gained an extra `.txt` extension.
 - **View offset or facing the wrong way:** face forward and hold **Y** to recenter.
 - **Stuck at a camera or hanging section:** press **A** to switch to Third Person.
-- **VR stops after about an hour:** install v0.4.0, close the game and set `seconds=0` in `dg_hook.on`.
-- **Problems with other mods:** try this beta on its own before reporting the problem.
+- **VR stops after about an hour:** install v0.5.0, close the game and set `seconds=0` in `dg_hook.on`.
+- **Two Eye rendering looks wrong (colours differ between the eyes, low resolution):** check that MGSHDFix is installed (`plugins\MGSHDFix.asi`), or switch back to AER.
+- **Problems with other mods:** keep MGSHDFix installed for Two Eye / 4K; disable other optional mods while diagnosing compatibility.
 
 [Report a problem](https://github.com/Shiffo0/MGS2-PCVR/issues) with your mod version, game version, headset, PC VR software, GPU, chapter/location and steps to reproduce it. Mention whether it happens in VR, Third Person or both. Review logs before sharing them and avoid uploading personal data or game files.
 
@@ -116,6 +125,7 @@ Created by **Shiffo0**. This is an unofficial fan project, not affiliated with o
 
 The mod's original code and documentation are available under the **[MIT License](LICENSE)**. This license covers the contributors' own work, not the game, its assets or trademarks. Third-party components retain their own licenses; notices are included in the download.
 
+- [MGSHDFix](https://github.com/ShizCalev/MGSHDFix); see [third-party notices](THIRD_PARTY_NOTICES.md).
 - [Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader) by ThirteenAG.
 - [OpenXR SDK / loader](https://github.com/KhronosGroup/OpenXR-SDK) by Khronos and contributors.
 

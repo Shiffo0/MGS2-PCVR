@@ -56,4 +56,26 @@ static int dg_link_present(DG_RENDER_LINK *s,uint32_t tid,uint32_t frame,uint64_
     s->consumers=0;memset(&s->pending,0,sizeof s->pending);
     return ok;
 }
+/* Why dg_link_draw_pair refused (diagnostic): 3 other thread, 4 no consumer
+   yet in this frame, 5 a second consumer (another list), 6 stale, 7 no pair. */
+static int dg_link_pair_reason(const DG_RENDER_LINK *s,uint32_t tid,uint32_t frame,uint64_t ms) {
+    if(s->owner!=tid||!tid)return 3;
+    if(s->consumers==0)return 4;
+    if(s->consumers>1)return 5;
+    if(!dg_link_fresh(&s->pending,frame,ms))return 6;
+    if(s->pending.payload.pair_valid!=1)return 7;
+    return 9;
+}
+/* Non-consuming read for world draws after the native consumer entry. Never
+   consult prepared/latest: those can already describe the following list. */
+static int dg_link_draw_pair(DG_RENDER_LINK *s,uint32_t tid,uint32_t frame,uint64_t ms,
+                             float source[16],float target[16],int *sequence) {
+    const DG_HOOK_HANDOFF *h=&s->pending.payload;
+    memset(source,0,16*sizeof(float));memset(target,0,16*sizeof(float));*sequence=0;
+    if(s->owner!=tid||!tid||s->consumers!=1||!dg_link_fresh(&s->pending,frame,ms)||
+       h->pair_valid!=1)return 0;
+    memcpy(source,&h->pair_ep[h->eye],16*sizeof(float));
+    memcpy(target,&h->pair_ep[1-h->eye],16*sizeof(float));
+    *sequence=s->pending.sequence;return 1;
+}
 #endif

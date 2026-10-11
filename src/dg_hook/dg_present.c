@@ -386,12 +386,29 @@ static HRESULT STDMETHODCALLTYPE hook_create_sc(
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 void dg_present_gpu_report(void (*log)(const char *fmt, ...)) { (void)log; }
 
 
 static HRESULT STDMETHODCALLTYPE hook_present(IDXGISwapChain *sc,
                                                UINT sync, UINT flags) {
     PRESENT_FN next;
+
+
+
     void (*callback)(IDXGISwapChain *);
     LONG count;
 
@@ -450,7 +467,19 @@ static HRESULT STDMETHODCALLTYPE hook_present(IDXGISwapChain *sc,
         InterlockedIncrement(&g_error_count);
     }
     if (next) {
+
+
+
         HRESULT hr = next(sc, sync, flags);
+
+
+
+
+
+
+
+
+
 
 
 

@@ -1,32 +1,38 @@
-# MGS2 PCVR v0.4.0
+# MGS2 PCVR v0.5.0 — Huge performance increase with second-eye rendering
 
-## Huge performance increase in VR
+## Highlights
 
-The mod checked memory validity with a Windows system call before almost every read of game state. In VR stereo those checks consumed most of the game thread's time, which kept the game below 60 frames per second even though the GPU was largely idle. The mod now remembers recent answers for a few milliseconds and falls back to a full check whenever an answer is missing, negative or expired.
+- **Two Eye rendering (Experimental).** The second eye is now drawn from the same game frame instead of the next one. Both eyes get a fresh image every game frame: up to **60 images per second per eye**, where AER gives each eye about 30. Motion is much smoother, with far less judder and ghosting.
+- **Effects in both eyes.** Rain, light pools, glow layers and the sky are drawn at the correct depth in the second eye.
+- **Matching colours.** The second eye gets the same MGSHDFix colour correction as the first.
+- **No vanishing walls at the edge of view.** In Two Eye rendering, the game renders a field of view that covers both eyes, and each eye is shown its own part of it.
 
-On the maintainer's PC (Meta Quest 3, 4K render resolution, stereo), the playtest build of this code went from 43–56 fps with frame spikes of 33–50 ms to a steady 60 fps. Flat and mono modes also benefit. Results on other PCs will vary.
+## Also since v0.4.0
 
-## Other changes since v0.3.5
+- Pistol aim transitions keep your controller's rotation, while reload, wall, melee and other special animations stay native.
+- Manual reload feedback: a green M9 slide cue and a SOCOM magazine cue.
 
-- **PSG-1 / PSG-1T:** in the first-person scope, hold the **right grip** to zoom in and the **left grip** to zoom out; zoom continues while the grip is held. The shot stays aimed with your head.
-- **Nikita:** the launcher sits in your VR hand. Hold the **right grip** to open the native Nikita sight and fire with the trigger, then steer the missile with the left stick. Firing no longer leaves the trigger or the menu blocked afterwards.
-- **Stinger:** the launcher stays in your hand instead of opening in the zoomed view. Holding the **right grip** opens the sight. The sight and lock-on have not been verified in the headset yet.
-- **Thermal goggles (experimental):** with the goggles in your inventory, press the left grip with your left hand near your left ear to toggle them. This has not been validated in the headset.
-- **Fire handling:** a trigger action the game does not accept is now abandoned after a short time instead of blocking later input.
-- **Player build and mod source:** development measurements, recording and weapon diagnostics are excluded. Comments that named internal game functions have been removed from the mod source.
+## Defaults
 
-Retains v0.3.5 Game Over recovery, HUD/cutscene handling, persistent wrist alignment, SteamVR support and unlimited sessions. AER still alternates eyes.
+- **AER (Alternate Eye Rendering) remains the default** (`stereo=1`, `vr_second_eye=0`).
+- Switch on **Two Eye rendering** in-game with **Home → VR Rendering → BOTH EYES (EXP)**; `(EXP)` means **Experimental**. Home changes last for the session. To start with it every time, set `vr_second_eye=1` in `dg_hook.on`.
+- The desktop window shows the **Right Eye** by default.
 
-## Installation and limitations
+## MGSHDFix required
 
-Extract the mod ZIP beside the game executable with the game closed. Back up your existing mod files first. Keep `dg_hand_calibration.bin` to preserve your wrist alignment.
+**[MGSHDFix](https://github.com/ShizCalev/MGSHDFix#installation) is required for Two Eye rendering, and also to get 4K resolution in the headset.** Install it separately. For 4K, set the resolution to **3840 × 2160** in the MGSHDFix Config Tool (in the game's `plugins` folder), and set Internal Resolution and Internal Upscaling to Default in the game's launcher. MGSHDFix and this mod use the same ASI loader (`winmm.dll`), so one copy serves both.
 
-The Tanker chapter remains the focus. Plant/Raiden, hanging and grenades retain the limitations described in the README. A full campaign regression is not claimed.
+## Installation and updating
 
-## Build
+Close the game and back up your existing mod files. Extract **MGS2-PCVR-v0.5.0.zip** into the folder containing `METAL GEAR SOLID2.exe`. Use the supplied `.on` files to get the new defaults. Keep `dg_hand_calibration.bin` to preserve your wrist alignment.
 
-The maintainer played and accepted this gameplay code on a playtest build (05F4F9F6): PSG-1 zoom, Nikita arm, firing, steering and menu, the Stinger in hand, and 60 fps in stereo. This release is **AEF2EC93**, a new binary rebuilt from that source after removing the development code. The rebuilt binary itself has not been tested in a headset.
+If you keep your own `dg_hook.on`, add `stereo_test=2` and check `stereo=1` and `vr_second_eye=0`. The wider field of view is only used while Two Eye rendering is on; AER renders exactly as in v0.4.0.
 
-The release-profile, XR runtime, HUD/cutscene and GPU checks passed on the published source. Private test harnesses and development results are not included.
+## Known limitations
 
-Binary SHA256: `AEF2EC9304365DF292263C5041B10BDA6AC9EBA36884AF65BD72BF3DFE9D8A23`.
+- Two Eye rendering is **Experimental**. Occasional flickering surfaces or stray quads can still appear. Switch back to AER if this bothers you.
+- Plant / Raiden support is still incomplete. See the README for controls and other gameplay limitations.
+
+## Source
+
+The `src` folder contains the full source of the mod itself. It contains no Metal Gear Solid 2 source code and no game assets.

@@ -30,6 +30,10 @@ static DG_LEFT_STATE g_left;
 static volatile LONG g_left_accepted, g_left_refused, g_left_support_pairs;
 static volatile LONG g_left_status, g_left_target[3], g_left_blend;
 static volatile LONG g_left_reason;
+
+
+
+
 /* Per unique solved pair: aim/coherence, right commit, anchor, reach,
    distance, dwell, attached. Keep these across releases for run diagnosis. */
 static volatile LONG g_left_support_gate[7];
@@ -69,7 +73,9 @@ static int left_arm_show_unarmed(ULONGLONG arm, const DG_BRIDGE_ARM_TARGET *t)
         g_left.arm == arm && g_left.stream == left_calibration_stream(t) &&
         g_left.pair == t->pair_id && left_owner(&mc, &adj) &&
         resolve_player(&current, NULL, &weapon) == DG_RESOLVE_OK &&
-        current == arm && weapon == 0;
+        current == arm && (weapon == 0 ||
+            (weapon == 13 && dg_bridge_blade_braced() && t->aim_write &&
+             t->aim_weapon_id==13 && t->aim_arm==arm && g_b.ik_active));
 }
 
 static void left_wrist_release(void)
@@ -380,6 +386,30 @@ static void left_arm_now(ULONGLONG arm, const DG_BRIDGE_ARM_TARGET *t,
     }
     InterlockedIncrement(&g_left_support_gate[support_gate]);
     if(blend>0) for(k=0;k<3;k++) target[k]+=(support[k]-target[k])*blend;
+    /* Use the same solved right wrist and orientation that drive the blade,
+       not a separately calibrated controller-space line. Native Blade0/1
+       positions are in game units; a resting point 300..600 units along the
+       blade stays away from the hilt and tip. */
+    if(t->aim_weapon_id==13 && dg_bridge_blade_braced() && right_committed &&
+       g_b.have_pred_wrist && g_b.hand_have_desired && t->aim_write &&
+       t->aim_arm==arm && t->aim_pair_id==t->pair_id && t->hands_coherent) {
+        const double blade0[3]={10,-118,75};
+        const double axis[3]={3.454840660095215,-383.86553955078125,759.2001342773438};
+        double start[3],direction[3],point[3];
+        arm_quat_rotate(g_b.hand_desired,blade0,start);
+        arm_quat_rotate(g_b.hand_desired,axis,direction);
+        for(k=0;k<3;k++) {
+            start[k]=(start[k]+g_b.pred_wrist[k])/1000.0;
+            point[k]=target[k]/1000.0;
+        }
+        if(dg_blade_brace_snap(start,direction,point)) {
+            for(k=0;k<3;k++)target[k]=point[k]*1000.0;
+
+
+
+
+        }
+    }
     reason=8;
     memset(&ii,0,sizeof ii);
     ii.upper=mi.upper; ii.fore=mi.fore; ii.max_reach_frac=.99;
@@ -444,6 +474,9 @@ static void left_arm_now(ULONGLONG arm, const DG_BRIDGE_ARM_TARGET *t,
     }
     *(volatile ULONGLONG *)(ULONG_PTR)(mc+0x38)|=DG_LEFT_MASK;
     g_left.active=1; g_left.accepted++;
+
+
+
     if(right_committed && g_b.have_pred_wrist && g_b.hand_have_desired &&
        finger_valid && g_left.wrist_world_valid) {
         double contact[3];arm_quat_rotate(g_left.wrist_world,finger_local,contact);
@@ -461,4 +494,64 @@ refuse:
     InterlockedIncrement(&g_left_refused);
     InterlockedExchange(&g_left_reason,reason);
     left_arm_release();
+}
+
+/* Bounded read-only witness: accepted IK and object visibility do not prove
+ * that the rendered hand reached the blade. Observe the actual hierarchy,
+ * including its finger contact, separately from this pair's prediction. */
+#include "dg_evm_witness.inl"
+static void left_blade_observe(ULONGLONG arm,const DG_BRIDGE_ARM_TARGET *t) {
+    left_evm_observe(arm,t);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    (void)arm;(void)t;
+
 }

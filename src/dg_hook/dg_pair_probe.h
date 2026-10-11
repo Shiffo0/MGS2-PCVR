@@ -112,7 +112,6 @@ static void cp_prepare(void);
 
 
 
-static void pp_prepare(ULONG64 base,const char *marker,const char *output) {
 
 
 
@@ -123,7 +122,8 @@ static void pp_prepare(ULONG64 base,const char *marker,const char *output) {
 
 
 
-}
+
+
 /* Worker poll: the owner can request capture after reaching gameplay.
    One request attempt per session, including a malformed/refused request. */
 static int pp_poll(void (*log)(const char *,...)) {

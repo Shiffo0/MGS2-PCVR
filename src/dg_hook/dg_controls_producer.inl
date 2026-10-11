@@ -394,9 +394,10 @@ static void controls_route_frame(const DG_XR_FRAME *frame, int allowed,
         frame->right_hand.secondary_button || frame->right_hand.menu_button ||
         frame->left_hand.thumbstick_click || frame->right_hand.thumbstick_click ||
         frame->right_hand.trigger_click || frame->right_hand.trigger_value>.1f ||
-        frame->left_hand.trigger_click || frame->left_hand.trigger_value>.1f ||
-        frame->left_hand.squeeze_click)),
+        frame->left_hand.trigger_click || frame->left_hand.trigger_value>.1f)),
         now_ms,g_controls.context,&out->blade);
+    /* The left grip is the block brace now: it keeps the sample, and the
+       stroke recognizer ignores samples taken with it down (blade_tick). */
     stinger_sample_from_frame(frame,native_allowed && generation &&
         !(radial && (owned.deny_new_fire || !owned.route_valid)) &&
         !(frame && (frame->left_hand.thumbstick_click || frame->right_hand.thumbstick_click ||
