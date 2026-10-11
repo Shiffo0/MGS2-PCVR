@@ -24,6 +24,7 @@
 - **Reload feedback:** a green M9 slide cue and a SOCOM magazine cue during manual reloads. With Two Eye rendering, the USP also shows green markers at the magazine opening.
 - **Stinger:** picking it up into your hand is more reliable.
 - **Fission Mailed:** the fake game-over screen is shown flat, and your controls keep working.
+- **Favourites are saved:** your weapon and item radial favourites now survive a game restart. They are stored in `dg_favorites.dat` next to the game; your game saves are untouched. ([#6](https://github.com/Shiffo0/MGS2-PCVR/issues/6))
 
 **Home menu:** two new entries, **Desktop Observer** and **VR Rendering** (AER / BOTH EYES (EXP)).
 
@@ -39,7 +40,7 @@
 
 ## Installation and updating
 
-Close the game and back up your existing mod files. Extract **MGS2-PCVR-v0.5.0.zip** into the folder containing `METAL GEAR SOLID2.exe`. Use the supplied `.on` files to get the new defaults. Keep `dg_hand_calibration.bin` to preserve your wrist alignment.
+Close the game and back up your existing mod files. Extract **MGS2-PCVR-v0.5.0.zip** into the folder containing `METAL GEAR SOLID2.exe`. Use the supplied `.on` files to get the new defaults. Keep `dg_hand_calibration.bin` (wrist alignment) and `dg_favorites.dat` (radial favourites) when updating.
 
 If you keep your own `dg_hook.on`, add `stereo_test=2` and check `stereo=1` and `vr_second_eye=0`. The wider field of view is only used while Two Eye rendering is on; AER renders exactly as in v0.4.0.
 

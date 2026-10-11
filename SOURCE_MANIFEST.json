@@ -181,7 +181,7 @@
   },
   {
     "path": "src/dg_hook/dg_controls_producer.inl",
-    "sha256": "320E262BBD930B2EEB72260C632E9A16B98EEAECB8A18A0DF2BCD9D80EA47741"
+    "sha256": "E22571FEB114F41FE3857C59A631A149B0EB7274D1F4E9247AE3453F4242DF3B"
   },
   {
     "path": "src/dg_hook/dg_coolant_input.h",
@@ -226,6 +226,10 @@
   {
     "path": "src/dg_hook/dg_fake_gameover.inl",
     "sha256": "3A8B6BEE4B959C931C0776CE9DE155D3C08921E52311A3612E479D4474D4262E"
+  },
+  {
+    "path": "src/dg_hook/dg_favorites.h",
+    "sha256": "B7FC9E5045C0D8C728358BACBF004455C43017598CF8CD465C03D990422AEB3C"
   },
   {
     "path": "src/dg_hook/dg_fire.c",

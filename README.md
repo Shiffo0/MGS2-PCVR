@@ -21,7 +21,7 @@ Two Eye rendering can still show the occasional flickering surface or stray quad
 **Also new:**
 - HF blade swings without a button, plus a two-handed block.
 - The desktop window shows your headset view (Right Eye, 16:9).
-- Smoother pistol aim transitions, green reload cues, more reliable Stinger pick-up, and Fission Mailed support.
+- Smoother pistol aim transitions, green reload cues, more reliable Stinger pick-up, Fission Mailed support, and radial favourites that are saved between sessions.
 
 See the [release notes](RELEASE_NOTES.md).
 
@@ -76,6 +76,8 @@ Controls below use **Quest button names** and the **default right-handed layout*
 | Left stick click | Item selection radial |
 | Swing the right hand with the HF blade (VR) | Slash (across / up / down) or stab (thrust forward); no button needed (experimental) |
 | Left hand on the HF blade + hold left grip | Block (experimental) |
+
+**Radial favourites** are saved in `dg_favorites.dat` beside the game executable and survive restarts.
 
 **Radial selection:** start with the stick centered and triggers released. Hold the relevant stick click, move that stick toward the entry, and press the **same controller's trigger** to confirm. Releasing the stick click while an entry is highlighted also selects it. The opposite trigger cancels. Release the controls and return the stick to center before opening another selection. Release the selection trigger before using the weapon.
 

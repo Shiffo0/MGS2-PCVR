@@ -5,6 +5,18 @@
 #include "dg_interact_bindings.inl"
 #include "dg_radial_game.h"
 #include "dg_radial_ready.h"
+#include "dg_favorites.h"
+static char g_favorites_path[MAX_PATH];
+static void controls_favorites_path(void) {
+#ifndef DG_HOOK_TEST
+    DWORD n=GetModuleFileNameA(NULL,g_favorites_path,sizeof g_favorites_path);
+    char *slash;
+    if (!n || n>=sizeof g_favorites_path) {g_favorites_path[0]=0;return;}
+    slash=strrchr(g_favorites_path,92);
+    if (!slash || strcpy_s(slash+1,sizeof g_favorites_path-(size_t)(slash+1-g_favorites_path),"dg_favorites.dat"))
+        g_favorites_path[0]=0;
+#endif
+}
 typedef struct {
     int available;
     uint64_t version;
@@ -46,6 +58,8 @@ static void controls_init(void) {
     memset(&g_controls,0,sizeof g_controls);
     dg_radial_owner_init(&g_controls.owner);
     g_controls.context=1;
+    controls_favorites_path();
+    if (g_favorites_path[0]) dg_favorites_load(g_favorites_path,g_controls.favorites);
     g_controls.group[0]=g_controls.group[1]=-1;
     g_controls.stream=g_arm_pose_stream_id;
     g_controls.source=g_source;
@@ -343,6 +357,8 @@ static void controls_route_frame(const DG_XR_FRAME *frame, int allowed,
                 g_controls.context++;g_controls.cached=0;
             } else if (g_controls.group[kind]==1 && g_controls.favorites_edit[kind]) {
                 g_controls.favorites[kind]^=UINT64_C(1)<<entry;
+                if (g_favorites_path[0] && !dg_favorites_save(g_favorites_path,g_controls.favorites))
+                    logf_("favorites: could not save preferences\r\n");
                 g_controls.context++;g_controls.cached=0;
             } else if(kind && owned.selection.trigger_confirm &&
                       (entry==1 || entry==3 || entry==4 || entry==5)) {
