@@ -16,7 +16,14 @@ The **Tanker chapter with Snake** is the focus of this beta. Switch between VR a
 
 **MGSHDFix is required for Two Eye rendering, and also to get 4K resolution in the headset.** Install [MGSHDFix](https://github.com/ShizCalev/MGSHDFix#installation) separately. For 4K, set the resolution to **3840 × 2160** in the MGSHDFix Config Tool (in the game's `plugins` folder), and set Internal Resolution and Internal Upscaling to Default in the game's launcher.
 
-Two Eye rendering can still show the occasional flickering surface or stray quad. Switch back to AER if this bothers you. See the [release notes](RELEASE_NOTES.md).
+Two Eye rendering can still show the occasional flickering surface or stray quad. Switch back to AER if this bothers you.
+
+**Also new:**
+- HF blade swings without a button, plus a two-handed block.
+- The desktop window shows your headset view (Right Eye, 16:9).
+- Smoother pistol aim transitions, green reload cues, more reliable Stinger pick-up, and Fission Mailed support.
+
+See the [release notes](RELEASE_NOTES.md).
 
 ## Requirements
 
@@ -67,6 +74,8 @@ Controls below use **Quest button names** and the **default right-handed layout*
 | Hold right grip with the Nikita or Stinger | Weapon sight; release to return |
 | Left grip, with the left hand near the left ear | Thermal goggles on/off (experimental, when owned) |
 | Left stick click | Item selection radial |
+| Swing the right hand with the HF blade (VR) | Slash (across / up / down) or stab (thrust forward); no button needed (experimental) |
+| Left hand on the HF blade + hold left grip | Block (experimental) |
 
 **Radial selection:** start with the stick centered and triggers released. Hold the relevant stick click, move that stick toward the entry, and press the **same controller's trigger** to confirm. Releasing the stick click while an entry is highlighted also selects it. The opposite trigger cancels. Release the controls and return the stick to center before opening another selection. Release the selection trigger before using the weapon.
 

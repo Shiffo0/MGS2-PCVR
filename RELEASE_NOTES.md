@@ -7,10 +7,25 @@
 - **Matching colours.** The second eye gets the same MGSHDFix colour correction as the first.
 - **No vanishing walls at the edge of view.** In Two Eye rendering, the game renders a field of view that covers both eyes, and each eye is shown its own part of it.
 
-## Also since v0.4.0
+## Also new since v0.4.0
 
-- Pistol aim transitions keep your controller's rotation, while reload, wall, melee and other special animations stay native.
-- Manual reload feedback: a green M9 slide cue and a SOCOM magazine cue.
+**HF blade (Raiden, experimental)**
+- **No button needed:** with the blade in hand in VR, swing to attack. Swing across, up or down to slash, and thrust forward to stab. Lifting the sword before a chop counts as a wind-up, so the chop itself is what attacks.
+- **Two-handed block:** put your left hand on the blade and hold the left grip to block. Release the grip or move your hand away to stop blocking. Your left hand stays on the blade while you block.
+- **Full blade model** in first person instead of the stretched one.
+
+**Desktop observer**
+- The desktop window now shows what you see in the headset, by default the **Right Eye**, cropped to 16:9.
+- **Both Eyes (EXP)** combines both eyes into one wider desktop view (Experimental) and avoids cutting your hands and arms at the seam where it can.
+- Switch it with **Home → Desktop Observer**.
+
+**Weapons and gameplay**
+- **Pistol aiming:** aim transitions keep your controller's rotation, while reload, wall, melee and other special animations stay native. This reduces arm jumps when you start aiming.
+- **Reload feedback:** a green M9 slide cue and a SOCOM magazine cue during manual reloads. With Two Eye rendering, the USP also shows green markers at the magazine opening.
+- **Stinger:** picking it up into your hand is more reliable.
+- **Fission Mailed:** the fake game-over screen is shown flat, and your controls keep working.
+
+**Home menu:** two new entries, **Desktop Observer** and **VR Rendering** (AER / BOTH EYES (EXP)).
 
 ## Defaults
 
