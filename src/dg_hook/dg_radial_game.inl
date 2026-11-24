@@ -183,7 +183,6 @@ static int radial_engine_ready(const dg_radial_native_snapshot *s,
     if (kind==DG_RADIAL_EQUIP_WEAPON) {
         if (status&0x4000u) return 0;
 
-
         if ((status&UINT64_C(0x50000000040)) || (status&0x02000000u) ||
             (flags&0x100u) || (flags2&0x10u) ||
             (s->item_types[i->actor_item]&0x0cu) ||

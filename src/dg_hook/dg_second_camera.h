@@ -1,6 +1,3 @@
-
-
-
 #ifndef DG_SECOND_CAMERA_H
 #define DG_SECOND_CAMERA_H
 #include <math.h>

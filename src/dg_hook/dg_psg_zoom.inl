@@ -1,16 +1,8 @@
 /* Reuse the native shared zoom actor, but prove PSG ownership independently
    from the photo-camera manager. No pad/camera writes here. */
-/* Zoom parent: every native zoom constructor call (photo camera 0x4ee1ac,
-   PSG 0x71355e, 0x7176ac) passes rdx=[0x17df6a0], stored at zoom+0x60
-   (0x57adbc) - the same global the photo route checks through
-   g_zoom_a.parent_slot. It is not the arm camera of the camera gate; that
-   comparison refused every live PSG frame (25 Sep 2026: 440 and 1928). The
-   constructor also writes its camera back to *(actor+0x108) (0x57ae52), which
-   is why zoom+0x58 == scope holds. */
+
 static int psg_zoom_observe(uint64_t expected,uint64_t *owner,uint64_t *cam,unsigned *om,unsigned *imask) {
-
-
-
+    int dgw_w=dgw_weapon_now();
     uint64_t actor,player,scope,parent,zoom,fn,pad,zc,zp;int weapon,ok=0,oi,ii;
     unsigned pause,flags,pm,sm;
     if((!g_zoom_a.valid) || (!g_zoom_detour.installed) || (!TryAcquireSRWLockShared(&g_controls_lock)))return 0;

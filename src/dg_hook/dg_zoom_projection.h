@@ -52,6 +52,27 @@ static double dg_psg_projection_step(DG_ZOOM_PROJECTION *s,uint64_t id,int valid
     if(boundary)s->gain=angle/8.0;
     s->last_eye=eye;s->have_eye=1;return s->gain;
 }
+/* The optic's native zoom actor publishes focal length in a witnessed
+   2..24 range. Restore the legacy XR magnification range (1..4) across
+   the entire travel after replacing the game's projection with the XR view.
+   The last part of the zoom dial must continue changing the rendered world. */
+static double dg_optics_projection_step(DG_ZOOM_PROJECTION *s,uint64_t id,int valid,
+    float angle,int stereo,int eye) {
+    int boundary=!stereo || !s->have_eye || (eye==0 && s->last_eye!=0);
+    if(!valid || !id || !(angle>=2 && angle<=24)){
+        memset(s,0,sizeof *s);return 1;
+    }
+    if(id!=s->identity){
+        memset(s,0,sizeof *s);s->identity=id;boundary=1;
+    }
+    if(boundary)s->gain=1.0+3.0*((double)angle-2.0)/22.0;
+    s->last_eye=eye;s->have_eye=1;
+    return s->gain;
+}
+static int dg_zoom_drop_stores(int scoped,uint64_t owner,uint64_t previous)
+{
+    return !scoped || !owner || owner!=previous;
+}
 static void dg_zoom_projection_apply(MAT *m,double gain) {
     if(gain>1 && gain<=7.5) {
         m->m[0][0]=(float)(m->m[0][0]*gain);

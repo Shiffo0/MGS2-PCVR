@@ -1,13 +1,7 @@
-/* MGSHDFix "Correct Gamma Levels" for the replayed eye (10 Oct 2026). MGSHDFix runs its colour correction at
-   Present on the swap-chain buffer (src/fixes/color_correction.cpp: SweetFX vibrance 0.15, then a smootherstep
-   luma curve blended by 0.225). The native eye is captured from that buffer after it; the replayed eye is
-   published from our own texture and missed it (live 10 Oct: native T3 == buffer after the game's last draw,
-   median 25; buffer at Present median 19; replay 25). Same shader, applied to our texture in place.
-   Enabled when <game>\plugins\MGSHDFix.settings says "Correct Gamma Levels=1"; vr_se_mode bit 64 = off. */
 #include <d3dcompiler.h>
 #pragma comment(lib,"d3dcompiler.lib")
 struct DgHdfixColour {
- int enabled=-1;   /* -1 not read yet (the desk check sets 1) */
+ int enabled=-1;
  bool failed=false;
  ComPtr<ID3D11VertexShader>vs;ComPtr<ID3D11PixelShader>ps;ComPtr<ID3D11SamplerState>smp;ComPtr<ID3D11RasterizerState>rs;ComPtr<ID3D11DepthStencilState>dss;
  ComPtr<ID3D11Texture2D>temp;ComPtr<ID3D11ShaderResourceView>tempSrv;D3D11_TEXTURE2D_DESC tempDesc{};
@@ -19,7 +13,7 @@ struct DgHdfixColour {
  }
  bool on(){
   if(enabled<0){char p[MAX_PATH];DWORD n=GetModuleFileNameA(nullptr,p,MAX_PATH);char*s=n&&n<MAX_PATH?strrchr(p,'\\'):nullptr;
-   bool loaded=GetModuleHandleA("MGSHDFix.asi")!=nullptr;   /* only when MGSHDFix really runs in this process */
+   bool loaded=GetModuleHandleA("MGSHDFix.asi")!=nullptr;
    if(s&&loaded){strcpy_s(s+1,MAX_PATH-(s+1-p),"plugins\\MGSHDFix.settings");enabled=readSetting(p);}else enabled=0;
    if(logger)logger("second_eye: MGSHDFix colour correction for the replayed eye: %s\r\n",!loaded?"off (MGSHDFix not loaded)":enabled?"on (MGSHDFix loaded, Correct Gamma Levels=1)":"off (Correct Gamma Levels absent or 0)");}
   return enabled>0&&!failed;

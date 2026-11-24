@@ -2,7 +2,6 @@
 #define DG_COOLANT_INPUT_H
 #include <stdint.h>
 
-
 typedef struct {
     uint64_t player,pad,press;
     unsigned tick,stream,mask;

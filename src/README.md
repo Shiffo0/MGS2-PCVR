@@ -1,4 +1,4 @@
-# MGS2 PCVR v0.5.0 — mod source
+# MGS2 PCVR v0.6.0 — mod source
 
 This folder contains the source of the mod itself. It contains no Metal Gear Solid 2 source code and no game assets.
 
@@ -10,8 +10,8 @@ Requirements: Windows x64, Visual Studio 2022 C++ Build Tools with the Windows S
 2. Set `OPENXR_INCLUDE_DIR` to the directory that contains `openxr\openxr.h`.
 3. Run `src\build.bat`.
 
-The output is `src\dg_hook\dg_hook.asi`. The build sets `DG_ENABLE_DIAGNOSTICS=0`, so development diagnostics are compiled out. Two Eye rendering does not depend on them.
+The output is `src\dg_hook\dg_hook.asi`, the player build. There is a single build profile; development measurement tools are not part of this source.
 
-`dg_hook\dg_cb_retarget_cs.h` is a precompiled compute shader; its source is `dg_hook\dg_cb_retarget.hlsl`. The colour correction in `dg_hook\dg_hdfix_colour.inl` adapts MGSHDFix's colour shader; see `THIRD_PARTY_NOTICES.md`.
+The `*_cs.h` headers are precompiled compute shaders; their sources are the `.hlsl` files next to them (`dg_cb_retarget`, `dg_geometry_probe`, `dg_msaa_compare`), and `dg_observer_shader.hlsl` is the desktop observer shader. The colour correction in `dg_hook\dg_hdfix_colour.inl` adapts MGSHDFix's colour shader; see `THIRD_PARTY_NOTICES.md`.
 
 Compiler and linker timestamps differ between builds, so a rebuilt binary is not byte-identical to the released one.

@@ -1,5 +1,3 @@
-
-
 typedef struct {
     ULONGLONG arm,objs,evm;
     LONG obj_owned,evm_owned;

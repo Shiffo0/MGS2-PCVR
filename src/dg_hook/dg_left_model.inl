@@ -20,6 +20,11 @@ static void left_model_publish(ULONGLONG base,int stride,const DG_ADJ_FRAME *fra
     }
     if(!adjust_quat_to_world(frame,a,old_up) || !adjust_quat_to_world(frame,b,old_fore) ||
        !adjust_quat_to_world(frame,qa,up) || !adjust_quat_to_world(frame,qb,fore))goto refuse;
+    {   /* socom_gap: the clavicle adjust (slot 7) is part of the chain under the upper arm */
+        double cp[4],cn[4];
+        if(!left_clav_world(frame,g_left.clav_prev,cp) || !left_clav_world(frame,g_left.clav_next,cn))goto refuse;
+        dg_ik_quat_mul(old_up,cp,old_up);dg_ik_quat_mul(up,cn,up);
+    }
     dg_ik_quat_mul(old_fore,old_up,old_chain);dg_ik_quat_conj(old_chain,inv);
     dg_ik_quat_mul(inv,live,native);dg_ik_quat_mul(fore,up,chain);
     dg_ik_quat_mul(chain,native,solved);arm_quat_rotate(solved,axis,normal);

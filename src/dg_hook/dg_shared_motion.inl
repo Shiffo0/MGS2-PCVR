@@ -1,6 +1,3 @@
-
-
-
 #define DG_MOTION_MOBILE 1u
 #define DG_MOTION_RELOAD 2u
 static void mobile_arm_pose(void *rsp);

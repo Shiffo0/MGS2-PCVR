@@ -1,15 +1,5 @@
 #pragma once
-/* Union-FOV render, per-eye presentation (10 Oct 2026).
-   stereo_test=2 renders both eyes with the union FOV: the game's culling then covers the replayed eye and
-   walls stop vanishing at its edge (simulator: 33 -> 0-2 drop-probe transitions). Submitted as such, the
-   Quest showed a doubled image (user, 10 Oct; also seen in July, MGS2_PCVR_V3_PLAN.md S4d) - the runtime
-   path does not present a union-FOV layer the way it presents its own per-eye FOV.
-   An eye's own frustum, from the same eye position, is an axis-aligned rectangle of the union image plane
-   (both are central projections onto the same plane). So each eye is submitted with its own FOV and that
-   rectangle as the sub-image: exactly what the runtime shows correctly today, cut from the wider render.
-   Angles in radians, OpenXR convention (left/down negative). The rectangle is rounded to whole pixels and
-   the returned FOV is that of the rounded rectangle, so pixels map exactly. Returns 0 (caller keeps the
-   stored FOV and the full image) unless the eye FOV lies inside the stored one and differs from it. */
+
 #include <math.h>
 typedef struct { double left, right, up, down; } DgFov;
 typedef struct { int x, y, w, h; } DgRect;

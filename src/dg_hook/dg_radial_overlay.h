@@ -50,9 +50,7 @@ void dg_radial_overlay_init(dg_radial_overlay *s, uint64_t session_epoch);
 dg_radial_overlay_layer dg_radial_overlay_step(dg_radial_overlay *s,
     const dg_radial_overlay_ops *ops, const dg_radial_overlay_frame *frame,
     const dg_radial_overlay_model *model, uint32_t *scratch, size_t capacity);
-/* Explicit owner-confirmed stopped session, before destroying its parent.
- * Never resets a live acquired image. Failure retains the handle for teardown.
- * After success call init only for a genuinely new session epoch. */
+
 int dg_radial_overlay_teardown(dg_radial_overlay *s,
     const dg_radial_overlay_ops *ops, int session_stopped);
 #endif

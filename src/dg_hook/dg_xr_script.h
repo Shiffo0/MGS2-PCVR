@@ -1,5 +1,3 @@
-
-
 #ifndef DG_XR_SCRIPT_H
 #define DG_XR_SCRIPT_H
 
@@ -15,8 +13,6 @@
 #define DG_XR_SCRIPT_BUTTON_SECONDARY     8u
 #define DG_XR_SCRIPT_BUTTON_MENU         16u
 
-/* Opaque parsed storage, exposed this far so desk tests can parse and sample
-   without starting a thread.  Call program_free after every successful parse. */
 typedef struct {
     void *steps;
     unsigned int step_count;
@@ -42,9 +38,6 @@ int  dg_xr_script_program_parse_text(DG_XR_SCRIPT_PROGRAM *out,
                                      char *error, size_t error_cap);
 void dg_xr_script_program_free(DG_XR_SCRIPT_PROGRAM *program);
 
-/* Pure random-access sample. Returns 1 for a live tick, 0 at/after EOF.
-   Edge counters and software-turn transforms belong to the live player and
-   are intentionally absent here. */
 int dg_xr_script_program_sample(const DG_XR_SCRIPT_PROGRAM *program,
                                 uint64_t tick, DG_XR_FRAME *frame,
                                 unsigned int *events);
@@ -61,8 +54,6 @@ int  dg_xr_script_get_frame(DG_XR_FRAME *out);
    -1 if stop timed out while the worker still owns its resources. */
 int  dg_xr_script_finished(void);
 
-/* Mailboxes corresponding to the three edge routes that live outside
-   DG_XR_FRAME in dg_xr.c. Values are process-monotonic across script runs. */
 uint64_t      dg_xr_script_primary_press_seq(unsigned int hand);
 uint64_t      dg_xr_script_menu_press_seq(void);
 unsigned long dg_xr_script_secondary_presses(unsigned int hand);
@@ -72,15 +63,5 @@ long          dg_xr_script_recenter_count(void);
 void   dg_xr_script_turn_rate(double deg_per_s);
 double dg_xr_script_turn_offset_rad(void);
 void   dg_xr_script_recenter(void);
-
-
-
-
-
-
-
-
-
-
 
 #endif

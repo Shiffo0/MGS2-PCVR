@@ -2,14 +2,6 @@
 #define DG_RADIAL_NATIVE_READ_H
 #include "dg_radial_inventory.h"
 
-
-
-
-
-
-
-
-
 enum { DG_RN_WEAPONS=22, DG_RN_ITEMS=41 };
 typedef struct dg_radial_native_anchors {
     int valid;

@@ -4,14 +4,8 @@
 #include <string.h>
 #include <math.h>
 #include <float.h>
+#include "dg_grip_blend.h"
 
-/* Metres, LOCAL-space samples. No native pointers or writes in recognition.
- * No button: while the blade is held, a fast stroke of the hand relative to
- * the head is an attack. A stroke is judged when it ENDS (it slows down,
- * reverses or runs too long), so its direction is the whole stroke, not the
- * first centimetres. An attack then waits DG_BLADE_PENDING_MS: if a stroke
- * the other way starts inside that time, the first was a wind-up (lifting
- * the sword before a chop) and the follow-up is judged instead. grip is sampled but no longer consulted. */
 typedef struct {
     uint64_t source, sequence, context, now_ms;
     int64_t time_ns;
@@ -30,12 +24,22 @@ typedef struct {
 #define DG_BLADE_MIN_STAB    0.20  /* m forward */
 #define DG_BLADE_MIN_MS      40
 #define DG_BLADE_MAX_MS      700
-#define DG_BLADE_COOLDOWN_MS 350
+#define DG_BLADE_COOLDOWN_MS 200
 #define DG_BLADE_PENDING_MS  150  /* an attack waits this long for an opposing follow-up */
 #define DG_BLADE_LATE_MS     500  /* a held attack still fires this late after a failed follow-up */
 #define DG_BLADE_MAX_SPEED   25.0  /* m/s: faster is a tracking jump, not a swing */
+/* A slash may reach forward: lateral >= this share of |forward| is still a
+   slash (the stab rule is judged first and keeps priority). */
+#define DG_BLADE_SLASH_REACH 0.6
+
+#define DG_BLADE_LIVE_LEN        0.90
+#define DG_BLADE_LIVE_TIP_START  1.5   /* m/s */
+#define DG_BLADE_LIVE_TIP_HOLD   1.0   /* m/s */
 
 enum { DG_BLADE_NONE=0, DG_BLADE_SLASH=1, DG_BLADE_STAB=2 };
+/* Pair rule: of two opposing strokes inside PENDING_MS the one with the higher
+   peak fires, the other is the wind-up; a tie goes to the later one. */
+enum { DG_BLADE_PAIR_NONE=0, DG_BLADE_PAIR_EARLIER_FASTER, DG_BLADE_PAIR_LATER_FASTER };
 enum { DG_BLADE_END_STOP=1, DG_BLADE_END_REVERSE=2, DG_BLADE_END_TIMEOUT=3 };
 /* Why an evaluated stroke did (not) attack. */
 enum { DG_BLADE_R_FIRED=0, DG_BLADE_R_SLOW, DG_BLADE_R_SHORT, DG_BLADE_R_BRIEF,
@@ -62,6 +66,8 @@ typedef struct {
     int have, framed, active;
     DG_BLADE_STROKE pending;
     int have_pending, contested;
+    double tip_speed;          /* m/s of the blade tip this step; 0 when unknown */
+    double hand_step;          /* m/s of the raw hand step this sample (tracking space); 0 when unknown */
 } DG_BLADE_STATE;
 
 typedef struct {
@@ -70,7 +76,24 @@ typedef struct {
        a replaced wind-up, if the judged stroke displaced one. */
     int report, dropped;
     DG_BLADE_STROKE stroke, windup;
+    /* When a pair of opposing strokes was decided this step: which rule fired
+       which stroke (DG_BLADE_PAIR_*), 0 otherwise. */
+    int pair;
+    /* Diagnostics: why this step threw the recogniser state away
+       (DG_BLADE_RESET_*, 0 = it did not), and whether it was a duplicate. */
+    int reset, duplicate;
 } DG_BLADE_OUTPUT;
+/* Why dg_blade_step reset the recogniser. SELECTION is the bridge's own
+   reset (player or hand selection changed); the step never reports it. */
+enum { DG_BLADE_RESET_NONE=0, DG_BLADE_RESET_NOT_ALLOWED, DG_BLADE_RESET_INVALID,
+       DG_BLADE_RESET_CONTEXT, DG_BLADE_RESET_BACKWARDS, DG_BLADE_RESET_GAP,
+       DG_BLADE_RESET_DT, DG_BLADE_RESET_SPEED, DG_BLADE_RESET_HEAD,
+       DG_BLADE_RESET_SELECTION, DG_BLADE_RESET_COUNT };
+static const char *dg_blade_reset_name(int r) {
+    static const char *n[DG_BLADE_RESET_COUNT]={"none","not-allowed","invalid","source/context",
+        "backwards","gap>100ms","dt","speed>25","head-step>8cm","selection"};
+    return r>=0 && r<DG_BLADE_RESET_COUNT ? n[r] : "?";
+}
 
 static double dg_blade_dot(const double *a,const double *b) {
     return a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
@@ -107,7 +130,7 @@ static void dg_blade_judge(DG_BLADE_STROKE *t) {
         t->attack=DG_BLADE_STAB;t->reason=DG_BLADE_R_FIRED;return;
     }
     if(-t->z>=DG_BLADE_MIN_STAB && -t->z>1.5*lateral){t->reason=DG_BLADE_R_BACK;return;}
-    if(lateral>=DG_BLADE_MIN_SLASH && lateral>fabs(t->z)) {
+    if(lateral>=DG_BLADE_MIN_SLASH && lateral>=DG_BLADE_SLASH_REACH*fabs(t->z)) {
         t->attack=DG_BLADE_SLASH;t->reason=DG_BLADE_R_FIRED;
         /* Saturate the dominant axis past native RStickDir's 96-byte margin.
          * Preserving the ratio retains the native diagonal sectors. */
@@ -147,15 +170,23 @@ static void dg_blade_release(DG_BLADE_STATE *s,DG_BLADE_OUTPUT *out,DG_BLADE_STR
     if(t.attack)dg_blade_fire(s,out,&t,now);
     out->stroke=t;out->report=1;
 }
+/* Wind-up pair: peaks within DG_BLADE_PAIR_TIE (m/s) are a tie, which the later
+   stroke wins; outside it the higher peak fires. 0.1 m/s is ~2 mm per 16 ms
+   tick, below what a 60 Hz tick can tell apart for the same arm. */
+#define DG_BLADE_PAIR_TIE 0.1
 /* A stroke ended. An attack waits DG_BLADE_PENDING_MS: a stroke starting the
    other way inside that time makes it a wind-up and is judged instead. */
 static void dg_blade_settle(DG_BLADE_STATE *s,DG_BLADE_OUTPUT *out,DG_BLADE_STROKE t,uint64_t now) {
     if(s->have_pending && s->contested) {
         DG_BLADE_STROKE p=s->pending;
         s->have_pending=s->contested=0;
-        if(t.attack) {
+        if(t.attack && p.peak>t.peak+DG_BLADE_PAIR_TIE) {
+
+            t.attack=DG_BLADE_NONE;t.reason=DG_BLADE_R_WINDUP;t.ax=t.ay=128;
+            dg_blade_release(s,out,p,now);out->windup=t;out->dropped=1;out->pair=DG_BLADE_PAIR_EARLIER_FASTER;
+        } else if(t.attack) {
             p.attack=DG_BLADE_NONE;p.reason=DG_BLADE_R_WINDUP;p.ax=p.ay=128;
-            dg_blade_release(s,out,t,now);out->windup=p;out->dropped=1;
+            dg_blade_release(s,out,t,now);out->windup=p;out->dropped=1;out->pair=DG_BLADE_PAIR_LATER_FASTER;
         } else if(now-p.end_ms<=DG_BLADE_LATE_MS) {
             dg_blade_release(s,out,p,now);out->windup=t;out->dropped=1; /* the failed follow-up */
         } else {
@@ -183,15 +214,33 @@ static DG_BLADE_OUTPUT dg_blade_step(DG_BLADE_STATE *s,const DG_BLADE_SAMPLE *in
     DG_BLADE_OUTPUT out;
     double rel[3],last_rel[3],v[3],head_delta[3],hand_delta[3],dt,speed,raw,hand_speed,d,n;int k;
     memset(&out,0,sizeof out);out.x=out.y=128;
-    if(!dg_blade_sample_valid(in)) {dg_blade_reset(s);return out;}
-    if(s->have && (in->source!=s->last.source || in->context!=s->last.context ||
-        in->sequence<s->last.sequence || in->now_ms<s->last.now_ms ||
-        in->time_ns<s->last.time_ns || in->now_ms-s->last.now_ms>100))dg_blade_reset(s);
+    if(!dg_blade_sample_valid(in)) {
+        DG_BLADE_SAMPLE t=*in;t.allowed=1;
+        out.reset=dg_blade_sample_valid(&t)?DG_BLADE_RESET_NOT_ALLOWED:DG_BLADE_RESET_INVALID;
+        dg_blade_reset(s);return out;
+    }
+    if(s->have) {
+        if(in->source!=s->last.source || in->context!=s->last.context)out.reset=DG_BLADE_RESET_CONTEXT;
+        else if(in->sequence<s->last.sequence || in->now_ms<s->last.now_ms ||
+                in->time_ns<s->last.time_ns)out.reset=DG_BLADE_RESET_BACKWARDS;
+        else if(in->now_ms-s->last.now_ms>100)out.reset=DG_BLADE_RESET_GAP;
+        if(out.reset)dg_blade_reset(s);
+    }
+    s->tip_speed=0;s->hand_step=0;
     if(!s->have) {s->last=*in;s->have=1;dg_blade_frame(s,in);return out;}
     /* A duplicated publication cannot gain time, speed, or another attack. */
-    if(in->sequence==s->last.sequence)return out;
+    if(in->sequence==s->last.sequence){out.duplicate=1;return out;}
     dt=(double)(in->time_ns-s->last.time_ns)*1e-9;
-    if(dt<.001 || dt>.1) {dg_blade_reset(s);return out;}
+    if(dt<.001 || dt>.1) {out.reset=DG_BLADE_RESET_DT;dg_blade_reset(s);return out;}
+    {   /* Blade tip speed, tracking space: holding the blade still is zero
+           however the head moves; a wrist flick counts. */
+        double tip[3];
+        for(k=0;k<3;k++)tip[k]=(in->hand[k]+DG_BLADE_LIVE_LEN*in->forward[k])-
+                               (s->last.hand[k]+DG_BLADE_LIVE_LEN*s->last.forward[k]);
+        s->tip_speed=sqrt(dg_blade_dot(tip,tip))/dt;
+        for(k=0;k<3;k++)tip[k]=in->hand[k]-s->last.hand[k];
+        s->hand_step=sqrt(dg_blade_dot(tip,tip))/dt;
+    }
     for(k=0;k<3;k++) {
         head_delta[k]=in->head[k]-s->last.head[k];
         hand_delta[k]=in->hand[k]-s->last.hand[k];
@@ -201,7 +250,10 @@ static DG_BLADE_OUTPUT dg_blade_step(DG_BLADE_STATE *s,const DG_BLADE_SAMPLE *in
     }
     raw=sqrt(dg_blade_dot(v,v));
     hand_speed=sqrt(dg_blade_dot(hand_delta,hand_delta))/dt;
-    if(raw>DG_BLADE_MAX_SPEED || dg_blade_dot(head_delta,head_delta)>.0064) {dg_blade_reset(s);return out;}
+    if(raw>DG_BLADE_MAX_SPEED || dg_blade_dot(head_delta,head_delta)>.0064) {
+        out.reset=raw>DG_BLADE_MAX_SPEED?DG_BLADE_RESET_SPEED:DG_BLADE_RESET_HEAD;
+        dg_blade_reset(s);return out;
+    }
     for(k=0;k<3;k++)s->vel[k]=.5*v[k]+.5*s->vel[k];
     speed=sqrt(dg_blade_dot(s->vel,s->vel));
     s->last=*in;
@@ -239,13 +291,63 @@ static DG_BLADE_OUTPUT dg_blade_step(DG_BLADE_STATE *s,const DG_BLADE_SAMPLE *in
     }
     return out;
 }
-/* Block: the left hand on the blade with the left grip held (tracking-space
- * metres). The blade runs from the right grip along its pointing axis for
- * DG_BLADE_BRACE_LEN. A grip PRESS with the left hand within
- * DG_BLADE_BRACE_NEAR of it starts the block; releasing the grip, or moving the
- * hand more than DG_BLADE_BRACE_FAR off the blade, ends it. A press made away
- * from the blade never becomes a block while it is held. Tracking loss keeps
- * it DG_BLADE_BRACE_HOLD_MS (the native guard animation may take the hand). */
+
+enum { DG_BLADE_LIVE_NO=0, DG_BLADE_LIVE_MODE, DG_BLADE_LIVE_ADMIT, DG_BLADE_LIVE_GUARD,
+       DG_BLADE_LIVE_POSTURE, DG_BLADE_LIVE_STROKE, DG_BLADE_LIVE_SLOW, DG_BLADE_LIVE_JUMP,
+       DG_BLADE_LIVE_CONFIRM, DG_BLADE_LIVE_THRESHOLD, DG_BLADE_LIVE_REHIT, DG_BLADE_LIVE_ON };
+
+#define DG_BLADE_LIVE_THR_HOLD 1.5
+#define DG_BLADE_REHIT_MS      500
+typedef struct { int on, why; uint64_t on_ms; int pend; uint64_t pend_seq;
+                 double hit_speed, stroke_peak; uint64_t stroke_id, contact_ms, contact_stroke; } DG_BLADE_LIVE;
+
+static void dg_blade_live_contact(DG_BLADE_LIVE *g,uint64_t now) {
+    if(!g)return;
+    g->contact_ms=now;g->contact_stroke=g->stroke_id;
+}
+static int dg_blade_live_step(DG_BLADE_LIVE *g,int mode,const DG_BLADE_STATE *s,
+    int admitted,int guard,int posture_bad,uint64_t now) {
+    int was=g->on,thr=g->hit_speed>0;
+    double start=thr?DG_BLADE_LIVE_THR_HOLD:DG_BLADE_LIVE_TIP_START,hold=thr?DG_BLADE_LIVE_THR_HOLD:DG_BLADE_LIVE_TIP_HOLD;
+    g->on=0;
+    if(s && s->active) {
+        if(s->start_ms!=g->stroke_id){g->stroke_id=s->start_ms;g->stroke_peak=0;}
+        if(_finite(s->tip_speed) && s->tip_speed>g->stroke_peak &&
+           _finite(s->hand_step) && s->hand_step<=DG_BLADE_MAX_SPEED)g->stroke_peak=s->tip_speed;
+    } else {g->stroke_id=0;g->stroke_peak=0;}
+    if(mode!=1 && mode!=2)g->why=DG_BLADE_LIVE_MODE;
+    else if(!admitted)g->why=DG_BLADE_LIVE_ADMIT;
+    else if(guard)g->why=DG_BLADE_LIVE_GUARD;
+    else if(posture_bad)g->why=DG_BLADE_LIVE_POSTURE;
+    else if(!s || !s->active)g->why=DG_BLADE_LIVE_STROKE;
+    else if(!_finite(s->tip_speed) ||
+            s->tip_speed<(was?hold:start))g->why=DG_BLADE_LIVE_SLOW;
+    else if(!_finite(s->hand_step) || s->hand_step>DG_BLADE_MAX_SPEED)g->why=DG_BLADE_LIVE_JUMP;
+    else if(thr && !was && g->stroke_peak<g->hit_speed)g->why=DG_BLADE_LIVE_THRESHOLD;
+    else if(thr && !was && g->contact_ms && now>=g->contact_ms && now-g->contact_ms<DG_BLADE_REHIT_MS &&
+            g->contact_stroke==g->stroke_id)g->why=DG_BLADE_LIVE_REHIT;
+    else if(!was && !(g->pend && s->last.sequence!=g->pend_seq)) {
+        g->pend=1;g->pend_seq=s->last.sequence;g->why=DG_BLADE_LIVE_CONFIRM;
+        return 0;
+    }
+    else {g->on=1;g->why=DG_BLADE_LIVE_ON;if(!was)g->on_ms=now;}
+    g->pend=0;
+    return g->on;
+}
+
+#define DG_BLADE_LIVE_STAB_MIN 0.05
+static int dg_blade_live_kind(const DG_BLADE_STATE *s) {
+    double d[3],x,y,z;int k;
+    if(!s || !s->active || !s->framed)return DG_BLADE_SLASH;
+    for(k=0;k<3;k++)d[k]=(s->last.hand[k]-s->last.head[k])-s->start[k];
+    x=dg_blade_dot(d,s->right);y=d[1];z=dg_blade_dot(d,s->forward);
+    if(z>=DG_BLADE_LIVE_STAB_MIN && z>1.5*sqrt(x*x+y*y) && s->pointing>.7)return DG_BLADE_STAB;
+    return DG_BLADE_SLASH;
+}static const char *dg_blade_live_name(int w) {
+    static const char *names[]={"none","mode","not-admitted","guard","posture","no-stroke","slow","jump","confirming","below-threshold","rehit-block","on"};
+    return w>=0 && w<=DG_BLADE_LIVE_ON ? names[w] : "?";
+}
+
 #define DG_BLADE_BRACE_LEN     0.90
 #define DG_BLADE_BRACE_NEAR    0.20
 #define DG_BLADE_BRACE_FAR     0.35
@@ -272,6 +374,29 @@ static int dg_blade_brace_snap(const double grip[3],const double forward[3],doub
     for(k=0;k<3;k++)left[k]=grip[k]+t*forward[k]/n;
     return 1;
 }
+
+typedef struct { double point[3]; int have; } DG_BLADE_SNAP_MEMO;
+/* The visible left hand while blocking (raw tracking metres, in/out). `braced`
+ * is the guard's state, decided by dg_blade_brace_step on the raw sample; this
+ * only moves the drawn hand towards its resting point on the blade through
+ * the hand's grip blend and never feeds back into the guard. Returns the
+ * weight applied (0 = the controller position, 1 = the snap point). Without a
+ * blade line (or a failed snap) the memo's last point is used while the
+ * weight is above 0; a non-finite controller position is never moved. */
+static double dg_blade_brace_visible(DG_GRIP_BLEND *b,DG_BLADE_SNAP_MEMO *memo,int braced,long long now_ns,
+    const DG_GRIP_TIMES *t,int have_blade,const double grip[3],const double forward[3],double left[3]) {
+    double snap[3],w=dg_grip_blend_step(b,braced,now_ns,t);int k;
+    if(!(w>0)){if(memo)memo->have=0;return 0;}
+    for(k=0;k<3;k++)if(!_finite(left[k]))return 0;
+    memcpy(snap,left,sizeof snap);
+    if(have_blade && dg_blade_brace_snap(grip,forward,snap)) {
+        if(memo){memcpy(memo->point,snap,sizeof snap);memo->have=1;}
+    } else if(memo && memo->have) {
+        memcpy(snap,memo->point,sizeof snap);
+    } else return 0;
+    dg_grip_mix3(left,snap,w,left);
+    return w;
+}
 static int dg_blade_brace_step(DG_BLADE_BRACE *g,const DG_BLADE_SAMPLE *in) {
     int k,ok=dg_blade_sample_valid(in) && in->left_valid;
     for(k=0;k<3 && ok;k++)if(!_finite(in->left[k]) || fabs(in->left[k]-in->head[k])>2.5)ok=0;
@@ -289,9 +414,9 @@ static int dg_blade_brace_step(DG_BLADE_BRACE *g,const DG_BLADE_SAMPLE *in) {
     } else if(g->active && g->dist>DG_BLADE_BRACE_FAR) g->active=0;
     return g->active;
 }
-
-
-
-
-
+static const char *dg_blade_reason_name(int r) {
+    static const char *names[DG_BLADE_R_COUNT]={"fired","slow","short","brief","long",
+        "pull-back","not-pointing","ambiguous","cooldown","wind-up"};
+    return r>=0 && r<DG_BLADE_R_COUNT ? names[r] : "?";
+}
 #endif

@@ -1,7 +1,6 @@
 #ifndef DG_OBSERVER_ARM_GUARD_H
 #define DG_OBSERVER_ARM_GUARD_H
 
-
 static int observer_arm_box(float box[4],const DG_MODEL_ARM *arm,
                             const DG_XR_RAW_POSE *eye,uint64_t captured) {
     double n,x,y,z,w,points[3][3],length=0;int i,j,k;

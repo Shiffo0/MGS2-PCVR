@@ -128,8 +128,6 @@ typedef struct FunctionRefs {
     size_t count;
 } FunctionRefs;
 
-
-
 typedef struct PadMaskResult {
     ULONGLONG pad_subject;
     ULONGLONG pad_stop_aim;
@@ -165,9 +163,6 @@ typedef struct PlayerPadResult {
 #define DG_GV_PAD_PRESS_OFFSET 8
 #define DG_GV_PAD_COUNT 4
 
-
-
-
 typedef struct PadPressResult {
     DWORD function_begin;
     DWORD function_end;
@@ -188,8 +183,6 @@ typedef struct WristResult {
     DWORD seam;
     int ok;
 } WristResult;
-
-
 
 typedef struct FireResult {
     DWORD publisher_begin;
@@ -422,15 +415,15 @@ static const IMAGE_SECTION_HEADER *section_for_rva(const LiveImage *image,
     return NULL;
 }
 
-
-
-
-
-
-
-
-
-
+static void section_name(const IMAGE_SECTION_HEADER *section, char out[9])
+{
+    if (!section) {
+        strcpy_s(out, 9, "?");
+        return;
+    }
+    memcpy(out, section->Name, 8);
+    out[8] = 0;
+}
 
 static int target_is_writable_data(const LiveImage *image, ULONGLONG target)
 {
@@ -539,18 +532,16 @@ static int function_run_bounds(const LiveImage *image, DWORD rva,
     return 1;
 }
 
-/* Two RVAs belong to the same body: same contiguous run, and the second is not
-   before the first. */
-
-
-
-
-
-
-
-
-
-
+static int same_function_run(const LiveImage *image, DWORD first, DWORD second)
+{
+    DWORD a_begin;
+    DWORD a_end;
+    DWORD b_begin;
+    DWORD b_end;
+    return function_run_bounds(image, first, &a_begin, &a_end) &&
+           function_run_bounds(image, second, &b_begin, &b_end) &&
+           a_begin == b_begin && a_end == b_end;
+}
 
 static int decode_rip_reference(const LiveImage *image, DWORD at, DWORD limit,
                                 RipRef *out)
@@ -797,26 +788,26 @@ static int function_has_target(const FunctionRefs *refs, ULONGLONG target,
     return 0;
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+static size_t count_unique_writable_stores(const LiveImage *image,
+                                           const FunctionRefs *refs)
+{
+    ULONGLONG targets[MAX_FUNCTION_REFS];
+    size_t count = 0;
+    size_t i;
+    for (i = 0; i < refs->count; i++) {
+        size_t j;
+        const RipRef *ref = &refs->refs[i];
+        if (ref->kind != REF_STORE ||
+            !target_is_writable_data(image, ref->target))
+            continue;
+        for (j = 0; j < count; j++) {
+            if (targets[j] == ref->target) break;
+        }
+        if (j == count && count < MAX_FUNCTION_REFS)
+            targets[count++] = ref->target;
+    }
+    return count;
+}
 
 static int direct_call_target(const LiveImage *image, DWORD at, DWORD limit,
                               DWORD *target)
@@ -834,45 +825,45 @@ static int direct_call_target(const LiveImage *image, DWORD at, DWORD limit,
     return section_for_rva(image, *target) != NULL;
 }
 
+static size_t collect_direct_calls(const LiveImage *image, DWORD begin,
+                                   DWORD end, DWORD calls[MAX_DIRECT_CALLS],
+                                   DWORD targets[MAX_DIRECT_CALLS])
+{
+    DWORD at;
+    size_t count = 0;
+    if (end > image->size) end = image->size;
+    for (at = begin; at + 5 <= end; at++) {
+        DWORD target;
+        if (direct_call_target(image, at, end, &target)) {
+            if (count < MAX_DIRECT_CALLS) {
+                calls[count] = at;
+                targets[count] = target;
+            }
+            count++;
+            at += 4;
+        }
+    }
+    return count;
+}
 
+static void print_window(const LiveImage *image, DWORD hit)
+{
+    DWORD start = hit > 16 ? hit - 16 : 0;
+    DWORD end = hit + 32;
+    DWORD offset;
+    if (end > image->size) end = image->size;
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    printf("    bytes:");
+    for (offset = start; offset < end; offset++) {
+        if (((offset - start) % 16) == 0)
+            printf("\n      %08lX  ", (unsigned long)offset);
+        if (image->valid[offset])
+            printf("%02X ", image->bytes[offset]);
+        else
+            printf("?? ");
+    }
+    putchar('\n');
+}
 
 static void scan_pattern(const LiveImage *image, const PatternDef *definition,
                          PatternResult *result)
@@ -1101,8 +1092,6 @@ static void find_pad_masks(const LiveImage *image,
             continue;
         collect_function_refs(image, begin, end, &refs);
 
-
-
         if (function_has_target(&refs, subject_toggle, 1) &&
             longest_dword_cluster(image, &refs, &probe) >=
                 PAD_CLUSTER_MIN_SLOTS) {
@@ -1112,13 +1101,6 @@ static void find_pad_masks(const LiveImage *image,
         }
     }
     if (candidate_count != 2) return;
-
-
-
-
-
-
-
 
     if (!function_loads_target(&candidates[0], subject_move) ||
         !function_loads_target(&candidates[1], subject_move))
@@ -1196,8 +1178,6 @@ static int ref_is_copy_access(const RipRef *ref, RefKind kind, int width)
 {
     return ref->kind == kind && ref->width == width;
 }
-
-
 
 static int find_40byte_span(const FunctionRefs *function, RefKind kind,
                             ULONGLONG *base, DWORD *first, DWORD *last)
@@ -1293,8 +1273,6 @@ static int decode_scaled_load_base(const LiveImage *image, DWORD at,
     *width = prefix == 0xF2 ? 8 : (prefix == 0xF3 ? 4 : 16);
     return 1;
 }
-
-
 
 static int find_scaled_40byte_source(const LiveImage *image, DWORD begin,
                                      DWORD end, ULONGLONG *source)
@@ -1415,9 +1393,7 @@ static void find_player_pad(const LiveImage *image,
             gv_pad_data == player_pad ||
             count_ref_functions(image, gv_pad_data, REF_LEA) < 2)
             continue;
-        /* The seam is where F2 detours, so its unwind record must be this
-           entry or the one immediately after it with no gap - never further,
-           even though the run continues past both. */
+
         if (seam >= copy_begin && seam < copy_end) {
             seam_begin = copy_begin;
             seam_end = copy_end;
@@ -1492,153 +1468,143 @@ static int modrm_memory_end(const LiveImage *image, DWORD modrm_at,
     return 1;
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+static int decode_or_40(const LiveImage *image, DWORD at, DWORD limit,
+                        DWORD *end)
+{
+    DWORD p = at;
+    unsigned char modrm;
+    if (p < limit && image->valid[p] &&
+        image->bytes[p] >= 0x40 && image->bytes[p] <= 0x4F)
+        p++;
+    if (p + 2 > limit || !all_valid(image->valid, p, 2, image->size) ||
+        image->bytes[p] != 0x83)
+        return 0;
+    modrm = image->bytes[p + 1];
+    if (((modrm >> 3) & 7) != 1 ||
+        !modrm_memory_end(image, p + 1, limit, end) ||
+        *end >= limit || !image->valid[*end] ||
+        image->bytes[*end] != 0x40)
+        return 0;
+    (*end)++;
+    return 1;
+}
+
+static int vector_store_before(const LiveImage *image, DWORD begin,
+                               DWORD before, DWORD *store)
+{
+    DWORD at;
+    DWORD search_begin = before > 96 ? before - 96 : begin;
+    int matches = 0;
+    for (at = search_begin; at + 3 <= before; at++) {
+        DWORD p = at;
+        DWORD memory_end;
+        if (image->bytes[p] == 0x66 || image->bytes[p] == 0xF2 ||
+            image->bytes[p] == 0xF3)
+            p++;
+        if (p < before && image->bytes[p] >= 0x40 &&
+            image->bytes[p] <= 0x4F)
+            p++;
+        if (p + 3 > before || !all_valid(image->valid, p, 3, image->size) ||
+            image->bytes[p] != 0x0F ||
+            (image->bytes[p + 1] != 0x11 &&
+             image->bytes[p + 1] != 0x7F) ||
+            !modrm_memory_end(image, p + 2, before, &memory_end))
+            continue;
+        *store = at;
+        matches++;
+    }
+    return matches >= 1;
+}
+
+static int find_bytes_between(const LiveImage *image, DWORD begin, DWORD end,
+                              const unsigned char *needle, size_t length,
+                              DWORD *found)
+{
+    DWORD at;
+    if (end > image->size) end = image->size;
+    if (length > end - begin) return 0;
+    for (at = begin; at <= end - (DWORD)length; at++) {
+        if (all_valid(image->valid, at, length, image->size) &&
+            memcmp(image->bytes + at, needle, length) == 0) {
+            *found = at;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int wrist_candidate(const LiveImage *image, DWORD begin, DWORD end,
+                           DWORD or_at, DWORD or_end, DWORD *adjust_store,
+                           DWORD *clamp_at)
+{
+    static const unsigned char plus_1023[2] = { 0xFF, 0x03 };
+    static const unsigned char minus_1023[2] = { 0x01, 0xFC };
+    DWORD search_end = or_end + 320;
+    DWORD plus_at;
+    DWORD minus_at;
+    DWORD calls[MAX_DIRECT_CALLS];
+    DWORD targets[MAX_DIRECT_CALLS];
+    size_t call_count;
+    size_t i;
+    size_t after_clamp = 0;
+    if (search_end > end) search_end = end;
+    if (!vector_store_before(image, begin, or_at, adjust_store) ||
+        !find_bytes_between(image, or_end, search_end, plus_1023,
+                            sizeof(plus_1023), &plus_at) ||
+        !find_bytes_between(image, plus_at + 2, search_end, minus_1023,
+                            sizeof(minus_1023), &minus_at))
+        return 0;
+    call_count = collect_direct_calls(image, minus_at, end, calls, targets);
+    if (call_count > MAX_DIRECT_CALLS) call_count = MAX_DIRECT_CALLS;
+    for (i = 0; i < call_count; i++) {
+        if (calls[i] > minus_at) after_clamp++;
+    }
+    if (after_clamp < 2) return 0;
+    *clamp_at = minus_at;
+    return 1;
+}
+
+static void find_wrist(const LiveImage *image, WristResult *result)
+{
+    const RUNTIME_FUNCTION *table;
+    DWORD count;
+    DWORD i;
+    size_t matches = 0;
+    memset(result, 0, sizeof(*result));
+    if (!get_runtime_table(image, &table, &count)) return;
+    for (i = 0; i < count; i++) {
+        DWORD begin;
+        DWORD end;
+        DWORD at;
+        if (!function_run_bounds(image, table[i].BeginAddress, &begin, &end) ||
+            begin != table[i].BeginAddress)
+            continue;
+        for (at = begin; at < end; at++) {
+            DWORD or_end;
+            DWORD adjust_store;
+            DWORD clamp_at;
+            DWORD or_at = at;
+            if (!decode_or_40(image, or_at, end, &or_end)) continue;
+            /* decode_or_40 treats the REX prefix as optional, so the very same
+               instruction also decodes one byte in - step past the whole
+               instruction instead of counting it twice as two sites. */
+            at = or_end - 1;
+            if (!wrist_candidate(image, begin, end, or_at, or_end,
+                                 &adjust_store, &clamp_at))
+                continue;
+
+            if (!find_runtime_function(image, or_at, &result->function_begin,
+                                       &result->function_end))
+                continue;
+            result->adjust_store = adjust_store;
+            result->adjust_or = or_at;
+            result->clamp = clamp_at;
+            result->seam = or_end;
+            matches++;
+        }
+    }
+    result->ok = matches == 1;
+}
 
 static int decode_test_immediate(const LiveImage *image, DWORD at, DWORD limit,
                                  ULONGLONG *immediate, DWORD *end)
@@ -1714,11 +1680,6 @@ static int decode_rip_dword_read(const LiveImage *image, DWORD at, DWORD limit,
     return 1;
 }
 
-
-
-
-
-
 static int decode_and_register_imm8(const LiveImage *image, DWORD at,
                                     DWORD limit, ULONGLONG *immediate,
                                     DWORD *end)
@@ -1748,11 +1709,6 @@ static int function_has_lea(const FunctionRefs *refs, ULONGLONG target)
     }
     return 0;
 }
-
-
-
-
-
 
 static int lea_then_call_seam(const LiveImage *image, DWORD begin, DWORD end,
                               ULONGLONG target, DWORD window, DWORD *seam)
@@ -1886,322 +1842,313 @@ static void find_pad_press(const LiveImage *image,
     result->ok = matches == 1;
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+static size_t count_refs_to_target(const FunctionRefs *function,
+                                   ULONGLONG target, RefKind kind,
+                                   int require_kind)
+{
+    size_t i;
+    size_t count = 0;
+    for (i = 0; i < function->count; i++) {
+        if (function->refs[i].target == target &&
+            (!require_kind || function->refs[i].kind == kind))
+            count++;
+    }
+    return count;
+}
+
+static int find_two_pointer_guards(const LiveImage *image,
+                                   const FunctionRefs *function,
+                                   DWORD before, ULONGLONG *first,
+                                   ULONGLONG *second)
+{
+    size_t i;
+    int found = 0;
+    for (i = 0; i < function->count; i++) {
+        const RipRef *ref = &function->refs[i];
+        if (ref->instruction >= before || ref->width != 8 ||
+            ref->kind == REF_STORE ||
+            !target_is_writable_data(image, ref->target))
+            continue;
+        if (!found) {
+            *first = ref->target;
+            found = 1;
+        } else if (ref->target != *first) {
+            *second = ref->target;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int publication_candidate(const LiveImage *image,
+                                 const FunctionRefs *function,
+                                 ULONGLONG private_target,
+                                 ULONGLONG player_status,
+                                 FireResult *result)
+{
+    size_t i;
+    int matches = 0;
+    for (i = 0; i < function->count; i++) {
+        const RipRef *private_store = &function->refs[i];
+        size_t j;
+        size_t published = 0;
+        ULONGLONG gm_target = 0;
+        DWORD gm_instruction = 0;
+        ULONGLONG body;
+        ULONGLONG arm_body;
+        if (private_store->kind != REF_STORE || private_store->width != 1 ||
+            !private_store->immediate_valid ||
+            private_store->immediate != 0xFF ||
+            private_store->target != private_target)
+            continue;
+        if (count_refs_to_target(function, private_target, REF_LOAD, 0) < 1)
+            continue;
+        for (j = 0; j < function->count; j++) {
+            const RipRef *ref = &function->refs[j];
+            if (ref->kind != REF_STORE || ref->width != 1 ||
+                ref->immediate_valid || ref->target == private_target ||
+                !target_is_writable_data(image, ref->target))
+                continue;
+            gm_target = ref->target;
+            gm_instruction = ref->instruction;
+            published++;
+        }
+        if (published != 1) continue;
+        if (!function_has_target(function, player_status, 0)) continue;
+        if (!find_two_pointer_guards(image, function, gm_instruction,
+                                     &body, &arm_body))
+            continue;
+        result->gm_weapon_fire = gm_target;
+        result->weapon_fire_private = private_target;
+        result->player_body = body;
+        result->player_arm_body = arm_body;
+        result->publication = gm_instruction;
+        matches++;
+    }
+    return matches == 1;
+}
+
+static int has_immediate_byte_store(const LiveImage *image, ULONGLONG target,
+                                    unsigned char value)
+{
+    const RUNTIME_FUNCTION *table;
+    DWORD count;
+    DWORD i;
+    if (!get_runtime_table(image, &table, &count)) return 0;
+    for (i = 0; i < count; i++) {
+        FunctionRefs refs;
+        size_t j;
+        collect_function_refs(image, table[i].BeginAddress,
+                              table[i].EndAddress, &refs);
+        for (j = 0; j < refs.count; j++) {
+            const RipRef *ref = &refs.refs[j];
+            if (ref->kind == REF_STORE && ref->width == 1 &&
+                ref->immediate_valid && ref->target == target &&
+                ref->immediate == value)
+                return 1;
+        }
+    }
+    return 0;
+}
+
+static int find_weapon_fire_setter(const LiveImage *image, DWORD *setter,
+                                   ULONGLONG *private_target)
+{
+    WORD i;
+    size_t matches = 0;
+    for (i = 0; i < image->section_count; i++) {
+        const IMAGE_SECTION_HEADER *section = &image->sections[i];
+        DWORD begin;
+        DWORD size;
+        DWORD end;
+        DWORD at;
+        if (!(section->Characteristics & IMAGE_SCN_MEM_EXECUTE)) continue;
+        begin = section->VirtualAddress;
+        size = section->Misc.VirtualSize;
+        if (size < section->SizeOfRawData) size = section->SizeOfRawData;
+        if (begin >= image->size) continue;
+        if (size > image->size - begin) size = image->size - begin;
+        end = begin + size;
+        for (at = begin; at + 7 <= end; at++) {
+            RipRef ref;
+            if (!decode_rip_reference(image, at, end, &ref) ||
+                ref.kind != REF_STORE || ref.width != 1 ||
+                ref.immediate_valid ||
+                !target_is_writable_data(image, ref.target) ||
+                ref.instruction_end >= end ||
+                !image->valid[ref.instruction_end] ||
+                image->bytes[ref.instruction_end] != 0xC3)
+                continue;
+            /* A REX-prefixed store decodes again one byte in, as the same
+               instruction; step over the whole thing so it counts once. */
+            at = ref.instruction_end - 1;
+            if (!has_immediate_byte_store(image, ref.target, 0xFF)) continue;
+            *setter = ref.instruction;
+            *private_target = ref.target;
+            matches++;
+        }
+    }
+    return matches == 1;
+}
+
+static size_t count_setter_callers(const LiveImage *image, DWORD setter)
+{
+    const RUNTIME_FUNCTION *table;
+    DWORD count;
+    DWORD i;
+    size_t callers = 0;
+    if (!get_runtime_table(image, &table, &count)) return 0;
+    for (i = 0; i < count; i++) {
+        DWORD calls[MAX_DIRECT_CALLS];
+        DWORD targets[MAX_DIRECT_CALLS];
+        size_t call_count;
+        size_t j;
+        call_count = collect_direct_calls(image, table[i].BeginAddress,
+                                          table[i].EndAddress, calls, targets);
+        if (call_count > MAX_DIRECT_CALLS) call_count = MAX_DIRECT_CALLS;
+        for (j = 0; j < call_count; j++) {
+            if (targets[j] == setter) {
+                callers++;
+                break;
+            }
+        }
+    }
+    return callers;
+}
+
+static void find_fire_publication(const LiveImage *image,
+                                  const PatternResult patterns[PATTERN_COUNT],
+                                  FireResult *result)
+{
+    const RUNTIME_FUNCTION *table;
+    DWORD count;
+    DWORD i;
+    size_t matches = 0;
+    DWORD setter = 0;
+    ULONGLONG private_target = 0;
+    ULONGLONG player_status;
+    FireResult candidate;
+
+    memset(result, 0, sizeof(*result));
+    if (!patterns[7].ok) return;
+    player_status = patterns[7].targets[0];
+    if (!get_runtime_table(image, &table, &count) ||
+        !find_weapon_fire_setter(image, &setter, &private_target))
+        return;
+
+    for (i = 0; i < count; i++) {
+        FunctionRefs refs;
+        DWORD begin;
+        DWORD end;
+        memset(&candidate, 0, sizeof(candidate));
+        if (!function_run_bounds(image, table[i].BeginAddress, &begin, &end) ||
+            begin != table[i].BeginAddress)
+            continue;
+        collect_function_refs(image, begin, end, &refs);
+        if (!publication_candidate(image, &refs, private_target, player_status,
+                                   &candidate))
+            continue;
+        candidate.publisher_begin = begin;
+        candidate.publisher_end = end;
+        *result = candidate;
+        matches++;
+    }
+    if (matches != 1) {
+        memset(result, 0, sizeof(*result));
+        return;
+    }
+    result->setter = setter;
+    result->setter_callers = (DWORD)count_setter_callers(image, setter);
+    if (!result->setter_callers ||
+        result->gm_weapon_fire == result->weapon_fire_private ||
+        result->player_body == result->player_arm_body)
+        return;
+    result->ok = 1;
+}
+
+static int extension_relationships(const ExtensionResult *extension,
+                                   const PatternResult patterns[PATTERN_COUNT],
+                                   int print)
+{
+    int ok = 1;
+    if (!extension->masks.ok || !extension->player_pad.ok ||
+        !extension->wrist.ok || !extension->fire.ok)
+        return 0;
+
+    if (patterns) {
+        if (!patterns[12].ok) {
+            if (print)
+                printf("  FAIL relation: ArmCamRotateShift anchor did not "
+                       "pass\n");
+            return 0;
+        }
+        if (patterns[12].hits[0] < extension->wrist.function_begin ||
+            patterns[12].hits[0] >= extension->wrist.adjust_or) {
+            if (print)
+                printf("  FAIL relation: ArmCamRotateShift branch is not "
+                       "inside SetPos ahead of the adjust[6] store "
+                       "(0x%lX, 0x%lX..0x%lX)\n",
+                       (unsigned long)patterns[12].hits[0],
+                       (unsigned long)extension->wrist.function_begin,
+                       (unsigned long)extension->wrist.adjust_or);
+            ok = 0;
+        } else if (print) {
+            printf("  PASS relation: ArmCamRotateShift is read in SetPos, "
+                   "ahead of the joint 6 adjustment it becomes\n");
+        }
+    }
+    if (extension->player_pad.function_begin ==
+        extension->wrist.function_begin) {
+        if (print)
+            printf("  FAIL relation: PlayerPad merge and wrist share "
+                   "one unwind function\n");
+        ok = 0;
+    } else if (print) {
+        printf("  PASS relation: PlayerPad merge and wrist are in distinct "
+               "unwind functions\n");
+    }
+    if (extension->masks.pad_subject ==
+            extension->masks.pad_stop_aim ||
+        extension->masks.pad_weapon ==
+            extension->masks.pad_press_weapon ||
+        extension->masks.subject_move ==
+            extension->masks.subject_toggle) {
+        if (print)
+            printf("  FAIL relation: distinct pad targets alias\n");
+        ok = 0;
+    } else if (print) {
+        printf("  PASS relation: pad masks and subject state targets are "
+               "distinct\n");
+    }
+    if (extension->fire.publisher_begin ==
+            extension->player_pad.function_begin ||
+        extension->fire.gm_weapon_fire ==
+            extension->fire.weapon_fire_private ||
+        extension->fire.player_body == extension->fire.player_arm_body) {
+        if (print)
+            printf("  FAIL relation: fire publication targets alias\n");
+        ok = 0;
+    } else if (print) {
+        printf("  PASS relation: fire publisher, setter and fire globals are "
+               "distinct\n");
+    }
+    return ok;
+}
+
+static void scan_extension(const LiveImage *image,
+                           const PatternResult patterns[PATTERN_COUNT],
+                           ExtensionResult *extension)
+{
+    memset(extension, 0, sizeof(*extension));
+    find_pad_masks(image, patterns, &extension->masks);
+    find_player_pad(image, &extension->masks, &extension->player_pad);
+    /* Reported, never required: extension_relationships does not look at it and
+       dg_anchors_resolve does not gate on it. See find_pad_press. */
+    find_pad_press(image, &extension->player_pad, &extension->pad_press);
+    find_wrist(image, &extension->wrist);
+    find_fire_publication(image, patterns, &extension->fire);
+    extension->relationships_ok = extension_relationships(extension, patterns, 0);
+}
 
 /* ------------------------------------------- base FPS cross-anchor gate --- */
 
@@ -2297,11 +2244,7 @@ static int check_relationships(const PatternResult results[PATTERN_COUNT],
             printf("  PASS relation: game-status is distinct from the FPS "
                    "globals\n");
     }
-    /* The menu-status pair, held to the same two constraints - adjacent, and
-       the `or` operand the lower of the two. The two pairs must also be four
-       distinct addresses: they sit in the same run of globals four bytes apart,
-       which is exactly the arrangement a mis-resolved displacement would land
-       in without anything else looking wrong. */
+
     if (!results[9].ok) {
         if (print) printf("  FAIL relation: menu-status anchor did not pass\n");
         return 0;
@@ -2341,9 +2284,8 @@ static int check_relationships(const PatternResult results[PATTERN_COUNT],
     } else if (print) {
         printf("  PASS relation: arm-body has two matching code anchors\n");
     }
-    {   /* And it is a pointer of its own, not one of the words we already hold.
-           They all live in the same writable data, so an off-by-a-displacement
-           landing on a neighbour is the failure to guard against. */
+    {
+
         int j;
         ULONGLONG others[11];
         others[0] = results[0].targets[0]; others[1] = results[0].targets[1];
@@ -2366,9 +2308,6 @@ static int check_relationships(const PatternResult results[PATTERN_COUNT],
                    "anchor\n");
     }
 
-
-
-
     if (!results[12].ok) {
         if (print)
             printf("  FAIL relation: ArmCamRotateShift anchor did not pass\n");
@@ -2384,8 +2323,8 @@ static int check_relationships(const PatternResult results[PATTERN_COUNT],
         printf("  PASS relation: ArmCamRotateShift address and .vy describe "
                "one SVECTOR\n");
     }
-    {   /* It is an SVECTOR of its own, in the same writable run as everything
-           else here, so the neighbour test applies to it too. */
+    {
+
         int j;
         ULONGLONG others[12];
         others[0] = results[0].targets[0]; others[1] = results[0].targets[1];
@@ -2534,13 +2473,7 @@ static int fingerprint_ok(const DiskPe *disk, const LiveImage *image,
     if (image->nt->FileHeader.TimeDateStamp != disk->timestamp) ok = 0;
     if (image->nt->FileHeader.NumberOfSections != disk->section_count) ok = 0;
     if (image->nt->OptionalHeader.AddressOfEntryPoint != disk->entry_rva) ok = 0;
-    /* ImageBase is the ONE header field the loader rewrites. When ASLR moves
-       the module, the in-memory OptionalHeader.ImageBase becomes the address it
-       was actually mapped at, not the 0x140000000 the file asks for - so an
-       exact match against the disk value fails on every normal retail run,
-       externally and in-process alike. Both readings are legitimate identity;
-       anything else means the header has been tampered with. The disk-side
-       check above stays exact. */
+
     if (image->nt->OptionalHeader.ImageBase != disk->image_base &&
         image->nt->OptionalHeader.ImageBase != image->base) ok = 0;
     if (image->nt->OptionalHeader.SizeOfImage != disk->image_size) ok = 0;
@@ -2584,378 +2517,344 @@ static int validate_image_headers(LiveImage *image)
     return 1;
 }
 
-/* ------------------------------------------------- synthetic test images --- *
- *
- * Shared so that both halves can exercise the SAME resolver against a hand
- * built image. Nothing here ever touches a real process; the scanner's
- * --self-test and the bridge's desk tests both stand on these.
- */
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+static void init_test_image(LiveImage *image, unsigned char *bytes,
+                            unsigned char *valid, DWORD size,
+                            IMAGE_NT_HEADERS64 *nt,
+                            IMAGE_SECTION_HEADER sections[3],
+                            RUNTIME_FUNCTION *runtime, DWORD runtime_count)
+{
+    memset(bytes, 0, size);
+    memset(valid, 1, size);
+    memset(nt, 0, sizeof(*nt));
+    memset(sections, 0, sizeof(IMAGE_SECTION_HEADER) * 3);
+    memset(runtime, 0, sizeof(RUNTIME_FUNCTION) * runtime_count);
+    image->bytes = bytes;
+    image->valid = valid;
+    image->size = size;
+    image->base = 0x10000000ULL;
+    image->nt = nt;
+    image->sections = sections;
+    image->section_count = 3;
+    memcpy(sections[0].Name, ".text", 5);
+    sections[0].VirtualAddress = 0x100;
+    sections[0].Misc.VirtualSize = 0xA00;
+    sections[0].Characteristics =
+        IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_EXECUTE;
+    memcpy(sections[1].Name, ".pdata", 6);
+    sections[1].VirtualAddress = 0xC00;
+    sections[1].Misc.VirtualSize = 0x200;
+    sections[1].Characteristics = IMAGE_SCN_MEM_READ;
+    memcpy(sections[2].Name, ".data", 5);
+    sections[2].VirtualAddress = 0x1000;
+    sections[2].Misc.VirtualSize = 0x800;
+    sections[2].Characteristics =
+        IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE;
+    nt->OptionalHeader
+        .DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION].VirtualAddress =
+        0xC00;
+    nt->OptionalHeader
+        .DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION].Size =
+        runtime_count * sizeof(RUNTIME_FUNCTION);
+    memcpy(bytes + 0xC00, runtime,
+           runtime_count * sizeof(RUNTIME_FUNCTION));
+}
+
+static void sync_test_runtime(LiveImage *image,
+                              const RUNTIME_FUNCTION *runtime,
+                              DWORD runtime_count)
+{
+    memcpy(image->bytes + 0xC00, runtime,
+           runtime_count * sizeof(RUNTIME_FUNCTION));
+}
+
+static void emit_disp32(LiveImage *image, DWORD instruction,
+                        DWORD instruction_end, ULONGLONG target)
+{
+    LONG displacement = (LONG)((LONGLONG)target -
+        ((LONGLONG)image->base + instruction_end));
+    memcpy(image->bytes + instruction_end - 4, &displacement,
+           sizeof(displacement));
+}
+
+static void emit_disp32_at(LiveImage *image, DWORD disp_at,
+                           DWORD instruction_end, ULONGLONG target)
+{
+    LONG displacement = (LONG)((LONGLONG)target -
+        ((LONGLONG)image->base + instruction_end));
+    memcpy(image->bytes + disp_at, &displacement, sizeof(displacement));
+}
+
+static void emit_c7_store(LiveImage *image, DWORD at, ULONGLONG target,
+                          DWORD immediate)
+{
+    image->bytes[at] = 0xC7;
+    image->bytes[at + 1] = 0x05;
+    memcpy(image->bytes + at + 6, &immediate, sizeof(immediate));
+    emit_disp32_at(image, at + 2, at + 10, target);
+}
+
+static void emit_c6_store(LiveImage *image, DWORD at, ULONGLONG target,
+                          unsigned char immediate)
+{
+    image->bytes[at] = 0xC6;
+    image->bytes[at + 1] = 0x05;
+    image->bytes[at + 6] = immediate;
+    emit_disp32_at(image, at + 2, at + 7, target);
+}
+
+static void emit_rip_mov(LiveImage *image, DWORD at, unsigned char opcode,
+                         ULONGLONG target)
+{
+    image->bytes[at] = opcode;
+    image->bytes[at + 1] = 0x05;
+    emit_disp32(image, at, at + 6, target);
+}
 
 /* REX.W form: 48 8B 05 disp32 = mov rax,[rip+disp32]. */
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+static void emit_rip_mov64(LiveImage *image, DWORD at, unsigned char opcode,
+                           ULONGLONG target)
+{
+    image->bytes[at] = 0x48;
+    image->bytes[at + 1] = opcode;
+    image->bytes[at + 2] = 0x05;
+    emit_disp32(image, at, at + 7, target);
+}
+
+static void emit_rip_lea(LiveImage *image, DWORD at, ULONGLONG target)
+{
+    image->bytes[at] = 0x48;
+    image->bytes[at + 1] = 0x8D;
+    image->bytes[at + 2] = 0x05;
+    emit_disp32(image, at, at + 7, target);
+}
+
+static void emit_sse_store(LiveImage *image, DWORD at, ULONGLONG target,
+                           int width)
+{
+    DWORD end;
+    if (width == 8) image->bytes[at++] = 0xF2;
+    image->bytes[at] = 0x0F;
+    image->bytes[at + 1] = 0x11;
+    image->bytes[at + 2] = 0x05;
+    end = at + 7;
+    emit_disp32(image, at, end, target);
+}
+
+static void emit_rip_byte_store(LiveImage *image, DWORD at, ULONGLONG target)
+{
+    image->bytes[at] = 0x88;
+    image->bytes[at + 1] = 0x15;
+    emit_disp32(image, at, at + 6, target);
+}
+
+static void emit_rip_byte_load(LiveImage *image, DWORD at, ULONGLONG target)
+{
+    image->bytes[at] = 0x0F;
+    image->bytes[at + 1] = 0xB6;
+    image->bytes[at + 2] = 0x05;
+    emit_disp32(image, at, at + 7, target);
+}
+
+static void emit_scaled_load(LiveImage *image, DWORD at, DWORD disp, int width)
+{
+    if (width == 8) image->bytes[at++] = 0xF2;
+    image->bytes[at] = 0x0F;
+    image->bytes[at + 1] = 0x10;
+    image->bytes[at + 2] = 0x84;
+    image->bytes[at + 3] = 0xD6;
+    memcpy(image->bytes + at + 4, &disp, sizeof(disp));
+}
+
+static void emit_call(LiveImage *image, DWORD at, DWORD target)
+{
+    LONG displacement = (LONG)target - (LONG)(at + 5);
+    image->bytes[at] = 0xE8;
+    memcpy(image->bytes + at + 1, &displacement, sizeof(displacement));
+}
+
+static void emit_qword_guard(LiveImage *image, DWORD at, ULONGLONG target)
+{
+    image->bytes[at] = 0x48;
+    image->bytes[at + 1] = 0x83;
+    image->bytes[at + 2] = 0x3D;
+    image->bytes[at + 7] = 0;
+    emit_disp32_at(image, at + 3, at + 8, target);
+}
 
 /* `test r/m8, imm8` on a register - 41 F6 C2 <imm> in retail, the guard in
    front of every scenario-press read. */
-
-
-
-
-
-
-
-
+static void emit_test_reg_imm8(LiveImage *image, DWORD at,
+                               unsigned char immediate)
+{
+    image->bytes[at] = 0x41;
+    image->bytes[at + 1] = 0xF6;
+    image->bytes[at + 2] = 0xC2;    /* mod 11, reg 000 (/0 = TEST), rm 010 */
+    image->bytes[at + 3] = immediate;
+}
 
 /* `jz +2` then `mov r32,[rip+d32]` (8B) or `or r32,[rip+d32]` (0B) - the
    guarded read itself, in the two spellings the two branches compile to. */
-
-
-
-
-
-
-
-
-
+static void emit_guarded_rip_read(LiveImage *image, DWORD at,
+                                  unsigned char opcode, ULONGLONG target)
+{
+    image->bytes[at] = 0x74;        /* jz */
+    image->bytes[at + 1] = 0x06;
+    image->bytes[at + 2] = opcode;
+    image->bytes[at + 3] = 0x15;    /* mod 00, reg 010, rm 101 = RIP */
+    emit_disp32_at(image, at + 4, at + 8, target);
+}
 
 /* `and r32, imm8` on a register - 41 83 E2 <imm>, the one-shot's own clear. */
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+static void emit_and_reg_imm8(LiveImage *image, DWORD at,
+                              unsigned char immediate)
+{
+    image->bytes[at] = 0x41;
+    image->bytes[at + 1] = 0x83;
+    image->bytes[at + 2] = 0xE2;    /* mod 11, reg 100 (/4 = AND), rm 010 */
+    image->bytes[at + 3] = immediate;
+}
+
+static int dg_anchors_pad_press_self_test(void)
+{
+    unsigned char bytes[0x2000];
+    unsigned char valid[0x2000];
+    IMAGE_NT_HEADERS64 nt;
+    IMAGE_SECTION_HEADER sections[3];
+    RUNTIME_FUNCTION runtime[3];
+    LiveImage image;
+    PlayerPadResult player_pad;
+    PadPressResult result;
+    ULONGLONG gv_pad_data;
+    ULONGLONG gv_pad_direct;
+    ULONGLONG gv_pad_press;
+    ULONGLONG gv_pad_mask;
+
+    memset(runtime, 0, sizeof(runtime));
+    init_test_image(&image, bytes, valid, sizeof(bytes), &nt, sections,
+                    runtime, 3);
+    gv_pad_data   = image.base + 0x1100;
+    gv_pad_direct = gv_pad_data + DG_GV_PAD_STRIDE * DG_GV_PAD_COUNT;
+    gv_pad_press  = image.base + 0x1400;
+    gv_pad_mask   = image.base + 0x1410;
+
+    memset(&player_pad, 0, sizeof(player_pad));
+    player_pad.ok = 1;
+    player_pad.gv_pad_data = gv_pad_data;
+
+    runtime[0].BeginAddress = 0x100;
+    runtime[0].EndAddress   = 0x200;
+
+    emit_rip_lea(&image, 0x100, gv_pad_direct);
+    emit_call(&image, 0x107, 0x400);
+    emit_rip_lea(&image, 0x110, gv_pad_direct);
+    emit_call(&image, 0x117, 0x400);          /* direct_seam == 0x11C */
+
+    emit_rip_mov(&image, 0x120, 0x8B, gv_pad_data + DG_GV_PAD_FLAG_OFFSET);
+
+    emit_test_reg_imm8(&image, 0x130, 0x20);
+    emit_guarded_rip_read(&image, 0x134, 0x8B, gv_pad_press);
+    /*   normal branch: the two masks under their own guards, then the press */
+    emit_test_reg_imm8(&image, 0x150, 0x04);
+    emit_guarded_rip_read(&image, 0x154, 0x23, gv_pad_mask);
+    emit_test_reg_imm8(&image, 0x160, 0x08);
+    emit_guarded_rip_read(&image, 0x164, 0x23, gv_pad_mask + 4);
+    emit_test_reg_imm8(&image, 0x170, 0x20);
+    emit_guarded_rip_read(&image, 0x174, 0x0B, gv_pad_press);
+
+    emit_and_reg_imm8(&image, 0x190, 0xDF);
+    emit_rip_mov(&image, 0x194, 0x89, gv_pad_data + DG_GV_PAD_FLAG_OFFSET);
+
+    /* [1] a decoy: reads the flag and a global under a 0x20 guard, but only
+           once, and never stores the flag back. A consumer, not the owner. */
+    runtime[1].BeginAddress = 0x300;
+    runtime[1].EndAddress   = 0x360;
+    emit_rip_mov(&image, 0x300, 0x8B, gv_pad_data + DG_GV_PAD_FLAG_OFFSET);
+    emit_test_reg_imm8(&image, 0x310, 0x20);
+    emit_guarded_rip_read(&image, 0x314, 0x8B, gv_pad_mask);
+    emit_and_reg_imm8(&image, 0x330, 0xDF);
+
+    /* [2] a call target for the two E8s above */
+    runtime[2].BeginAddress = 0x400;
+    runtime[2].EndAddress   = 0x440;
+    sync_test_runtime(&image, runtime, 3);
+
+    find_pad_press(&image, &player_pad, &result);
+    if (!result.ok || result.gv_pad_press != gv_pad_press ||
+        result.gv_pad_data_direct != gv_pad_direct ||
+        result.function_begin != 0x100 || result.function_end != 0x200 ||
+        result.press_read != 0x136 || result.press_clear != 0x190 ||
+        result.direct_seam != 0x11C)
+        return 0;
+
+    {
+        PlayerPadResult unresolved = player_pad;
+        unresolved.ok = 0;
+        find_pad_press(&image, &unresolved, &result);
+        if (result.ok || result.gv_pad_press) return 0;
+    }
+
+    emit_test_reg_imm8(&image, 0x170, 0x04);
+    find_pad_press(&image, &player_pad, &result);
+    if (result.ok) return 0;
+    emit_test_reg_imm8(&image, 0x170, 0x20);
+
+    /* Mutation 2: the two guarded reads name DIFFERENT globals. The finder
+       must refuse outright, never take the first. Point the second at the
+       mask, which is exactly the wrong answer that would otherwise ship. */
+    emit_guarded_rip_read(&image, 0x174, 0x0B, gv_pad_mask);
+    find_pad_press(&image, &player_pad, &result);
+    if (result.ok) return 0;
+    emit_guarded_rip_read(&image, 0x174, 0x0B, gv_pad_press);
+
+    /* Mutation 3: the flag is read but never written back. That is a consumer
+       of the pad word, not the pass that owns and clears the one-shot, and
+       arming a flag nobody clears would leave a press stuck on forever. */
+    memset(image.bytes + 0x194, 0, 6);
+    find_pad_press(&image, &player_pad, &result);
+    if (result.ok) return 0;
+    emit_rip_mov(&image, 0x194, 0x89, gv_pad_data + DG_GV_PAD_FLAG_OFFSET);
+
+    /* Mutation 4: the clear is of some other bit. Without `and ~0x20` this is
+       not the scenario-press pass at all. */
+    emit_and_reg_imm8(&image, 0x190, 0xFB);
+    find_pad_press(&image, &player_pad, &result);
+    if (result.ok) return 0;
+    emit_and_reg_imm8(&image, 0x190, 0xDF);
+
+    /* Mutation 5: the guarded read drifts out of reach of its guard. A read
+       twenty bytes past the test is a different statement, and pairing them
+       would be the finder inventing a relationship. */
+    memset(image.bytes + 0x174, 0, 8);
+    emit_guarded_rip_read(&image, 0x184, 0x0B, gv_pad_press);
+    find_pad_press(&image, &player_pad, &result);
+    if (result.ok) return 0;
+    memset(image.bytes + 0x184, 0, 8);
+    emit_guarded_rip_read(&image, 0x174, 0x0B, gv_pad_press);
+
+    /* Mutation 6: the decoy grows into a second full match. Ambiguity is a
+       refusal, never a first-match. */
+    emit_test_reg_imm8(&image, 0x320, 0x20);
+    emit_guarded_rip_read(&image, 0x324, 0x0B, gv_pad_mask);
+    emit_rip_mov(&image, 0x340, 0x89, gv_pad_data + DG_GV_PAD_FLAG_OFFSET);
+    find_pad_press(&image, &player_pad, &result);
+    if (result.ok) return 0;
+    memset(image.bytes + 0x320, 0, 12);
+    memset(image.bytes + 0x340, 0, 6);
+
+    memset(image.bytes + 0x100, 0, 7);
+    memset(image.bytes + 0x110, 0, 7);
+    find_pad_press(&image, &player_pad, &result);
+    if (!result.ok || result.gv_pad_press != gv_pad_press ||
+        result.gv_pad_data_direct || result.direct_seam)
+        return 0;
+    emit_rip_lea(&image, 0x100, gv_pad_direct);
+    emit_rip_lea(&image, 0x110, gv_pad_direct);
+
+    /* and back to the honest image, which must still resolve */
+    find_pad_press(&image, &player_pad, &result);
+    return result.ok && result.gv_pad_press == gv_pad_press &&
+           result.gv_pad_data_direct == gv_pad_direct;
+}
 
 /* ------------------------------------------------------ one-call resolve --- *
  *
@@ -2976,14 +2875,10 @@ typedef struct DG_ANCHORS {
     ULONGLONG pl_subject_move;
     ULONGLONG pl_subject_toggle;
 
-
-
-
     ULONGLONG pad_subject;
     ULONGLONG pad_stop_aim;
     ULONGLONG pad_weapon;
     ULONGLONG pad_press_weapon;
-
 
     ULONGLONG player_pad;
     ULONGLONG gv_pad_data;
@@ -2992,21 +2887,12 @@ typedef struct DG_ANCHORS {
        independent anchors, so it gates fail-closed and never fail-open. */
     ULONGLONG gm_player_status;
 
-
-
-
-
-
     ULONGLONG gm_game_status;       /* the `or` operand, the lower address */
     ULONGLONG gm_game_status_scn;   /* the `mov` operand, 4 bytes above it */
 
-
     ULONGLONG gm_menu_status;
     ULONGLONG gm_menu_status_scn;
-    /* The subjective arm object, held by two independent anchors. F4 needs it
-       to make the arm visible; F5 and F6 need it because its right-hand joint
-       is what the bullet matrix is taken from. Nothing writes through this yet
-       - it is resolved so the first live run has something to observe. */
+
     ULONGLONG gm_player_arm_body;
 
     ULONGLONG arm_cam_rotate_shift;

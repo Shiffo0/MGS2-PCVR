@@ -1,8 +1,3 @@
-
-
-
-
-
 static DG_DETOUR g_aim_blend_hook;
 static ULONGLONG g_aim_blend_base, g_aim_blend_lease_ms;
 static int g_aim_blend_resolved;
@@ -34,12 +29,14 @@ static uint64_t aim_blend_owned(ULONGLONG mc,ULONGLONG now)
        !g_b.hand_command_requested || !hand_command_read(command,&tick,&pair))return 0;
     age=(LONG)((DWORD)g_b.c_ticks-(DWORD)tick);
     if(age<0 || age>DG_HAND_COMMAND_TICKS ||
-       resolve_hand_player(&current,&player,&weapon)!=DG_RESOLVE_OK ||
-       (weapon!=1 && weapon!=2 && weapon!=8) || reload_native_animation())return 0;
+       resolve_hand_player(&current,&player,&weapon)!=DG_RESOLVE_OK)return 0;
+
+    if(weapon!=1 && weapon!=2 && weapon!=3 && weapon!=5 &&
+       weapon!=15 && weapon!=18)return 0;
+    if(reload_native_animation())return 0;
     arm=g_b.ik_owned_arm;
     if(current!=arm || !plausible_ptr(arm) || region_end(arm)<arm+0x1b0 ||
        region_end(mc)<mc+0x60 || RD32(mc+0x14)!=55)return 0;
-
 
     motion=RD32(arm+0x1ac);
     if(motion!=0 && motion!=1 && motion!=2 && motion!=4 &&
@@ -92,7 +89,7 @@ static void aim_blend_install(void)
         (void *)(ULONG_PTR)(g_aim_blend_base+0x681550),aim_blend_native,
         (void *)(ULONG_PTR)(g_aim_blend_base+0x681542),
         (void *)(ULONG_PTR)(g_aim_blend_base+0x681594),&why,1);
-    if(g_b.log)g_b.log("  aim blend: owned pistol rotation filter %s (%s)\r\n",ok?"installed":"unavailable",why);
+    if(g_b.log)g_b.log("  aim blend: owned weapon rotation filter %s (%s)\r\n",ok?"installed":"unavailable",why);
 }
 static void aim_blend_stop(void)
 {

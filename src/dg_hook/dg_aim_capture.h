@@ -3,10 +3,6 @@
 #include "dg_xr.h"
 #include <stdint.h>
 
-/* Bounded, revision-checked hand-root aim for M9, USP and run-1 weapons:
-   SOCOM, AKS-74U, M4, RGB6, Coolant. Every actor must still resolve to the
-   player's selected hand; model 0 must be parentless with the root's basis.
-   Zero on refusal. No recorder state is touched. */
 typedef struct {
     uint64_t arm, subobject, subobjs, hand, model;
     uint64_t weapon_id; /* explicit ID, also distinguishes reused object storage */
@@ -26,6 +22,16 @@ typedef struct {
 } DG_NIKITA_BINDING;
 int dg_aim_capture_nikita_binding(uintptr_t image_base, uint64_t expected_arm,
                                  DG_NIKITA_BINDING *out);
+
+typedef struct {
+    uint64_t player, actor, arm, arm_objs, hand, player_body, native_root;
+    uint64_t normal_object, normal_objs, subject_object, model, root;
+    int weapon, chanl; unsigned vflag, flags;
+} DG_PSG_BINDING;
+int dg_aim_capture_psg_binding(uintptr_t image_base, uint64_t expected_arm,
+                               DG_PSG_BINDING *out, const char **why);
+
+void dg_aim_capture_psg_act_own(uint64_t image_base, const unsigned char *bytes, unsigned n);
 
 /* Opt-in observation only. No game writes, callbacks or new detours.
    Caller passes the EXACT XR frame and raw view used to build camera_world.

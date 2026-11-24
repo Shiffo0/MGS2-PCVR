@@ -29,6 +29,16 @@ static int glyph(unsigned char c) {
     if (c >= '0' && c <= '9') return c-'0'+26;
     return c == '-' ? 36 : c == '.' ? 37 : -1;
 }
+void dg_laser_text(unsigned *pixels,int width,int scale,const char *label) {
+    int i,r,c,dx,dy;
+    for(i=0;label[i] && (6*i+6)*scale<=width;i++){
+        int k=glyph((unsigned char)label[i]);
+        if(k<0)continue;
+        for(r=0;r<7;r++)for(c=0;c<5;c++)if(glyphs[k][r]&(1<<(4-c)))
+            for(dy=0;dy<scale;dy++)for(dx=0;dx<scale;dx++)
+                pixels[((r+4)*scale+dy)*width+(6*i+c+1)*scale+dx]=0xffefffffu;
+    }
+}
 static void put(unsigned char *p, int x, int y, unsigned char r,
                 unsigned char g, unsigned char b) {
     size_t i;

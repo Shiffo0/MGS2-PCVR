@@ -1,5 +1,3 @@
-
-
 #ifndef DG_CODEC_MENU_H
 #define DG_CODEC_MENU_H
 #include "dg_menu.h"

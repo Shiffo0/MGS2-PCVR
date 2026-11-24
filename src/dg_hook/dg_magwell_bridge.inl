@@ -1,6 +1,6 @@
 static int magwell_waiting(void) {
     return g_reload.weapon==2 && reload_fresh() && reload_visual_ready() &&
-        g_reload.valid && g_reload.waiting && g_reload.empty && g_reload.reserve &&
+        g_reload.valid && g_reload.waiting && (g_reload.empty || g_reload.ejected) && g_reload.reserve &&
         !g_reload.anim && !g_reload.gesture.permit && !g_b.script_menu_only;
 }
 int dg_bridge_magwell_allowed(void) {
@@ -8,8 +8,7 @@ int dg_bridge_magwell_allowed(void) {
         ok=magwell_waiting();ReleaseSRWLockShared(&g_reload_lock);
     }return ok;
 }
-/* Called at native list preparation; the result travels with that exact
-   list's camera handoff, never with the latest/current render-thread pose. */
+
 int dg_bridge_magwell_snapshot(DG_MAGWELL *out) {
     int ok=0;uint64_t arm,weapon,objs,root;double point[3];
     memset(out,0,sizeof *out);

@@ -6,9 +6,6 @@
  * have it clear. Raw AIM and the binary layout remain unchanged. */
 #define DG_AIM_REPLAY_BLADE 16u
 
-/* DGREC6 absolute-direction input, before quaternion construction or filtering.
-   Matrices are camera axes in world. View and AIM are exact LOCAL xyzw/xyz.
-   Selection IDs describe the bounded live guard's result, never replay pointers. */
 typedef struct {
     double camera[3][3], view[7], aim[7], dt;
     unsigned long long sample_seq;

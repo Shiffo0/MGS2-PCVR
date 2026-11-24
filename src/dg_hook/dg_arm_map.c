@@ -5,10 +5,7 @@
 #include "dg_arm_map.h"
 
 #define DG_ARM_MAP_EPS 1.0e-9
-/* World translations around 127 m are stored as float in the game, so a live
-   200-300 mm bone can quantise by hundredths of a millimetre between poses.
-   One permille tolerates that while a model swap is independently identified
-   by arm/objs/topology and a real length change remains fail-closed. */
+
 #define DG_ARM_MAP_BONE_EPS 1.0e-3
 #define DG_ARM_MAP_MAX_REACH_FRAC 0.99
 /* Visual safety envelope, not a claim about human anatomy. The input still
@@ -101,6 +98,7 @@ int dg_arm_map_step(DG_ARM_MAP_STATE *state, const DG_ARM_MAP_IN *in,
     double wrist_vec[3];
     double candidate[3];
     double ray[3];
+    const double *centre;
     double source_span;
     double wrist_reach;
     double reach;
@@ -177,8 +175,6 @@ int dg_arm_map_step(DG_ARM_MAP_STATE *state, const DG_ARM_MAP_IN *in,
         return 0;
     }
 
-    /* Quantisation-tolerated live measurements must not modulate the scale
-       every frame. The calibrated character lengths are the stable contract. */
     max_reach = (state->upper + state->fore) * DG_ARM_MAP_MAX_REACH_FRAC;
     min_reach = fabs(state->upper - state->fore);
 
@@ -195,11 +191,7 @@ int dg_arm_map_step(DG_ARM_MAP_STATE *state, const DG_ARM_MAP_IN *in,
         out->controller_delta[i] =
             in->controller_view[i] - state->controller0_view[i];
         candidate[i] = in->explicit_target ? in->desired_view[i] : in->anchor_shoulder
-            /* The anatomical reference belongs to this calibration's root
-               frame. Native aim/reload may move the LIVE shoulder, but must
-               not move a reachable controller target with it. The caller
-               still carries this root-local target with locomotion/turning;
-               the live shoulder below still owns reach and the IK origin. */
+
             ? state->shoulder0_view[i] +
               (in->controller_view[i] - in->player_shoulder[i]) * scale
             : state->wrist0_view[i] + out->controller_delta[i] * scale;
@@ -210,7 +202,13 @@ int dg_arm_map_step(DG_ARM_MAP_STATE *state, const DG_ARM_MAP_IN *in,
         return 0;
     }
 
-    sub3(candidate, in->shoulder_view, ray);
+    centre = in->has_reach_centre ? in->reach_centre_view : in->shoulder_view;
+    if (in->has_reach_centre && !finite3(in->reach_centre_view)) {
+        memset(out, 0, sizeof(*out));
+        out->flags = DG_ARM_MAP_F_BAD_INPUT;
+        return 0;
+    }
+    sub3(candidate, centre, ray);
     reach = len3(ray);
     if (!DG_ARM_MAP_FINITE(reach)) {
         memset(out, 0, sizeof(*out));
@@ -244,8 +242,13 @@ int dg_arm_map_step(DG_ARM_MAP_STATE *state, const DG_ARM_MAP_IN *in,
     if (reach > DG_ARM_MAP_EPS && wanted != reach) {
         double k = wanted / reach;
         for (i = 0; i < 3; ++i)
-            candidate[i] = in->shoulder_view[i] + ray[i] * k;
+            candidate[i] = centre[i] + ray[i] * k;
         reach = wanted;
+    }
+    if (in->has_reach_centre) {
+        double live_ray[3];
+        sub3(candidate, in->shoulder_view, live_ray);
+        reach = len3(live_ray);
     }
 
     for (i = 0; i < 3; ++i) out->target_view[i] = candidate[i];

@@ -21,6 +21,7 @@ typedef struct {
    uint32_t storage is only alignment/storage: do not interpret native integers.
    Returns 1 rendered, 0 cleared (hidden/invalid), -1 null/short buffer untouched.
    Clears exactly DG_RADIAL_VIEW_PIXELS pixels; surplus capacity untouched. */
+void dg_laser_text(unsigned *pixels,int width,int scale,const char *text);
 int dg_radial_view_raster(const dg_radial_view *view, uint32_t *pixels,
                           size_t pixel_count);
 #endif

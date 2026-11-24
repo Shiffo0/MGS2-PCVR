@@ -1,14 +1,5 @@
 #pragma once
-/* Second-camera constant bank on the GPU (dg_cb_retarget.hlsl): the currently
- * bound VS cb0 of the world shader is copied, c20..23 replaced by
- * transpose(D) * c20..23, and bound as a private buffer with the same range.
- * No CPU readback, no stall - unlike SecondCameraBuffer, which stays the
- * reference for a single proof draw. The GPU also checks per draw that the
- * prefix X in c20..23 = (X*S)^T is affine; a projective prefix (another
- * projection) gets an empty bank (w = 0, nothing drawn) and is counted. The
- * first four checked banks (c16..c23) are kept as evidence. Buffers are reused across draws; the
- * immediate context orders copy, dispatch, copy and draw. The compute state
- * it touches is restored exactly (MsaaCsState). */
+
 #include <d3d11_1.h>
 #include <wrl/client.h>
 #include <string.h>
@@ -59,11 +50,11 @@ struct SecondCameraGpu {
   if(FAILED(d->CreateUnorderedAccessView(dst.Get(),&u,&uav)))return false;
   width=bytes;return true;
  }
-
-
-
-
-
+ /* Prepares and binds the private bank for the draw about to be replayed:
+    c20..23 = transpose(delta)*c20..23 when their prefix over the source camera
+    (inverse `sinv`) is affine, else empty.
+    `countDraw` adds the draw to the flags (once per draw, not per pass).
+    Returns a refusal reason, or nullptr when bound. */
  const char*bind(ID3D11Device*d,ID3D11DeviceContext*c,const float delta[16],const float sinv[16],bool countDraw,UINT pers=20,UINT slot=0){
   if(bound)return "already_bound";
   original.Reset();first=count=0;
@@ -101,29 +92,27 @@ struct SecondCameraGpu {
  }
 };
 
-/* Resolves a multisampled colour snapshot and writes it as a 32-bit top-down
-   BMP (diagnostic evidence; blocking readback, once). */
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+static bool dgDumpBmp(ID3D11Device*d,ID3D11DeviceContext*c,ID3D11Texture2D*ms,DXGI_FORMAT read,const char*path){
+ if(!ms||!path)return false;
+ D3D11_TEXTURE2D_DESC x{};ms->GetDesc(&x);
+ bool bgra=read==DXGI_FORMAT_B8G8R8A8_UNORM;if(!bgra&&read!=DXGI_FORMAT_R8G8B8A8_UNORM)return false;
+ D3D11_TEXTURE2D_DESC r=x;r.SampleDesc.Count=1;r.SampleDesc.Quality=0;r.Format=read;r.BindFlags=0;r.CPUAccessFlags=0;r.MiscFlags=0;r.Usage=D3D11_USAGE_DEFAULT;
+ ComPtr<ID3D11Texture2D> resolved,staging;if(FAILED(d->CreateTexture2D(&r,nullptr,&resolved)))return false;
+ r.Usage=D3D11_USAGE_STAGING;r.CPUAccessFlags=D3D11_CPU_ACCESS_READ;if(FAILED(d->CreateTexture2D(&r,nullptr,&staging)))return false;
+ if(x.SampleDesc.Count>1)c->ResolveSubresource(resolved.Get(),0,ms,0,read);else c->CopyResource(resolved.Get(),ms);
+ c->CopyResource(staging.Get(),resolved.Get());
+ D3D11_MAPPED_SUBRESOURCE m{};if(FAILED(c->Map(staging.Get(),0,D3D11_MAP_READ,0,&m)))return false;
+ FILE*f=nullptr;bool ok=false;
+ if(!fopen_s(&f,path,"wb")&&f){
+  UINT row=x.Width*4;unsigned char h[54]{};UINT size=54+row*x.Height;
+  h[0]='B';h[1]='M';memcpy(h+2,&size,4);UINT off=54;memcpy(h+10,&off,4);UINT hs=40;memcpy(h+14,&hs,4);
+  INT w=(INT)x.Width,ht=-(INT)x.Height;memcpy(h+18,&w,4);memcpy(h+22,&ht,4);h[26]=1;h[28]=32;UINT img=row*x.Height;memcpy(h+34,&img,4);
+  ok=fwrite(h,1,54,f)==54;
+  unsigned char*line=(unsigned char*)malloc(row);
+  for(UINT y=0;ok&&line&&y<x.Height;y++){const unsigned char*s=(const unsigned char*)m.pData+y*m.RowPitch;
+   if(bgra)memcpy(line,s,row);else for(UINT i=0;i<x.Width;i++){line[i*4]=s[i*4+2];line[i*4+1]=s[i*4+1];line[i*4+2]=s[i*4];line[i*4+3]=s[i*4+3];}
+   ok=fwrite(line,1,row,f)==row;}
+  free(line);fclose(f);if(!line)ok=false;
+ }
+ c->Unmap(staging.Get(),0);return ok;
+}

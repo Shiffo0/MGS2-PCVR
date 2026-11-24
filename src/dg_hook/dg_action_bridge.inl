@@ -80,8 +80,7 @@ void dg_bridge_action_context(int allowed) {
     if(!allowed){g_action_owner.held=0;g_action_owner.blocked=1;g_camera_owner.blocked=1;g_zoom_owner.blocked=1;g_zoom_owner.direction=0;}
     ReleaseSRWLockExclusive(&g_action_lock);
 }
-/* Common Direct-update return runs even when NORMAL takes its demo branch.
-   This is revocation only: never inject into Direct or scenario input. */
+
 static void action_update_boundary(void) {
     unsigned flags;
     if(!InterlockedCompareExchange(&g_action_enabled,0,0))return;

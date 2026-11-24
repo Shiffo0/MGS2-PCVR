@@ -34,9 +34,7 @@ static void nikita_visual_release(void) {
 }
 
 static void nikita_visual_apply(uint64_t arm,const DG_BRIDGE_ARM_TARGET *t) {
-
-
-
+    int dgw_w=dgw_weapon_now();
     DG_NIKITA_BINDING n,ctx;uintptr_t base;int scope=0;
     LONG age=(LONG)((DWORD)g_b.c_ticks-(DWORD)g_b.hand_command_tick);
     if((!t) || (!t->write) || (!t->hand_write) || (!t->absolute_aim) || (!t->aim_write) ||

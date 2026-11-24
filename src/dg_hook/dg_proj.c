@@ -1,17 +1,3 @@
-/* dg_proj.c - per-eye asymmetric projection math.
- *
- * The game uses row vectors.  In the live projection the horizontal NDC
- * coordinate is
- *
- *     ndc_x = (x / z) * m[0][0] + m[2][0]
- *
- * and the vertical expression has the matching m[1][1]/m[2][1] form.  The
- * depth mapping is in m[2][2] and m[3][2].  Consequently this helper changes
- * exactly four elements and never reconstructs, reads, or edits the depth
- * mapping.  That is WHY the eye override cannot inherit the near/far defect
- * of a rebuilt projection.
- */
-
 #include <math.h>
 #include <stdio.h>
 #include <string.h>

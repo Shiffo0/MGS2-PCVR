@@ -1,9 +1,3 @@
-/* Fission Mailed. The scripted fake game-over screen is its own actor: it
- * shrinks the running game into a corner under a Game Over panel while play
- * continues, and sets no game or menu status bit. In VR that composite would
- * fill the eye, so its three visual layers are never created (the game
- * tests every one for NULL): play simply continues in stereo. Its per-frame
- * Act still marks it live for the log. */
 #include <intrin.h>   /* _ReturnAddress */
 typedef void (__fastcall *DG_FAKE_GO_FN)(void *);
 static DG_DETOUR g_fake_go_detour;
@@ -38,7 +32,6 @@ static void __fastcall fake_go_act(void *work) {
 }
 static void fake_go_resolve(const LiveImage *im) {
     g_fake_go_base=0;
-
 
     if(!m9_match(im,0x59c8c0,(const unsigned char *)"\x40\x53\x48\x81\xec\x80\0\0\0\x48\x8b\x05",12) ||
        !m9_match(im,0x59d636,(const unsigned char *)"\x4c\x8d\x05\x83\xfa\xff\xff",7) ||

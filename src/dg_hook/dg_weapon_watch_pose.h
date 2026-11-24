@@ -1,11 +1,7 @@
 #ifndef DG_WEAPON_WATCH_POSE_H
 #define DG_WEAPON_WATCH_POSE_H
 #include "dg_model_radar.h"
-/* Text runs across the forearm, top edge toward the hand. Centered on
- * the bone axis, 55 mm proximal to the wrist, 25 mm above the surface.
- * Reverse the surface quarter-turn: inward inspection, based on the
- * user observing the opposite (outward) roll with build 329BD099.
- * This is a candidate anatomical alignment, pending headset acceptance. */
+
 static int dg_watch_pose(const DG_MODEL_ARM *arm,double width,double height,uint64_t now,DG_RADAR_POSE *out) {
  DG_MODEL_ARM basis;double along[3],normal[3],across[3],dot=0;int k;
  if(!arm)return 0;basis=*arm;

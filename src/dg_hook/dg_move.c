@@ -11,10 +11,6 @@ static int finite_ok(double v)
     return v == v && v <= 1.0e12 && v >= -1.0e12;
 }
 
-
-
-
-
 static int physically_moving(const DG_MOVE_IN *in)
 {
     int dx = (int)in->left_dx - 128;
@@ -155,11 +151,6 @@ void dg_move_step(const DG_MOVE_IN *in, DG_MOVE_OUT *out)
         return;
     }
 
-    /* Rescale the live range so our first speakable deflection already clears
-       the game's own margin. deadzone..1 maps onto (MARGIN+1)..127; without
-       this a stick at 20% passes our gate, lands inside the game's margin,
-       and is discarded there - a walk that "works" in every counter and moves
-       nobody. */
     scaled = (mag - dz) / (1.0 - dz);
     scaled = (double)(DG_MOVE_GAME_MARGIN + 1) +
              scaled * (double)(127 - (DG_MOVE_GAME_MARGIN + 1));

@@ -30,15 +30,6 @@ void dg_recoil_step(DG_RECOIL *r)
 
     if (!r) return;
 
-    /* The exact solution, advanced one tick - not an integrator. A critically
-       damped spring is x(t) = (x0 + a*t)*exp(-w*t) with a = v0 + w*x0, so a
-       tick is a closed-form linear map and the shape does not depend on how
-       often it is stepped. That matters more here than the two multiplies it
-       costs: an Euler step at dt = 1 tick with w = 1/3 is nowhere near the
-       curve it is meant to be following - it swallows most of the impulse in
-       the first step and peaks at a third of the asked-for height. The header
-       promises a peak of one at three ticks, and only the closed form keeps
-       that promise. */
     a = r->v + DG_RECOIL_OMEGA * r->x;
     decay = exp(-DG_RECOIL_OMEGA);
     nx = (r->x + a) * decay;

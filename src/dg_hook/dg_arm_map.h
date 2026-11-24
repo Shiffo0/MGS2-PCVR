@@ -1,5 +1,3 @@
-
-
 #ifndef DG_ARM_MAP_H
 #define DG_ARM_MAP_H
 
@@ -22,20 +20,20 @@ typedef struct {
     double controller_view[3];
     double shoulder_view[3];
     double native_wrist_view[3];
-    /* The PLAYER's own shoulder, in the same frame and units as
-       controller_view - which is head-relative, so this is an anthropometric
-       offset from the headset and not anything the game knows. Read only when
-       anchor_shoulder is set, and required to be finite when it is. */
+
     double player_shoulder[3];
     /* The PLAYER's shoulder-to-wrist length at full extension, same units.
        Anthropometry again; required to be finite and positive when
        anchor_shoulder is set, and unread otherwise. */
     double player_reach;
-    double upper;               /* live shoulder-to-elbow length, mm */
-    double fore;                /* live elbow-to-wrist length, mm */
+    double upper;
+    double fore;
     int anchor_shoulder;        /* 0 = offset anchor, 1 = shoulder anchor */
     int explicit_target;        /* camera-derived root-local target; same reach policy */
     double desired_view[3];
+
+    int has_reach_centre;
+    double reach_centre_view[3];
 } DG_ARM_MAP_IN;
 
 typedef struct {
@@ -43,7 +41,7 @@ typedef struct {
     double controller_delta[3]; /* since calibration, before scaling */
     double scale;
     double source_span;         /* calibration controller-to-shoulder span */
-    double reach_used;          /* |target_view - live shoulder_view| */
+    double reach_used;
     unsigned flags;             /* DG_ARM_MAP_F_* */
 } DG_ARM_MAP_OUT;
 

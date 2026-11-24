@@ -2,17 +2,7 @@
 #define DG_RADIAL_INVENTORY_H
 #include <stddef.h>
 #include <stdint.h>
-/* Optional CPU-only observer. No game writes, calls, retries or equip policy.
- * Caller owns approved executable identity, serialized stable sampling and a
- * fault-contained exact read callback (return 1 iff ALL requested bytes read).
- * A live callback MUST validate readable regions; this code never dereferences
- * callback addresses. A byte-buffer implementation is sufficient for desk use.
- * Scans loaded PE sections, NOT fixed historical RVAs. Resolve once per module
- * generation, discard on unload/context loss. Re-resolve after image changes.
- * Physical inventory spans include unused indices: NOT a selectable catalog.
- * no_use_ready/equip_ready are always zero; eligibility and retail change-phase
- * have not been established. Even a positive observed count grants no action.
- */
+
 enum { DG_RINV_INVENTORY=1u, DG_RINV_DESIRED=2u, DG_RINV_ACTOR=4u };
 enum { DG_RINV_MAX_SLOTS=64 };
 typedef int (*dg_radial_inventory_read)(void *ctx, uint64_t address, void *dst, size_t n);

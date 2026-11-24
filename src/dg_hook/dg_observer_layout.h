@@ -1,8 +1,8 @@
 #ifndef DG_OBSERVER_LAYOUT_H
 #define DG_OBSERVER_LAYOUT_H
 #include <math.h>
-
-
+/* Tangent-space extents: left, right, bottom, top. Square screen pixels need
+   equal pixels per tangent unit in X/Y, independent of source texture shape. */
 typedef struct { float eye[2][4], crop[4], options[4], arm[2][4], arm_mode[4]; } DG_OBSERVER_LAYOUT;
 static int observer_bounds(const DG_PROJ_FOV *f, float b[4]) {
     double a[4]={f->left,f->right,f->down,f->up}; int i;

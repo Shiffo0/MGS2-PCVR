@@ -13,8 +13,7 @@ static unsigned long dg_hand_request_step(DG_HAND_REQUEST *s,unsigned long press
     if(!s->initialized) {s->seen=presses;s->initialized=1;}
     if(presses!=s->seen) {
         s->seen=presses;s->request=0;
-        /* Do not turn an old menu/cutscene button into a later calibration.
-           Both sides of the button edge must be live, safe unarmed samples. */
+
         if(eligible && s->eligible && stream==s->stream &&
            (unsigned int)(now-s->last_ms)<=100u) {
             s->request=presses;s->requested_ms=now;

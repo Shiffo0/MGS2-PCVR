@@ -13,6 +13,13 @@
 #endif
 #define DG_M9_GRAB_RADIUS_M 0.15
 
+enum { DG_M9_ROUTE_NONE, DG_M9_ROUTE_GRIP_RELEASE, DG_M9_ROUTE_RAIL, DG_M9_ROUTE_FULL_RELEASE,
+       DG_M9_ROUTE_INVALID, DG_M9_ROUTE_SHOT_SEQ, DG_M9_ROUTE_EPOCH, DG_M9_ROUTE_END,
+       DG_M9_ROUTE_CONTACT_UNREACHABLE, DG_M9_ROUTE_CONTACT_LOST, DG_M9_ROUTE_CONTACT_WRIST,
+       DG_M9_ROUTE_NATIVE_SHOT, DG_M9_ROUTE_CONTEXT_RESET, DG_M9_ROUTE_UNKNOWN, DG_M9_ROUTE_COUNT };
+static int g_m9_step_route;
+#define DG_M9_EXIT(route) ((void)(g_m9_step_route || (g_m9_step_route=(route))))
+
 enum { M9_NEEDS_RACK, M9_GRABBED, M9_FULL_REAR, M9_RETURN_BAD,
        M9_RETURN_GOOD, M9_READY };
 enum { M9_GRAB=1, M9_END=2, M9_CLICK=4, M9_COMPLETE=8, M9_CANCEL=16 };
@@ -61,11 +68,13 @@ static DG_M9_OUTPUT dg_m9_step(DG_M9_STATE *s,const DG_M9_INPUT *in) {
     memset(&o,0,sizeof o);o.block_fire=1;
     if(!s||!in)return o;
     if(!s->initialized || s->epoch!=in->epoch) {
+        DG_M9_EXIT(DG_M9_ROUTE_EPOCH);
         dg_m9_reset(s);s->initialized=1;s->epoch=in->epoch;s->source=in->source;
         s->now_ms=s->fresh_ms=in->now_ms;s->shot_sequence=in->shot_sequence;
         s->grip_prev=1;s->trigger_prev=1; /* first sample must be neutral */
     }
     if(in->shot_sequence!=s->shot_sequence) {
+        DG_M9_EXIT(DG_M9_ROUTE_SHOT_SEQ);
         s->shot_sequence=in->shot_sequence;s->state=M9_NEEDS_RACK;
         s->travel=0;s->neutral=0;s->full_samples=0;s->grip_prev=1;
         s->grab_deadline=0;
@@ -79,6 +88,7 @@ static DG_M9_OUTPUT dg_m9_step(DG_M9_STATE *s,const DG_M9_INPUT *in) {
        !dg_m9_vec_ok(in->left)||!dg_m9_vec_ok(in->anchor)||
        !M9_FINITE(in->stroke)||in->stroke<0.005||in->stroke>0.15||
        !M9_FINITE(in->return_seconds)||in->return_seconds<0.02||in->return_seconds>2) {
+        DG_M9_EXIT(DG_M9_ROUTE_INVALID);
         if(s->state!=M9_READY) {s->state=M9_NEEDS_RACK;s->travel=0;}
         s->neutral=0;s->grip_prev=1;s->trigger_prev=1;s->full_samples=0;
         s->grab_deadline=0;
@@ -116,16 +126,19 @@ static DG_M9_OUTPUT dg_m9_step(DG_M9_STATE *s,const DG_M9_INPUT *in) {
             if(s->state==M9_FULL_REAR && (!in->grip ||
                dx*dx+dz*dz>0.06*0.06 || dy < -0.12 ||
                dy > in->stroke+0.12 || d>0.08*0.08)) {
+                DG_M9_EXIT(DG_M9_ROUTE_FULL_RELEASE);
                 s->state=M9_RETURN_GOOD;
             } else if(dx*dx+dz*dz>0.06*0.06 || dy < -0.12 || dy > in->stroke+0.12 || d>0.08*0.08) {
+                DG_M9_EXIT(DG_M9_ROUTE_RAIL);
                 s->state=M9_RETURN_BAD;s->full_samples=0;o.events|=M9_CANCEL;o.cancel_reason=2;
             } else if(!in->grip) {
+                DG_M9_EXIT(DG_M9_ROUTE_GRIP_RELEASE);
                 s->state=s->state==M9_FULL_REAR?M9_RETURN_GOOD:M9_RETURN_BAD;
             } else {
                 s->travel=dy<0?0:dy>in->stroke?in->stroke:dy;
                 if(s->travel>=in->stroke-0.002) {
                     if(s->full_samples<2)s->full_samples++;
-                    if(s->full_samples==2 && s->state!=M9_FULL_REAR){s->state=M9_FULL_REAR;o.events|=M9_END;}
+                    if(s->full_samples==2 && s->state!=M9_FULL_REAR){DG_M9_EXIT(DG_M9_ROUTE_END);s->state=M9_FULL_REAR;o.events|=M9_END;}
                 } else if(s->state!=M9_FULL_REAR)s->full_samples=0;
                 memcpy(s->previous,in->left,sizeof s->previous);
             }

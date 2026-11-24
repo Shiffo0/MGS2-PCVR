@@ -1,21 +1,5 @@
 #pragma once
-/* Batched second-eye replay (27 Sep 2026).
- * Live and on the desk (rt_switch_bench): switching the DEPTH target around each
- * replayed draw costs ~11.5 us of GPU time per draw at 4K MSAA4 (colour only:
- * 0.5 us); ~1000 world draws a frame made the game a slide show. Replaying the
- * frame's world draws in batches - one target switch per batch - costs ~0.15 us.
- *
- * A record is the pipeline state of one world draw, taken right after the
- * game's own draw, with every constant buffer the CPU can vouch for copied into
- * the ring (cb0 of the vertex shader retargeted to the other eye, exactly as
- * the CPU route binds it). The batch is replayed into B later; until then the
- * game may change the contents of what the records still reference (vertex,
- * index and non-shadowed constant buffers, textures). DgBatch keeps that set,
- * and the caller must flush BEFORE any write to it (Map, UpdateSubresource,
- * copies, clears, compute, a draw into another target). The captured state is
- * bounded (slots below); `unboundedSlots` says whether a draw uses more, and
- * such a draw is not recorded. Hull, domain and geometry shaders must be null.
- * Flush restores every slot it touched to the game's current state. */
+
 #include <d3d11_1.h>
 #include <wrl/client.h>
 #include <vector>
@@ -35,7 +19,7 @@ struct DgDrawState {
     /* raw pointers, each holding one reference (released by clear) */
     ID3D11VertexShader *vs = nullptr; DgCb vcb[vsCb]; ID3D11ShaderResourceView *vsrv[vsSrv]{}; ID3D11SamplerState *vsam[vsSam]{};
     ID3D11PixelShader *ps = nullptr; DgCb pcb[psCb]; ID3D11ShaderResourceView *psrv[psSrv]{}; ID3D11SamplerState *psam[psSam]{};
-    /* geometry stage (29 Sep: part of the game's particles expand in a geometry shader) */
+
     ID3D11GeometryShader *gs = nullptr; DgCb gcb[gsCb]; ID3D11ShaderResourceView *gsrv[gsSrv]{}; ID3D11SamplerState *gsam[gsSam]{};
     ID3D11InputLayout *layout = nullptr; ID3D11Buffer *vb[vbs]{}; UINT stride[vbs]{}, offset[vbs]{};
     ID3D11Buffer *ib = nullptr; DXGI_FORMAT ibf = DXGI_FORMAT_UNKNOWN; UINT ibo = 0; D3D11_PRIMITIVE_TOPOLOGY topo = D3D11_PRIMITIVE_TOPOLOGY_UNDEFINED;
@@ -121,7 +105,6 @@ struct DgDrawRec {
     bool ownTarget = false; ID3D11RenderTargetView *rt = nullptr; ID3D11DepthStencilView *ds = nullptr;
 };
 
-
 struct DgRecordArgs {
     int pers = -1; DgIndexedFn indexed = nullptr; DgDrawFn plain = nullptr; UINT n = 0, first = 0; INT base = 0;
     bool ownTarget = false; ID3D11RenderTargetView *rt = nullptr; ID3D11DepthStencilView *ds = nullptr;
@@ -136,7 +119,7 @@ struct DgBatch {
     static constexpr UINT setSize = 4096;
     std::vector<void *> set = std::vector<void *>(setSize);
     std::vector<UINT> setUsed;
-    /* SRV -> resource, cached (views live long) */
+
     struct ViewRes { void *view, *res; }; ViewRes views[256]{}; UINT viewNext = 0;
 
     bool pending() const { return used > 0; }

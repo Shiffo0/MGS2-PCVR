@@ -1,6 +1,3 @@
-
-
-
 #include "dg_stinger_aim.h"
 static DG_DETOUR g_stinger_detour[4];
 static SRWLOCK g_stinger_mode_lock=SRWLOCK_INIT;
@@ -16,9 +13,6 @@ static int stinger_claim(void) {return g_stinger_claim;}
 
 static struct { uint64_t base; int resolved; volatile LONG live,fault; } g_stinger;
 int dg_bridge_stinger_enabled(void) {return g_stinger.live && !g_stinger.fault;}
-
-
-
 static const unsigned stinger_sites[4]={0x715394,0x715569,0x4a0979,0x4a0bb1};
 static const unsigned char stinger_bytes[4][12]={
     {0x4d,0x8b,0x86,0xa0,0,0,0,0x85,0xca},
@@ -43,9 +37,7 @@ static void stinger_resolve(const LiveImage *im) {
 /* Caller holds the controls lease. Pointer access is inside an SEH boundary.
    No dependence on draw-time matrices here: Act is still preparing them. */
 static int stinger_context(uint64_t expected_actor,uint64_t *object_out) {
-
-
-
+    int dgw_w=dgw_weapon_now();
     ULONGLONG arm=0,player=0;int weapon=0;uint64_t object,actor,now=GetTickCount64();
     LONG age=(LONG)((DWORD)g_b.c_ticks-(DWORD)g_b.hand_command_tick);
     if((!dg_bridge_stinger_enabled()) || (!g_b.armed) || (g_b.s_late_unsafe) ||
@@ -63,9 +55,6 @@ static int stinger_context(uint64_t expected_actor,uint64_t *object_out) {
        (*(int *)(uintptr_t)(player+0xbb0)!=6))return 0;
     object=*(uint64_t *)(uintptr_t)object;
     if((object<0x10000) || (*(uint64_t *)(uintptr_t)(object+0x40)!=0))return 0;
-
-
-
     *object_out=object;return 1;
 }
 /* Game-tick producer and actor consumers share the controls lease. A second
@@ -117,8 +106,6 @@ static void stinger_score_impl(void *original_rsp,float *saved67,int existing) {
         if(stinger_context(0,&object)) {
             memcpy(root,(void *)(uintptr_t)object,sizeof root);
             actor=*(uint64_t *)(uintptr_t)(g_stinger.base+0x17df688)-0xa0;
-
-
 
             if(*(unsigned char *)(uintptr_t)(actor+0x140)==0)
                 for(axis=0;axis<3;axis++)root[3][axis]-=1000.f*root[1][axis];

@@ -3,10 +3,25 @@
 static DG_ZOOM_ANCHORS g_zoom_a;
 static DG_DETOUR g_zoom_detour;
 static DG_CAMERA_ZOOM g_zoom_owner,g_psg_zoom_owner;
+static DG_CAMERA_ZOOM g_optics_zoom_owner;
 static volatile LONG g_zoom_direction,g_zoom_applied;
 int dg_bridge_camera_stick_owned(void) {
     dg_radial_inventory_snapshot inv;
     return camera_inventory(&inv) && (dg_camera_item(inv.actor_item)||dg_camera_item(inv.desired_item));
+}
+static int zoom_masks(uint64_t pad,unsigned *om,unsigned *imask)
+{
+    unsigned flags,pm,sm;
+    int oi,ii;
+    return interact_read(NULL,g_zoom_a.out_mask,om,4) && *om && !(*om&(*om-1)) &&
+       interact_read(NULL,g_zoom_a.in_mask,imask,4) && *imask && !(*imask&(*imask-1)) && *om!=*imask &&
+       interact_read(NULL,g_zoom_a.out_index,&oi,4) && oi>=0 && oi<12 &&
+       interact_read(NULL,g_zoom_a.in_index,&ii,4) && ii>=0 && ii<12 && oi!=ii &&
+       interact_read(NULL,pad+36,&flags,4) && !(flags&(0x103|0x1000|0x4000|0x30)) &&
+       interact_read(NULL,g_action_a.mask_prg,&pm,4) &&
+       interact_read(NULL,g_action_a.mask_scn,&sm,4) &&
+       (!(flags&4)||((pm&(*om|*imask))==(*om|*imask))) &&
+       (!(flags&8)||((sm&(*om|*imask))==(*om|*imask)));
 }
 /* Called under action lock. Revalidate the actual manager->zoom instance,
  * the observer lease, actor, parent, native state and all pad restrictions. */
@@ -56,41 +71,52 @@ static int zoom_observe(uint64_t expected,uint64_t now,uint64_t *manager_out,
 static void zoom_consumer(void *original_rsp) {
     unsigned char *sp=original_rsp;uint64_t work,manager=0,cam=0,actor=0;unsigned om=0,imask=0,shutter=0,status=0;
     DG_ACTION_SAMPLE p={0};int allowed=0,hatch=0,direction,psg=0;uint64_t now=GetTickCount64();
+    int optics=0,optics_grip=0;
+    uint64_t pad=0;
+    dg_radial_inventory_snapshot optic_inventory;
     if(!TryAcquireSRWLockExclusive(&g_action_lock)){InterlockedExchange(&g_action_lost,1);return;}
     if(g_action_provider)g_action_provider(&p);
-
-
-
     if(interact_read(NULL,(uint64_t)(ULONG_PTR)sp-56,&work,8) &&
        psg_zoom_observe(work,&manager,&cam,&om,&imask)) {
-        psg=1;allowed=p.valid&&!p.denied&&!p.shutter_denied;
+        /* vr_psg_rifle HIP: no zoom outside the scope (always 0 with the key off). */
+        psg=1;allowed=p.valid&&!p.denied&&!p.shutter_denied&&!dg_bridge_psg_hip_now();
+        { int w=dgw_weapon_now();
 
-
-
-
-
-
-
-
+ }
     }
     if(!psg && interact_read(NULL,(uint64_t)(ULONG_PTR)sp-56,&work,8) &&
        zoom_observe(work,now,&manager,&cam,&om,&imask) && action_observe(&actor,&hatch) && !hatch &&
        interact_read(NULL,g_camera_a.mask,&shutter,4) &&
-       interact_read(NULL,g_camera_a.pad+4,&status,4))
+       interact_read(NULL,g_camera_a.pad+4,&status,4)){
         allowed=p.valid&&p.zoom_active&&!p.denied&&!p.shutter_denied&&!p.shutter_down&&!(status&shutter);
+        if(optics_configured()){
+            optics=1;
+            allowed=p.valid&&!p.denied&&!p.shutter_denied&&!p.shutter_down&&!(status&shutter) &&
+                camera_inventory(&optic_inventory) &&
+                optics_input_now(optic_inventory.actor_item,manager,work,&optics_grip);
+        }
+    }
+    if(!psg && !optics && optics_configured() &&
+       interact_read(NULL,(uint64_t)(ULONG_PTR)sp-56,&work,8) &&
+       optics_scope_zoom_now(work,&manager,&cam) &&
+       interact_read(NULL,work+0x68,&pad,8) && pad==g_camera_a.pad &&
+       zoom_masks(pad,&om,&imask) && action_observe(&actor,&hatch) && !hatch){
+        optics=1;
+        allowed=p.valid&&!p.denied&&!p.shutter_denied &&
+            optics_input_now(14,manager,work,&optics_grip);
+    }
     if(InterlockedExchange(&g_action_lost,0))allowed=0;
     direction=psg ? dg_psg_zoom_step(&g_psg_zoom_owner,p.sample,p.source,manager,now,p.age_ms,
                         allowed,(float)p.psg_grip_zoom)
                   : dg_camera_zoom_step(&g_zoom_owner,p.sample,p.source,manager,now,p.age_ms,
                         allowed,p.zoom_y);
     if(!psg)memset(&g_psg_zoom_owner,0,sizeof g_psg_zoom_owner);
+    if(optics)direction=-dg_psg_zoom_step(&g_optics_zoom_owner,p.sample,p.source,manager,now,p.age_ms,
+                              allowed,(float)optics_grip);
+    else memset(&g_optics_zoom_owner,0,sizeof g_optics_zoom_owner);
     /* Retail out_mask branch ADDS focal length; in_mask SUBTRACTS it.
        Grip-in means greater magnification, regardless of those legacy names. */
     if(psg)direction=-direction;
-
-
-
-
 
     if(direction){
         dg_camera_zoom_merge(direction,om,imask,(uint64_t*)(sp-48),(uint64_t*)(sp-112),(uint64_t*)(sp-104));
@@ -105,6 +131,16 @@ int dg_bridge_zoom_now(uint64_t *identity,float *angle) {
     if(!TryAcquireSRWLockShared(&g_action_lock))return 0;
     if(zoom_observe(0,GetTickCount64(),&manager,&cam,&om,&imask) &&
        interact_read(NULL,cam+0x20,angle,4)&&*angle>=2 && *angle<=24){*identity=manager;ok=1;}
+    if(optics_configured()){
+        int direction;
+        dg_radial_inventory_snapshot inv;
+        if(ok && (!camera_inventory(&inv) ||
+                  !optics_input_now(inv.actor_item,manager,0,&direction)))ok=0;
+        if(!ok && optics_scope_zoom_now(0,&manager,&cam) &&
+           interact_read(NULL,cam+0x20,angle,4) && *angle>=2 && *angle<=24){
+            *identity=manager;ok=1;
+        }
+    }
     ReleaseSRWLockShared(&g_action_lock);return ok;
 }
 static void zoom_install(void) {

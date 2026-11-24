@@ -1,5 +1,3 @@
-
-
 static ULONGLONG region_end(ULONGLONG address);
 static DG_DETOUR g_hud_life_detour,g_hud_frame_detour;
 static ULONGLONG g_native_hud_base;

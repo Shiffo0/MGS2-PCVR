@@ -1,4 +1,3 @@
-/* Caller serializes access. Payload is the complete camera handoff, not only eye. */
 #ifndef DG_RENDER_LINK_H
 #define DG_RENDER_LINK_H
 #include <stdint.h>

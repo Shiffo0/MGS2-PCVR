@@ -7,7 +7,10 @@ extern "C" {
 #endif
 void dg_draw_trial_attach(ID3D11Device *device,void (*log)(const char*,...));
 void dg_draw_trial_poll(const char *session_marker);
+/* DLL_PROCESS_DETACH: put the real MGSHDFix trampolines back into slots that are still ours; no locks, no logging. */
+void dg_draw_trial_detach(void);
 void dg_draw_trial_present(void);
+void dg_draw_trial_after_present(void);
 void dg_draw_trial_xr_ready(ID3D11Device*,ID3D11DeviceContext*);
 void dg_draw_trial_stop(void);
 /* Exact consumed-list camera pair. False on missing/ambiguous ownership. */
@@ -15,15 +18,12 @@ int dg_render_second_camera(float source[16],float target[16],int *sequence);
 int dg_render_second_camera_reason(void); /* why the last call failed, 0 = ok */
 int dg_render_magwell(DG_MAGWELL *out,int sequence);
 int dg_bridge_magwell_allowed(void);
-int dg_render_second_camera_eye(void);
+int dg_render_second_camera_eye(void);    /* source eye of the last pair */
 int dg_second_eye_enabled(void);          /* vr_second_eye */
-/* Present: hand the replayed other eye of this frame to the headset store.
-   raw/fov: DG_XR_RAW_POSE / DG_PROJ_FOV of the other eye, same head sample. */
+
 int dg_second_eye_publish(int slot,const void *raw,const void *fov); /* 1 = B stored in slot */
 void dg_blit_boundary_control(const char *dir,int active,unsigned mark,unsigned present,int eye);
-/* Constant-buffer capture (dg_cb_probe.inl): the camera seam publishes the
-   matrices it just wrote so the desk analysis can look for them in the
-   vertex-shader constant buffers. VEH-safe: interlocked + memcpy only. */
+
 void dg_cb_probe_camera(int eye,const float *eye_pers,const float *pers,
                         const float *eye_inv,const float *eye_world);
 /* 2D sprite placement per eye (dg_ui2d.inl). scale in thousandths, conv in
@@ -45,7 +45,7 @@ long dg_ui2d_last_frame_bb(long*indexed,void**srv);
 long dg_ui2d_last_frame_draws(void);
 /* Present thread only: +1/-1 = frustum the frame's object shaders (c20) were drawn with, 2 mixed, 0 none. */
 int dg_ui2d_last_frame_obj(long*pos,long*neg);
-/* Camera seam (VEH-safe): DG_EYE_LEFT/RIGHT of the valid handoff just written. */
+
 void dg_ui2d_eye(int eye);
 /* Present thread only: what the frame that just ended uploaded (draws, votes, refusal reasons). */
 long dg_ui2d_last_frame_detail(char*out,size_t n);

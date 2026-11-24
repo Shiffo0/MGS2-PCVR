@@ -28,8 +28,7 @@ static int dg_model_radar_pose(const DG_MODEL_ARM *arm,double width,double heigh
     else {int a=m[1][1]>m[0][0]?1:0,b,c;if(m[2][2]>m[a][a])a=2;b=(a+1)%3;c=(b+1)%3;
         s=sqrt(1+m[a][a]-m[b][b]-m[c][c])*2;q[a]=s*.25;q[b]=(m[b][a]+m[a][b])/s;q[c]=(m[c][a]+m[a][c])/s;q[3]=(m[c][b]-m[b][c])/s;}
     out->qx=q[0];out->qy=q[1];out->qz=q[2];out->qw=q[3];
-    /* Lower-right corner terminates at the wrist; 30 mm estimated forearm radius sets
-       the panel above the bone axis (skin radius needs headset acceptance). The panel extends towards the elbow, never the hand. */
+
     out->px=arm->wrist[0]-x[0]*width*.5+y[0]*height*.5+z[0]*.030;
     out->py=arm->wrist[1]-x[1]*width*.5+y[1]*height*.5+z[1]*.030;
     out->pz=arm->wrist[2]-x[2]*width*.5+y[2]*height*.5+z[2]*.030;

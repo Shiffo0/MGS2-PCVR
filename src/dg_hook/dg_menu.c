@@ -28,15 +28,6 @@ static int due(unsigned long now, unsigned long deadline)
     return (long)(now - deadline) >= 0;
 }
 
-
-
-
-
-
-
-
-
-
 static int config_ok(const DG_MENU_IN *in)
 {
     unsigned int both = in->confirm_bit | in->cancel_bit;

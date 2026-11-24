@@ -4,13 +4,15 @@
 #define DG_RELOAD_HIGHLIGHT_H
 #include <math.h>
 #include <string.h>
-static int dg_reload_highlight_colour(float colour[16]) {
+enum { DG_HIGHLIGHT_GREEN=1, DG_HIGHLIGHT_BLUE=2 };
+static int dg_reload_highlight_colour(float colour[16],int tint) {
     float out[16]; int row,k;
     static const float green[3]={32.0f,160.0f,104.0f};
+    static const float blue[3]={32.0f,104.0f,224.0f};
     for(k=0;k<16;k++)if(!isfinite(colour[k]) || fabs(colour[k])>4096.0f)return 0;
     memcpy(out,colour,sizeof out);
     for(row=0;row<4;row++)for(k=0;k<3;k++)out[row*4+k]*=0.35f;
-    for(k=0;k<3;k++)out[12+k]+=green[k];
+    for(k=0;k<3;k++)out[12+k]+=tint==DG_HIGHLIGHT_BLUE ? blue[k] : green[k];
     memcpy(colour,out,sizeof out);return 1;
 }
 #endif

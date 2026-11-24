@@ -1,5 +1,3 @@
-
-
 #ifndef DG_MOVE_H
 #define DG_MOVE_H
 

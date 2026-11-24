@@ -28,6 +28,7 @@ static void mod_features_tick(int safe,int neutral) {
         g_reload.enabled=(want&2)!=0;
         g_reload.active=g_reload.waiting=g_reload.neutral=g_reload.driving=0;
         g_reload.cancel_ticks=g_reload.safe=g_reload.body_seek=g_reload.arm_seek=0;
+        g_reload.ejected=g_reload.grip_armed=g_reload.trigger_was=0;
         dg_reload_gesture_reset(&g_reload.gesture);
         if(g_b.log)g_b.log("  mod menu: VR pistol reload %s\r\n",g_reload.enabled?"on":"off");
     }
@@ -60,8 +61,6 @@ static void mod_menu_pad(int safe) {
     *(volatile unsigned char *)(ULONG_PTR)(p+DG_PAD_RIGHT_DX_OFFSET+1)=128;
     if(!reload_native_animation())m9_block_pad(mask,index);
 }
-
-
 
 static void mod_menu_start_pad(void) {
     uint64_t records[2]={g_b.a.gv_pad_data_direct,g_b.a.gv_pad_data};int i;

@@ -1,11 +1,6 @@
 #ifndef DG_WEAPON_AIM_H
 #define DG_WEAPON_AIM_H
 
-
-
-
-
-
 static int dg_weapon_hand_aim(int weapon)
 {
     return weapon == 1 || weapon == 2 || weapon == 3 || weapon == 5 ||
@@ -17,5 +12,12 @@ static int dg_weapon_hand_aim(int weapon)
 static int dg_weapon_pistol_support(int weapon)
 {
     return weapon == 1 || weapon == 2 || weapon == 3;
+}
+
+/* Long weapons whose support hand may steer the barrel (vr_twohand_rifles):
+   RGB6 5, AKS-74u 15, M4 18. Not the PSG-1/PSG-1T (own scope route). */
+static int dg_weapon_rifle_support(int weapon)
+{
+    return weapon == 5 || weapon == 15 || weapon == 18;
 }
 #endif

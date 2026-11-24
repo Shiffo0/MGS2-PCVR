@@ -17,11 +17,9 @@ static void mod_menu_input(int allowed,const DG_XR_FRAME *f,uint64_t generation,
     actual|=InterlockedCompareExchange(&g_stereo,0,0)?1u:0u;
     actual|=observer_on()?8u:0u;
     available|=1|8;
-#if 1
     /* Second eye (replayed other eye): only in stereo with verified link anchors. */
     actual|=second_eye_wanted()?16u:0u;
     if(InterlockedCompareExchange(&g_stereo,0,0)&&g_phase_stage_addr&&g_phase_consume_addr)available|=16;
-#endif
     if(f) {
         const DG_XR_HAND *l=&f->left_hand,*r=&f->right_hand;
         neutral=l->grip.active && r->grip.active && l->grip.tracked && r->grip.tracked &&
@@ -58,14 +56,12 @@ static void mod_menu_input(int allowed,const DG_XR_FRAME *f,uint64_t generation,
         strcpy_s(view->labels[i+DG_MM_ITEMS],17,!(available&bit)?"UNAVAILABLE":
             ((actual^g_mod_menu.requested)&bit)?"PENDING":
             i==0?((actual&bit)?"STEREO":"MONO"):
-#if 1
             /* Second eye asked for but no replay stored in the last 30 Presents
                (route not attached yet, link idle): say so instead of ON. */
             (i==4&&(actual&bit)&&(LONG)(InterlockedCompareExchange(&g_present_frame,0,0)-
                 InterlockedCompareExchange(&g_second_eye_frame,0,0))>30)?"WAITING":
-#endif
             (i==3&&(actual&bit))?(observer_mode()==2?"BOTH EYES (EXP)":observer_mode()==1?"RIGHT EYE":"LEFT EYE"):
-            i==4?((actual&bit)?"BOTH EYES (EXP)":"AER"):
+            i==4?((actual&bit)?"TWO EYE":"AER"):
             ((actual&bit)?"ON":"OFF"));
     }
 }

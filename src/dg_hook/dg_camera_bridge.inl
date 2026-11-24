@@ -11,6 +11,10 @@ static int camera_inventory(dg_radial_inventory_snapshot *s) {
     return (dg_radial_inventory_sample(&g_radial_game.image,&g_radial_game.inventory,s)&
         (DG_RINV_ACTOR|DG_RINV_DESIRED))==(DG_RINV_ACTOR|DG_RINV_DESIRED);
 }
+#include "dg_optics_native_probe.inl"
+static int optics_configured(void);
+static int optics_input_now(int item,uint64_t work,uint64_t zoom,int *direction);
+static int optics_scope_zoom_now(uint64_t expected,uint64_t *work,uint64_t *view);
 /* Observes the manager already dispatched by the game. The saved RCX is
  * at original RSP-24 (flags,RAX,RCX). No callback/state writes. */
 static void camera_observe_callback(void *sp) {
@@ -30,6 +34,7 @@ static void camera_observe_callback(void *sp) {
     g_camera_state=state;
     g_camera_manager=manager;g_camera_actor=inv.player_identity;g_camera_seen=now;
     ReleaseSRWLockExclusive(&g_camera_lock);
+    optics_native_witness(manager,&inv);
 }
 /* Called only under ACTION's pre-mask lock: one owner of stack status. */
 static unsigned camera_pre_mask(const DG_ACTION_SAMPLE *p,unsigned raw,unsigned flags,
@@ -64,7 +69,10 @@ static unsigned camera_pre_mask(const DG_ACTION_SAMPLE *p,unsigned raw,unsigned 
        !camera_inventory(&again)||again.player_identity!=in.actor ||
        again.actor_item!=in.item || again.desired_item!=in.desired_item ||
        !interact_read(NULL,manager+0xd0,&pad2,8)||pad2!=pad)goto step;
-
+    if(optics_configured()){
+        int direction;
+        if(!optics_input_now(in.item,manager,0,&direction))in.denied=1;
+    }
 
     in.ready=state==0 && time>=30 && child!=0x80 && frames<=0;
     in.mask=mask;in.native_down=(raw&mask)!=0;

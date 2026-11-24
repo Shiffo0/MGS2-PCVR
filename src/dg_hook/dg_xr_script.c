@@ -333,7 +333,6 @@ int dg_xr_script_program_sample(const DG_XR_SCRIPT_PROGRAM *program,
     return 0;
 }
 
-/* ----------------------------------------------------------- live player */
 static DG_XR_SCRIPT_PROGRAM g_program;
 static DG_XR_CONFIG g_cfg;
 static void (*g_log)(const char *fmt, ...);
@@ -638,65 +637,6 @@ static void player_neutral(DG_XR_SCRIPT_PLAYER *player,
     player->previous = *frame;
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 static DWORD WINAPI script_thread(LPVOID unused)
 {
     HANDLE waits[2] = { g_stop_event, g_go_event };
@@ -709,11 +649,6 @@ static DWORD WINAPI script_thread(LPVOID unused)
     wait = WaitForMultipleObjects(2, waits, FALSE, INFINITE);
     if (wait != WAIT_OBJECT_0 + 1) goto release;
 
-    /* Marker activation commonly happens from Codex or an editor. Give the
-       user a bounded window to put the game in front without consuming tick
-       zero. Keep republishing a neutral identity frame so the camera/provider
-       does not age stale while waiting. Once playback starts, the stricter
-       focus-loss rule in the main loop aborts permanently. */
     if (!foreground_is_ours()) {
         ULONGLONG deadline = GetTickCount64() + SCRIPT_FOCUS_WAIT_MS;
         if (g_log) g_log("  xr-script: waiting up to 30 s for game focus\r\n");

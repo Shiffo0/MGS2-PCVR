@@ -1,5 +1,3 @@
-
-
 #ifndef DG_XR_H
 #define DG_XR_H
 void dg_xr_zoom_changed(void);
@@ -39,15 +37,6 @@ int dg_xr_controller_toggle_take(void);
 typedef void (*DG_XR_CAPTURE_OBSERVER)(int eye, uint64_t capture_id);
 void dg_xr_set_capture_observer(DG_XR_CAPTURE_OBSERVER observer);
 
-
-
-
-
-
-
-
-
-
 /* Shared with dg_hook.c so there is exactly one definition of a matrix. */
 typedef struct { float m[4][4]; } MAT;
 
@@ -85,20 +74,17 @@ typedef struct {
     int    stereo_proj_x_sign;  /* retail default -1; +1 restores unmirrored probe */
     double trigger_deadzone;    /* release threshold; default 0.10 */
     double trigger_fire;        /* press threshold; default 0.55 */
-    /* The theater screen (vr_theater_dist / vr_theater_width, metres). The
-       distance is baked into the anchor pose at capture; the width is read
-       per frame, so it tunes live. Both clamped to 0.5..10 by the reader. */
+
     double theater_dist;        /* eye to screen centre; default 2.0 */
     double theater_width;       /* physical quad width; default 2.0 */
     int life_disabled;
     int grip_debug; /* read-only M9 hit-test visualization */       /* vr_life=off; default wrist + event LIFE */
     int    scene_blur_fix;      /* hook-only: suppress scene-history alpha in VR */
     int    second_camera_probe; /* hook-only observer; never changes Present selection */
-    int    second_eye;          /* vr_second_eye: the replayed other eye goes to the headset (diagnostic) */
+    int    second_eye;
     int    stereo_phase_fix;   /* hook-only: bind capture to consumed render buffer */
-    int    stereo_eye_x_sign;  /* hook-only: -1 = right eye at camera -x (default, headset-proven 2026-09-09); +1 swaps */
-    /* hook-only, 2026-09-18: per-eye placement of the flat 2D sprites
-       (camera overlay, HUD). See dg_ui2d.inl. */
+    int    stereo_eye_x_sign;
+
     int    ui2d;               /* 0 = off (default), 1 = on */
     int    ui2d_scale_mils;    /* 300..1000, default 750 */
     int    ui2d_conv_e5;       /* convergence, 1e-5 NDC per eye, default 1200 */
@@ -110,7 +96,7 @@ typedef struct {
     int    observer;           /* hook-only: enable aspect-correct desktop observer in stereo gameplay */
     int    draw_skip;          /* hook-only: 0 observe, 1 hold skipped Presents, 2 also label drawn frames by their rendered eye */
     int    eye_truth;          /* hook-only: 0 observe, 1 drop mislabelled frames, 2 relabel them */
-    /* 2026-09-18: the Soliton radar on the inside of the left wrist (dg_radar.inl, dg_xr_radar.inl). */
+
     int    radar_mode;         /* vr_radar_wrist: 0 off (default), 1 fixed (head-locked test quad), 2 wrist */
     int    radar_hud;          /* hook-only, vr_radar_hud: 1 (default) = leave the HUD radar, 0 = withhold its composite draw while the wrist radar is up */
     int    radar_space_local;  /* vr_radar_wrist_space: 0 (default) = the grip action space is the layer's space, 1 = pose composed in LOCAL */
@@ -234,22 +220,6 @@ int  dg_xr_adopt_device(void *d3d11_device);
 int  dg_xr_radar_capture(void *d3d11_texture2d);
 void dg_xr_radar_stats(char *out, size_t n);
 
-/* Called from the game's Present. Copies the back buffer into that eye's store
-   together with the pose and FOV the frame was ACTUALLY drawn with, so the
-   image can still be submitted honestly once it is a frame old.
- *
- * eye   DG_EYE_LEFT / DG_EYE_RIGHT, or DG_EYE_MONO for the stereo=0 path.
- * raw   the layer pose to submit this image with. NULL means "use the live
- *       pose", which is correct only for MONO, where the image is current.
- * fov   the frustum the frame was rendered with. NULL means unknown, and the
- *       image must then not be submitted at all rather than guessed at.
- *
- * Passing fov explicitly replaces S4b's habit of recovering it from m00/m11:
- * the camera hook knows exactly what it retargeted to, so asking the pixels
- * afterwards was always the long way round. A frame the camera hook rejected
- * has no eye and no honest pose - pass fov = NULL for it and the store keeps
- * whatever it held, rather than taking a frame drawn from the game's own
- * camera and labelling it as an eye. */
 void dg_xr_capture(void *swapchain, int eye,
                    const DG_XR_RAW_POSE *raw, const DG_PROJ_FOV *fov);
 /* Desktop observer: aspect-correct 16:9 crop. mode 0 left, 1 right, 2 both
@@ -257,9 +227,7 @@ void dg_xr_capture(void *swapchain, int eye,
    ALL captures. Maximum store age below; returns 1 when rendered. */
 #define DG_OBSERVER_MAX_AGE_MS 250
 int dg_xr_observer_fill(void *swapchain, int mode);
-
-
-
+void dg_xr_observer_present(unsigned present);
 
 typedef struct {
     MAT camera_world, projection;
@@ -277,6 +245,8 @@ void dg_xr_capture_measured(void *sc, int eye, const DG_XR_RAW_POSE *raw,
 int dg_xr_capture_texture(void *texture, int eye, const DG_XR_RAW_POSE *raw, const DG_PROJ_FOV *fov);
 /* Diagnostics: private copies of both eye stores (index = DG_EYE_LEFT/RIGHT); returns the count. */
 int dg_xr_snapshot_stores(void *out[2]);
+void dg_xr_set_sim_mode(int on);
+long dg_xr_ctx_work_seq(void);
 int  dg_xr_submitting(void);        /* 1 once real layers are going out */
 
 /* The theater/panel screen switch, called from Present with the bridge's
@@ -290,17 +260,15 @@ int  dg_xr_submitting(void);        /* 1 once real layers are going out */
    plain mono PROJECTION goes out instead (head-coupled, today's fallback),
    and with nothing captured, zero layers - exactly as today. */
 void dg_xr_screen(int active);
+void dg_xr_laser_panel(int options,int page,unsigned values);
+int dg_xr_laser_target(int options,int page,int hand);
+/* diag: the last laser hit on the theater quad as texture (u,v), 0 = none */
+int dg_xr_laser_uv(double *u,double *v);
+void dg_xr_menu_pointer_hand(int hand); /* 0 hidden, 1 left, 2 right */
 
 /* How many runtime frames have gone out as the theater quad. For the log. */
 long dg_xr_screen_frames(void);
 
-/* The quad's pose: yaw-only head orientation (pitch and roll stripped - the
-   screen must be world-upright however the head was tilted at entry), centre
-   placed dist metres straight ahead of the head ALONG THAT YAW, at eye
-   height. LOCAL-space in, LOCAL-space out; after this the pose never moves
-   with the head again - free look is the compositor's job. Pure, shared with
-   the desk build, and the desk test pins the yaw-stripping so a head-coupled
-   mutant cannot pass. */
 void dg_xr_screen_pose(const DG_XR_RAW_POSE *head, double dist_m,
                        DG_XR_RAW_POSE *out);
 
@@ -308,28 +276,17 @@ int  dg_xr_start(void (*log)(const char *fmt, ...));
 void dg_xr_stop(void);
 /* Optional manual M9 interaction feedback. */
 void dg_xr_m9_feedback(unsigned events);
+/* HF-blade haptics (dg_blade_haptic.h bits): queue only; the XR input thread applies it. */
+void dg_xr_blade_feedback(unsigned events);
 
-/* Live config update, called from the worker as the marker file is re-read. */
 void dg_xr_configure(const DG_XR_CONFIG *cfg);
 
 /* Safe from any thread; the request stays pending until a valid pose arrives. */
 void dg_xr_recenter(void);
 
-/* -------- software turn: the stick rotates the tracking space ------------
-   The recentre reference is rotated in place, pivoting about the LIVE head,
-   so the view, the walk frame and the controllers all turn together - a
-   stick turn becomes indistinguishable from the player turning on their
-   feet, which is exactly the property the arm needs (measured 2026-08-23:
-   with the body turned by pad bytes instead, the arm stayed pinned to the
-   old facing and the player recalibrated eleven times in one session).
-   Positive rate = turn right. The offset since the last reference capture
-   is exposed so the arm's frozen frame can ride along; a recentre absorbs
-   the offset back to zero by construction. */
 void   dg_xr_turn_rate(double deg_per_s);   /* refresh <=100ms; 0 stops; focused XR only */
 double dg_xr_turn_offset_rad(void);         /* accumulated since last capture */
-/* The pure step, exposed for the desk suite: advances a yaw-only reference
-   quaternion {qy,qw} by delta and re-pivots its position {px,pz} about the
-   head so the mapped head pose is invariant. */
+
 void   dg_xr_turn_step(double ref_q[2], double ref_p[2],
                        double head_px, double head_pz, double delta_rad);
 void   dg_xr_test_set_turn_offset(double rad);
@@ -361,10 +318,6 @@ void dg_xr_quat_to_mat(double x, double y, double z, double w, MAT *out);
    silently disagree with the transform dg_hook actually applies. */
 void dg_xr_mat_to_ypr(const MAT *r, double *yaw, double *pitch, double *roll);
 
-/* The whole conversion, factored out so it can be tested without a headset:
-   an OpenXR head pose relative to the recentre reference (quaternion xyzw and
-   position in metres, both already expressed in the reference frame) becomes
-   a POSE for build_delta(). */
 void dg_xr_head_to_pose(double qx, double qy, double qz, double qw,
                         double px, double py, double pz,
                         const DG_XR_CONFIG *cfg, DG_XR_POSE *out);
@@ -390,42 +343,14 @@ unsigned long dg_xr_secondary_presses(unsigned int hand);
    as the arm tumbling; the trigger gate is what ended it. */
 unsigned long dg_xr_secondary_ignored(unsigned int hand);
 
-/* Rising-edge sequence for the LEFT Quest menu/hamburger button.  A sequence
-   rather than a level is required because the game-side consumer runs on a
-   different thread and the button may be tapped between two camera seams. */
 uint64_t dg_xr_menu_press_seq(void);
 
-/* The gate itself, pure so the desk build can pin its truth table: a press
-   counts only on a rising edge with the same hand's trigger held. */
 /* Menu edge ownership: 0 none, 1 native START, 2 theater recenter. */
 unsigned int dg_xr_menu_route(unsigned int was_down, unsigned int is_down,
                               int theater);
 unsigned int dg_xr_secondary_counts(unsigned int was_down, unsigned int is_down,
                                     unsigned int trigger_click);
 
-/* Which part of the reference pose's ROTATION dg_xr_pose_relative_frame
-   removes. The translation is always removed, in every mode: subtracting the
-   head's position is what stops a lean reading as a hand movement, and that
-   was never the part in question.
-
-   HEAD removes all of it, so the result is what the hand is doing relative to
-   where you are LOOKING. That is wrong for an arm: your arm hangs off your
-   torso, and turning your head does not carry it with you. Kept because it is
-   what every build up to 2026-08-19 used.
-
-   YAW removes only the rotation about the up axis. Looking up, down or tilting
-   your head no longer moves the arm at all; turning left and right still
-   carries it, which is not anatomy but is self-correcting - the arm can never
-   end up somewhere you cannot turn to find.
-
-   ROOM removes the RECENTRE heading instead of anything the head is doing
-   now, so no part of the live head reaches the arm at all. That is the honest
-   model: the character's arm root turns with the character's body and not with
-   our head, so body-frame in maps to body-frame out. It is the seated origin
-   and not the runtime's raw LOCAL yaw for one reason - a player who turns
-   their chair can put it right with the recentre they already have, where a
-   raw tracking-space frame would have no correction at all. Before a seated
-   origin exists it behaves as YAW rather than as an unreferenced frame. */
 enum {
     DG_XR_REL_FRAME_HEAD = 0,
     DG_XR_REL_FRAME_YAW  = 1,
@@ -455,11 +380,5 @@ void dg_xr_hand_pose_sample(DG_XR_HAND_POSE *out, unsigned int hand,
                             unsigned int orientation_tracked,
                             unsigned int active, uint64_t sample_seq,
                             int64_t xr_time);
-
-
-
-
-
-
 
 #endif

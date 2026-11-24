@@ -45,7 +45,6 @@ static void controls_interact_from_frame(const DG_XR_FRAME *frame,
         ((weapon_hand==0 ? left : right)->squeeze_click?DG_IA_CODEC:0);
     out->choke_seq=off->trigger_press_seq;
 
-
     if (allowed==DG_IA_DOWNED_CONTEXT && right->primary_button)
         out->levels|=DG_IA_ACTION;
     out->ladder=allowed==DG_IA_LADDER_CONTEXT;
@@ -54,9 +53,6 @@ static void controls_interact_from_frame(const DG_XR_FRAME *frame,
     if (out->special==DG_IA_BEYOND_CONTEXT || out->special==DG_IA_LOCKER_CONTEXT)
         out->levels|=(left->squeeze_click?DG_IA_PEEP_LEFT:0) |
                      (right->squeeze_click?DG_IA_PEEP_RIGHT:0);
-
-
-
 
     if (out->special==DG_IA_BEYOND_CONTEXT) {
         if (!(left->thumbstick_x>=-1.0f && left->thumbstick_x<=1.0f))

@@ -1,6 +1,3 @@
-
-
-
 static struct {
     uint64_t base;
     int resolved, live;
@@ -15,7 +12,6 @@ static struct {
 static const unsigned mobile_sites[3]={0x51fc49,0x51fc50,0x51ffa7};
 static const unsigned mobile_targets[3]={0x53e180,0x53f240,0x53f240};
 
-/* Pure admission and pose rules are shared by the desk tests. */
 static int mobile_action(int weapon,uint64_t action,uint64_t base) {
     return (weapon==14 && action==base+0x51f880) ||
            (weapon==12 && action==base+0x51fd40);
@@ -25,7 +21,6 @@ static int mobile_standing(int weapon,uint64_t action,uint64_t base,
     return mobile_action(weapon,action,base) && stance==0 && transition==0 && grounded==1;
 }
 static int mobile_pose(int weapon,int motion) {
-
 
     if((weapon==14 && (motion==40 || motion==42)) ||
        (weapon==12 && motion==43))return 2;
@@ -58,7 +53,6 @@ static int mobile_context(uint64_t expected,uint64_t *player_out,int *weapon_out
     if(pad!=g_b.a.player_pad || region_end(pad)<pad+48 || !RD32(pad-4))return 0;
     *player_out=player;*weapon_out=weapon;return 1;
 }
-
 
 static void mobile_stance(void *rsp) {
     uint64_t *regs=(uint64_t *)rsp-16,player,table;int weapon;
@@ -93,10 +87,6 @@ static void mobile_arm_pose(void *rsp) {
         g_mobile_tools.pose_weapon=weapon;InterlockedIncrement(&g_mobile_tools.poses);
     }
 }
-
-
-
-
 
 static int mobile_anchor_index(int weapon,int index,uint64_t table,uint64_t base,
                                unsigned trigger,int rotation) {
@@ -146,8 +136,6 @@ static void mobile_turn(uint64_t player,unsigned fallback) {
         ((MOBILE_NATIVE_TURN)(uintptr_t)(b+fallback))(player);return;
     }
     pad=*(uint64_t *)(uintptr_t)(player+0xd00);
-
-
 
     mobile_apply(player,pad,(MOBILE_NATIVE_TURN)(uintptr_t)(b+0x53e180),
                            (MOBILE_NATIVE_TURN)(uintptr_t)(b+0x53deb0));

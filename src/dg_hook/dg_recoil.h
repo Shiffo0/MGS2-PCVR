@@ -1,49 +1,8 @@
-/* dg_recoil - the kick the game cannot give us any more.
- *
- * Deliberately standalone: no windows.h, no OpenXR, no game. Same rule as
- * dg_fire - the reasoning lives here so it can be tested at a desk, and the
- * bridge does the writing.
- *
- * Why this file has to exist at all. MGS2 animates recoil onto the arm joints
- * like any other motion, and we overwrite those joints every camera frame from
- * the controller. Measured, not assumed: in the run of 2026-08-19, twenty-four
- * consecutive frames at 60 fps spanning several shots show the muzzle flash
- * appear and vanish with the forearm and hand completely motionless. We win
- * that fight every tick, so the shot has no physical consequence at all.
- *
- * So the kick is ours to make. That is a real distinction and worth stating
- * plainly: everything else this project writes is a translation of something
- * the player or the game already did. This is motion we invent. It therefore
- * gets the strictest form of the usual rules - it must return to exactly zero,
- * it must never point the muzzle below where the player aimed, and it must be
- * impossible for it to leave a standing bias in the aim.
- *
- * The model is a critically damped spring driven by an impulse, which is what
- * a wrist actually is. A shot adds velocity; the spring pulls the hand back to
- * where the player is pointing. Critically damped means the amplitude rises,
- * peaks and returns without ever crossing zero - so the muzzle climbs and
- * settles, and never dips under the aim line on the way back. Rapid fire adds
- * impulses to a system that is still moving, which is exactly how a real one
- * behaves, and the accumulation is capped so a magazine dump cannot fold the
- * wrist.
- */
 #ifndef DG_RECOIL_H
 #define DG_RECOIL_H
 
-/* Angular frequency in radians per game tick. 1/3 puts the peak of a single
-   shot about three ticks (50 ms) after it, and a critically damped impulse is
-   down to a thousandth of it a little past thirty ticks - half a second from
-   shot to still. Both numbers are asserted by the desk tests rather than left
-   as intentions. */
 #define DG_RECOIL_OMEGA         0.33333333333333333
 
-/* One shot is one unit of amplitude at the peak. The caller multiplies that by
-   the degrees and millimetres it wants, so this file never knows about either
-   and the tuning lives in the marker. The factor is omega*e, which is what
-   turns an impulse of one into a peak of one for the continuous solution
-   x(t) = v0*t*exp(-omega*t). dg_recoil_step advances that solution in closed
-   form rather than integrating it, so the peak is exactly one - which is what
-   the tests check, to the third decimal. */
 #define DG_RECOIL_E             2.7182818284590452
 
 /* Three shots' worth of climb, and no more, however fast the trigger is
@@ -78,9 +37,6 @@ void   dg_recoil_reset(DG_RECOIL *r);
    heavier or lighter kick without touching this file. */
 void   dg_recoil_fire(DG_RECOIL *r, double shots);
 
-/* One game tick. Must be called on the tick seam and nowhere else: the camera
-   seam runs several times per tick, and an envelope stepped five times a tick
-   is an envelope five times too fast. */
 void   dg_recoil_step(DG_RECOIL *r);
 
 double dg_recoil_amplitude(const DG_RECOIL *r);

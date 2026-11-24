@@ -1,17 +1,5 @@
 #pragma once
 
-
-
-
-
-
-
-
-
-
-
-
-
 #include <d3d11_1.h>
 #include <wrl/client.h>
 #include <string.h>
@@ -38,9 +26,9 @@ static int dgRetargetRowsCpu(const uint32_t in[16], uint32_t out[16], const floa
         float z = r[8 + i], w = r[12 + i];
         float rounding = (5.960464477539063e-8f * 0.5f) *
                          (fabsf(2 * z - w) + fabsf(w)) * fabsf(Sinv[11]);
-
-
-
+        /* The source camera was rounded too: for R=X*S, propagate its
+           clip-z operand bound through this row of X and then through Sinv.
+           This preserves the unit-h check, without rescaling either bank. */
         if (sourceRounding && !(fabsf(x - want) <= tolerance * (scale + 1) + rounding)) {
             float sourceError = 0;
             for (int j = 0; j < 4; j++) {
@@ -63,14 +51,6 @@ static int dgRetargetRowsCpu(const uint32_t in[16], uint32_t out[16], const floa
     return 1;
 }
 
-
-/* Split camera layout (29 Sep, the game's effect shaders): c[pers-4..pers-1] = VIEW V (rigid),
-   c[pers..pers+3] = PROJECTION P, clip = P*(V*v) - measured live: P*V = this frame's camera to
-   0.1%, V orthonormal to 7e-6, P's x skew +-0.24251 per eye (the mirrored lens asymmetry). The
-   plain check sees "P = X*S*Q" as projective. Here: when P*V is the frame's camera (Sc = S^T, game
-   clip), the other eye gets P' = P with its x skew mirrored and V' = P'^-1 * Tc (Tc = T^T); V' must
-   come out rigid, else P' = P and V' = P^-1 * Tc (exact on screen, view space not rigid).
-   Returns 0 no match (the caller empties the rows), 1 mirrored + rigid, 2 exact fallback. */
 static bool dgInverse4(const double m[16], double o[16]) {
     double a[4][8];
     for (int r = 0; r < 4; r++) for (int c = 0; c < 8; c++) a[r][c] = c < 4 ? m[r * 4 + c] : (c - 4 == r);
@@ -121,14 +101,6 @@ static int dgSplitRetarget(const float vIn[16], const float pIn[16], const float
     return kind;
 }
 
-/* Banks with their own depth mapping (10 Oct 2026, effect-parity tour: rain/splash particles, light pools, glow,
-   sky - shaders C2290FAE, F26DFC8A, 265C303F, 0A541F15, E77E38FC). Their rows are L*X*S with X affine, where L
-   only rewrites clip z from (z, w): the effect has its own near/far (e.g. a pure projection over view-space
-   vertices), so the plain check sees a projective prefix and the rows are emptied (nothing drawn in the second
-   eye). Solve L's two unknowns (row 2 of L^-1 = (0,0,u,v)) from the four "row 3 of S^-1 * L^-1 * R = (0,0,0,1)"
-   equations in the least-squares sense, accept only when all four hold to the same relative tolerance, and
-   retarget as L * D^T * L^-1 * R: x, y and w follow the other eye, depth keeps the effect's own mapping. With the
-   same camera (D = I) this returns R. Returns 1 retargeted, 0 not this layout (out untouched). */
 struct DgZProjStats { unsigned long long guarded = 0; double uMin = 1e30, uMax = 0, mixMax = 0; };
 static DgZProjStats dgZProjStats;   /* what was accepted / refused by the conditioning guard (heartbeat) */
 static int dgZProjRetarget(const uint32_t in[16], uint32_t out[16], const float D[16], const float Sinv[16], float tolerance) {
@@ -137,22 +109,18 @@ static int dgZProjRetarget(const uint32_t in[16], uint32_t out[16], const float 
     const double s0 = Sinv[3], s1 = Sinv[7], s2 = Sinv[11], s3 = Sinv[15];
     double a[4], b[4], c[4];
     for (int j = 0; j < 4; j++) { a[j] = s2 * R[8 + j]; b[j] = s2 * R[12 + j]; c[j] = (j == 3 ? 1.0 : 0.0) - (s0 * R[j] + s1 * R[4 + j] + s3 * R[12 + j]); }
-    /* each equation weighted by its own size (the same measure the acceptance uses): unweighted, a translation
-       column of 1e5 drowns the other three and a decal bank with a pure depth offset looked ill-conditioned
-       (live 10 Oct, shader 0A541F15: light pools) */
+
     double aa = 0, ab = 0, bb = 0, ac = 0, bc = 0;
     for (int j = 0; j < 4; j++) {
         double w = 1.0 / (fabs(s0 * R[j]) + fabs(s1 * R[4 + j]) + fabs(s2 * R[8 + j]) + fabs(s3 * R[12 + j]) + 1.0); w *= w;
         aa += w * a[j] * a[j]; ab += w * a[j] * b[j]; bb += w * b[j] * b[j]; ac += w * a[j] * c[j]; bc += w * b[j] * c[j];
     }
     double det = aa * bb - ab * ab;
-    /* numerical floor only (live decal bank: 1.3e-10); the per-equation residual check below decides */
+
     if (!(fabs(det) > 1e-14 * aa * bb) || !(aa > 0) || !(bb > 0)) return 0;
     double u = (ac * bb - bc * ab) / det, v = (bc * aa - ac * ab) / det;
     if (!_finite(u) || !_finite(v) || fabs(u) < 1e-12) return 0;
-    /* conditioning (live 10/11 Oct, 651EF615: random white quads in the second eye after the weighted solve): a real
-       depth remap has 1/kappa = u near 1 (0.1..10) and mixes in little of the w row; an ill-conditioned L amplifies
-       the float noise of D (~1e-7, even with the same camera) into a broken depth, and a hidden quad passes */
+
     double r2 = 0, r3 = 0; for (int j = 0; j < 4; j++) { r2 = fmax(r2, fabs(R[8 + j])); r3 = fmax(r3, fabs(R[12 + j])); }
     double mix = fabs(v) * r3 / (fabs(u) * r2 + 1e-30);
     if (!(fabs(u) > 0.1 && fabs(u) < 10.0) || !(mix < 1.0)) { dgZProjStats.guarded++; return 0; }   /* mix ~ noise amplification - 1 */
@@ -235,10 +203,6 @@ struct SecondCameraCpu {
         if (FAILED(d->CreateBuffer(&b, nullptr, &ring))) { unsupported = "ring_create"; return false; }
         supported = true; unsupported = nullptr; return true;
     }
-
-
-
-
 
     const char *stageBound(ID3D11Device *d, ID3D11DeviceContext *c, ID3D11Buffer *buffer, UINT first, UINT count, int pers,
                            const float delta[16], const float sinv[16], DgBankLookup lookup, void *ctx, bool allowWrap,

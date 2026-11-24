@@ -1,5 +1,3 @@
-
-
 #ifndef DG_MENU_H
 #define DG_MENU_H
 

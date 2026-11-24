@@ -1,6 +1,3 @@
-
-
-
 #include "dg_item_use_retail.h"
 static struct {
     int pending;

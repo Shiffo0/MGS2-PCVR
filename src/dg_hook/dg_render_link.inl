@@ -2,7 +2,7 @@
 static SRWLOCK g_link_lock=SRWLOCK_INIT;
 static DG_RENDER_LINK g_link;
 static volatile LONG g_link_epoch,g_link_requested,g_render_link_active,g_link_probe_requested;
-static volatile LONG g_second_eye;             /* vr_second_eye (diagnostic build) */
+static volatile LONG g_second_eye;
 /* The marker sets the start value; the Home menu overrides it for the rest of
    the session (-1 = follow the marker), like the desktop observer. */
 static volatile LONG g_mod_second_eye_override=-1;
@@ -19,11 +19,7 @@ static volatile LONG g_link_hits,g_link_stage_hits,g_link_consumer_hits;
 static volatile LONG g_link_accepted,g_link_refused,g_link_contention;
 static volatile LONG g_link_register_mismatch,g_link_rearmed;
 static LONG g_link_last_hits;
-/* Live 27 Sep: switching the link on at runtime (arm_all/SetThreadContext) can be
-   lost on the render thread when it is inside an exception at that moment - the
-   exception's saved context is restored on continue. The camera trap therefore
-   re-arms the stage/consumer breakpoints in its own context record, which does
-   persist. The lost events still invalidate the current pair (epoch). */
+
 static void render_link_camera(CONTEXT *c,ULONG64 stage,ULONG64 consumer) {
     int pp=0;
 #ifdef DG_PAIR_PROBE_H
@@ -81,7 +77,7 @@ static int render_link_take(DG_HOOK_HANDOFF *h,int *sequence) {
     if(g_render_link_active&&render_link_lock()) {
         ok=dg_link_present(&g_link,GetCurrentThreadId(),(uint32_t)g_present_frame,
                            GetTickCount64(),h,sequence);
-        /* A lost event while we held the lock invalidates this candidate. */
+
         if(g_link_seen_epoch!=InterlockedCompareExchange(&g_link_epoch,0,0))ok=0;
         ReleaseSRWLockExclusive(&g_link_lock);
     }
@@ -89,7 +85,7 @@ static int render_link_take(DG_HOOK_HANDOFF *h,int *sequence) {
     return ok;
 }
 static volatile LONG g_link_pair_reason,g_link_pair_eye=-1;
-
+/* Source eye (DG_EYE_LEFT/RIGHT) of the last pair handed out. */
 int dg_render_second_camera_eye(void){return (int)InterlockedCompareExchange(&g_link_pair_eye,0,0);}
 /* 0 ok, 1 link inactive, 2 lock contention, 3..7 dg_link_pair_reason, 8 epoch. */
 int dg_render_second_camera_reason(void){return (int)InterlockedCompareExchange(&g_link_pair_reason,0,0);}

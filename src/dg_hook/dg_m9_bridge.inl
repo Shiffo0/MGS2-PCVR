@@ -1,6 +1,7 @@
 /* Retail 2.1.0.0 adapter, gated by the bridge fingerprint AND independent
  * instruction/table witnesses. No pointer is inferred from an actor list.
  * See m9_retail_evidence.py and M9_HANDMATIGE_SLEDE_IMPLEMENTATIE. */
+#include "dg_m9_contact.h" /* dg_m9_grasp_point */
 static SRWLOCK g_m9_lock=SRWLOCK_INIT;
 static DG_GRIP_DEBUG g_grip_debug;
 int dg_bridge_grip_debug_snapshot(DG_GRIP_DEBUG *out) {
@@ -12,7 +13,8 @@ static volatile LONG g_m9_enabled,g_m9_events;
 static struct {
     uint64_t base,subglobal,objs,ctrl,player,stamp,epoch,shots,rebound_arm;
     int resolved,live,active,render,blocked,last_state,last_block,fault,fault_reported,reset_context;
-    double anchor[3],scale;
+    int grasp_box; /* anchor from the slide's box (1) or its bare pivot (0) */
+    double anchor[3],scale,pivot[3];
     double pose_bias[3],grab_bias[3],pose_scale;
     uint64_t pose_source,pose_sequence,pose_stamp;
     uint64_t grip_log_ms;
@@ -21,6 +23,7 @@ static struct {
     DG_M9_OUTPUT out;
 } g_m9;
 unsigned dg_bridge_m9_events(void) {return (unsigned)InterlockedExchange(&g_m9_events,0);}
+#include "dg_m9_exit_probe.inl" /* m9_grab_probe: one reason line per exit from state 1/2 */
 /* Measure the controller-to-rendered-finger-contact difference from ONE successful
  * coherent arm solve. Independent arm calibration/reach limits make a raw
  * controller origin an unreliable proxy for the visible wrist. */
@@ -81,10 +84,6 @@ static void m9_resolve(const LiveImage *im) {
     if(g_b.log)g_b.log("  M9: retail slide/shot/audio witnesses resolved (opt-in)\r\n");
 }
 
-
-
-
-
 static int m9_current_owner(uint64_t arm,uint64_t ctrl,uint64_t objs) {
     uint64_t sub,actor,trigger,player,armobjs;
     if(!g_m9.subglobal || arm<0x60)return 0;
@@ -133,7 +132,11 @@ static void m9_slide_variant(void *original_rsp,int kind,int index_reg) {
         g_m9.objs=objs;g_m9.ctrl=ctrl;g_m9.stamp=GetTickCount64();
         if(g_m9.kind!=kind && g_b.log)g_b.log("  M9: validated slide variant kind=%d models=%d\r\n",kind,*(short *)(ULONG_PTR)(objs+0x64));
         g_m9.kind=kind;
-        for(k=0;k<3;k++)g_m9.anchor[k]=anchor[k];
+
+        { float box[6];
+          memcpy(box,(void *)(ULONG_PTR)(model+0x08),sizeof box);
+          g_m9.grasp_box=dg_m9_grasp_point(anchor,box,box+3,g_m9.anchor);
+          for(k=0;k<3;k++)g_m9.pivot[k]=anchor[k]; }
         /* BEFORE parent multiplication: replace only slide translation.
          * Hammers, timers, other weapons and enemy actors stay native. */
         if(g_m9.active && g_m9.render && !g_m9.fault && g_b.fps.state==DG_FPS_ACTIVE &&
@@ -152,11 +155,13 @@ static void m9_shot_seam(void *original_rsp) {
     AcquireSRWLockExclusive(&g_m9_lock);
     __try {
         if(g_m9.active && g_m9.objs && *(uint64_t *)(ULONG_PTR)(actor+0xa0)==g_m9.objs) {
+            DG_M9_STATE m9_pre=g_m9.state;
             g_m9.shots++;g_m9.blocked=1;
             g_m9.state.state=M9_NEEDS_RACK;g_m9.state.neutral=0;
             g_m9.state.travel=0;g_m9.state.full_samples=0;
             g_m9.out.progress=0;g_m9.out.attached=0;
             if(g_b.log)g_b.log("  M9: native shot confirmed #%llu\r\n",g_m9.shots);
+            m9_probe_offtick(DG_M9_ROUTE_NATIVE_SHOT,&m9_pre);
         }
     } __except(EXCEPTION_EXECUTE_HANDLER) {g_m9.fault=1;}
     ReleaseSRWLockExclusive(&g_m9_lock);
@@ -189,6 +194,7 @@ static int m9_fire_gate(int safe,int can_write,uint64_t player,int weapon,
                        int physical_down,DG_FIRE_IN *fire) {
     DG_M9_INPUT in;DG_M9_SAMPLE *s=&g_controls_frame.m9;
     uint64_t now=GetTickCount64();int block=0,k;unsigned events=0;
+    DG_M9_STATE m9_pre;
     AcquireSRWLockExclusive(&g_m9_lock);
     memset(&g_grip_debug,0,sizeof g_grip_debug);
     if(!g_m9_enabled || !g_m9.live || g_m9.fault || !g_b.armed) {
@@ -220,7 +226,9 @@ static int m9_fire_gate(int safe,int can_write,uint64_t player,int weapon,
     /* Never block a weapon we cannot render. Once the adapter is proven and
      * active, stale hand input cancels the grip but preserves the obligation. */
     if(weapon==1 && in.allowed && in.valid)g_m9.active=1;
+    m9_pre=g_m9.state;g_m9_step_route=DG_M9_ROUTE_NONE;
     g_m9.out=dg_m9_step(&g_m9.state,&in);events=g_m9.out.events;
+    m9_probe_step(&m9_pre,&in,s,events,safe,can_write,weapon,now);
     if(events&M9_GRAB)memcpy(g_m9.grab_bias,g_m9.pose_bias,sizeof g_m9.grab_bias);
     if(weapon==1 && in.valid && g_m9.objs && now>=g_m9.stamp && now-g_m9.stamp<=100) {
         g_grip_debug.stamp=now;g_grip_debug.sequence=in.sequence;
@@ -277,9 +285,11 @@ static void m9_context_boundary(int reset) {
     if(!g_m9_enabled)return;
     AcquireSRWLockExclusive(&g_m9_lock);
     if(reset && !g_m9.reset_context){
+        DG_M9_STATE m9_pre=g_m9.state;
         g_m9.epoch++;dg_m9_reset(&g_m9.state);
         g_m9.pose_source=0;
         g_m9.out.attached=0;g_m9.render=0;g_m9.blocked=1;
+        m9_probe_offtick(DG_M9_ROUTE_CONTEXT_RESET,&m9_pre);
     }
     g_m9.reset_context=reset;
     ReleaseSRWLockExclusive(&g_m9_lock);
@@ -311,6 +321,7 @@ static int m9_hand_contact(double local[3],uint64_t source) {
 static void m9_contact_cancel(void) {
     AcquireSRWLockExclusive(&g_m9_lock);
     if(g_m9.out.attached) {
+        DG_M9_STATE m9_pre=g_m9.state;
         /* Geometry releases contact, never erases a confirmed rear endpoint. */
         g_m9.state.state=g_m9.state.state==M9_FULL_REAR?M9_RETURN_GOOD:
             g_m9.state.travel>0?M9_RETURN_BAD:M9_NEEDS_RACK;
@@ -318,6 +329,7 @@ static void m9_contact_cancel(void) {
         g_m9.state.grip_prev=1;g_m9.state.neutral=0;
         g_m9.out.attached=0;g_m9.out.state=g_m9.state.state;g_m9.blocked=1;
         InterlockedOr(&g_m9_events,M9_CANCEL);
+        m9_probe_offtick(g_m9_site.site_route?g_m9_site.site_route:DG_M9_ROUTE_UNKNOWN,&m9_pre);
     }
     ReleaseSRWLockExclusive(&g_m9_lock);
 }

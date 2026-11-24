@@ -1,7 +1,3 @@
-
-
-
-
 int dg_bridge_hanging_heading_now(double *heading)
 {
     uint64_t player;

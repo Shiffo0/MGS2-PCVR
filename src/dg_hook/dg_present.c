@@ -23,24 +23,20 @@
 static volatile LONG g_state_request;
 void dg_present_poll_state_probe(const char *marker) {
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    char path[MAX_PATH], text[32], *leaf;
+    FILE *f=NULL;
+    size_t n;
+    if(!marker || InterlockedCompareExchange(&g_state_request,0,0)!=0) return;
+    if(strcpy_s(path,sizeof path,marker)) return;
+    leaf=strrchr(path,'\\');
+    if(leaf) {
+        if(strcpy_s(leaf+1,sizeof(path)-(leaf+1-path),"dg_state_probe.on")) return;
+    } else strcpy_s(path,sizeof path,"dg_state_probe.on");
+    if(fopen_s(&f,path,"rb") || !f) return;
+    n=fread(text,1,sizeof(text),f);
+    fclose(f);
+    if(n==9 && memcmp(text,"roundtrip",9)==0)
+        InterlockedCompareExchange(&g_state_request,1,0);
 
 }
 
@@ -255,165 +251,146 @@ static HRESULT STDMETHODCALLTYPE hook_create_sc(
     return hr;
 }
 
-/* ---- GPU frame timer (diagnostic build only, 2026-09-25) ----
- * One TIMESTAMP query right after Present returns (frame start) and one
- * right before the next Present is forwarded (frame end, after the XR
- * capture callback). Busy = end - start on the GPU clock; period = end - end.
- * Only TIMESTAMP queries: no DISJOINT or other scope query, so the draw-trial
- * query policy ("event and timestamp are allowed") is unaffected. The GPU
- * tick rate comes from QPC over >= 2 s. Results are read with DONOTFLUSH in
- * submission order; a full ring skips a frame, it never waits. The queries
- * live for the process lifetime. */
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-void dg_present_gpu_report(void (*log)(const char *fmt, ...)) { (void)log; }
-
+#define GT_RING 16
+#define GT_BINS 160 /* 0.5 ms bins; the last bin collects 79.5 ms and above */
+typedef struct { ID3D11Query *start, *end; LONG64 qpc_end; unsigned seq; int state; } GT_SLOT;
+static struct {
+    int init, failed; ID3D11DeviceContext *ctx;
+    GT_SLOT s[GT_RING]; unsigned cur, next_seq, next_proc;
+    int have_prev; UINT64 prev_end;
+    int have_cal; UINT64 cal_ts; LONG64 cal_qpc; double freq; LONG64 qpf;
+} g_gt;
+static SRWLOCK g_gt_lock = SRWLOCK_INIT;
+static struct {
+    unsigned n, np, dropped, invalid;
+    double sum_busy, max_busy, sum_period;
+    unsigned hist[GT_BINS];
+
+    unsigned unused;
+} g_gt_win;
+static struct { unsigned nb; double sum_block, sum_work, max_block; } g_gt_cpu;
+static LONG64 g_present_ret;
+
+static void gt_init(IDXGISwapChain *sc) {
+    ID3D11Device *dev = NULL; D3D11_QUERY_DESC qd; int i; LARGE_INTEGER f;
+    g_gt.init = 1;
+    if (!sc || FAILED(sc->lpVtbl->GetDevice(sc, &IID_ID3D11Device, (void **)&dev)) || !dev) {
+        g_gt.failed = 1; return;
+    }
+    dev->lpVtbl->GetImmediateContext(dev, &g_gt.ctx);
+    qd.Query = D3D11_QUERY_TIMESTAMP; qd.MiscFlags = 0;
+    for (i = 0; i < GT_RING && g_gt.ctx; i++)
+        if (FAILED(dev->lpVtbl->CreateQuery(dev, &qd, &g_gt.s[i].start)) ||
+            FAILED(dev->lpVtbl->CreateQuery(dev, &qd, &g_gt.s[i].end))) { g_gt.failed = 1; break; }
+    if (!g_gt.ctx) g_gt.failed = 1;
+    dev->lpVtbl->Release(dev);
+    QueryPerformanceFrequency(&f); g_gt.qpf = f.QuadPart;
+}
+
+static void gt_process(void) {
+    for (;;) {
+        GT_SLOT *s = NULL; UINT64 t0 = 0, t1 = 0; int i;
+        for (i = 0; i < GT_RING; i++)
+            if (g_gt.s[i].state == 2 && g_gt.s[i].seq == g_gt.next_proc) { s = &g_gt.s[i]; break; }
+        if (!s) return;
+        if (g_gt.ctx->lpVtbl->GetData(g_gt.ctx, (ID3D11Asynchronous *)s->start, &t0, sizeof t0,
+                                      D3D11_ASYNC_GETDATA_DONOTFLUSH) != S_OK ||
+            g_gt.ctx->lpVtbl->GetData(g_gt.ctx, (ID3D11Asynchronous *)s->end, &t1, sizeof t1,
+                                      D3D11_ASYNC_GETDATA_DONOTFLUSH) != S_OK) return;
+        s->state = 0; g_gt.next_proc++;
+        if (!g_gt.have_cal) { g_gt.have_cal = 1; g_gt.cal_ts = t1; g_gt.cal_qpc = s->qpc_end; }
+        else if (t1 > g_gt.cal_ts && s->qpc_end - g_gt.cal_qpc > 2 * g_gt.qpf)
+            g_gt.freq = (double)(t1 - g_gt.cal_ts) /
+                        ((double)(s->qpc_end - g_gt.cal_qpc) / (double)g_gt.qpf);
+        if (g_gt.freq > 0) {
+            double busy = t1 >= t0 ? (double)(t1 - t0) * 1000.0 / g_gt.freq : -1.0;
+            double period = (g_gt.have_prev && t1 > g_gt.prev_end)
+                ? (double)(t1 - g_gt.prev_end) * 1000.0 / g_gt.freq : -1.0;
+            AcquireSRWLockExclusive(&g_gt_lock);
+            if (busy < 0 || busy > 1000.0) g_gt_win.invalid++;
+            else {
+                unsigned b = (unsigned)(busy * 2.0);
+                if (b >= GT_BINS) b = GT_BINS - 1;
+                g_gt_win.hist[b]++; g_gt_win.n++; g_gt_win.sum_busy += busy;
+                if (busy > g_gt_win.max_busy) g_gt_win.max_busy = busy;
+                if (period > 0 && period < 1000.0) { g_gt_win.sum_period += period; g_gt_win.np++; }
+            }
+            ReleaseSRWLockExclusive(&g_gt_lock);
+        }
+        g_gt.have_prev = 1; g_gt.prev_end = t1;
+    }
+}
+
+static void gt_frame_end(IDXGISwapChain *sc) {
+    GT_SLOT *s;
+    if (!g_gt.init) gt_init(sc);
+    if (g_gt.failed) return;
+    s = &g_gt.s[g_gt.cur];
+    if (s->state == 1) {
+        LARGE_INTEGER q;
+        g_gt.ctx->lpVtbl->End(g_gt.ctx, (ID3D11Asynchronous *)s->end);
+        QueryPerformanceCounter(&q); s->qpc_end = q.QuadPart; s->state = 2;
+        g_gt.cur = (g_gt.cur + 1) % GT_RING;
+    }
+    gt_process();
+}
+
+static void gt_frame_start(void) {
+    GT_SLOT *s;
+    if (!g_gt.init || g_gt.failed) return;
+    s = &g_gt.s[g_gt.cur];
+    if (s->state != 0) {
+        AcquireSRWLockExclusive(&g_gt_lock); g_gt_win.dropped++; ReleaseSRWLockExclusive(&g_gt_lock);
+        return;
+    }
+    g_gt.ctx->lpVtbl->End(g_gt.ctx, (ID3D11Asynchronous *)s->start);
+    s->seq = g_gt.next_seq++; s->state = 1;
+}
+
+void dg_present_gpu_report(void (*log)(const char *fmt, ...)) {
+    unsigned n, np, dropped, invalid, hist[GT_BINS], acc = 0, i, p50 = 0, p95 = 0;
+    double sum, maxb, sump, freq = g_gt.freq; int failed = g_gt.failed, init = g_gt.init;
+    if (!log) return;
+    AcquireSRWLockExclusive(&g_gt_lock);
+    n = g_gt_win.n; np = g_gt_win.np; dropped = g_gt_win.dropped; invalid = g_gt_win.invalid;
+    sum = g_gt_win.sum_busy; maxb = g_gt_win.max_busy; sump = g_gt_win.sum_period;
+    memcpy(hist, g_gt_win.hist, sizeof hist);
+    memset(&g_gt_win, 0, sizeof g_gt_win);
+    ReleaseSRWLockExclusive(&g_gt_lock);
+    if (!init) { log("  gpu timer: not started (no Present yet)\r\n"); return; }
+    if (failed) { log("  gpu timer: unavailable (device/context/query creation failed)\r\n"); return; }
+    if (!n) {
+        log("  gpu timer: no completed frames this window (clock %s)  dropped %u invalid %u\r\n",
+            freq > 0 ? "calibrated" : "calibrating", dropped, invalid);
+        return;
+    }
+    for (i = 0; i < GT_BINS; i++) {
+        acc += hist[i];
+        if (!p50 && acc * 2 >= n) p50 = i + 1;
+        if (!p95 && acc * 20 >= n * 19) { p95 = i + 1; break; }
+    }
+    {   unsigned nb2; double sb, sw, mb;
+        AcquireSRWLockExclusive(&g_gt_lock);
+        nb2 = g_gt_cpu.nb; sb = g_gt_cpu.sum_block; sw = g_gt_cpu.sum_work; mb = g_gt_cpu.max_block;
+        g_gt_cpu.nb = 0; g_gt_cpu.sum_block = g_gt_cpu.sum_work = g_gt_cpu.max_block = 0;
+        ReleaseSRWLockExclusive(&g_gt_lock);
+        if (nb2) log("  present cpu: frames %u  game-thread work mean %.2f ms  blocked in Present mean %.2f ms (max %.2f)\r\n",
+                     nb2, sw / nb2, sb / nb2, mb);
+    }
+    log("  gpu timer: frames %u  busy mean %.2f ms  p50 <%.1f ms  p95 <%.1f ms  max %.2f ms"
+        "  |  period mean %.2f ms (%.1f fps)  |  gpu clock %.3f MHz  dropped %u invalid %u\r\n",
+        n, sum / n, p50 * 0.5, p95 * 0.5, maxb,
+        np ? sump / np : 0.0, (np && sump > 0) ? 1000.0 * np / sump : 0.0,
+        freq / 1e6, dropped, invalid);
+}
 
 static HRESULT STDMETHODCALLTYPE hook_present(IDXGISwapChain *sc,
                                                UINT sync, UINT flags) {
     PRESENT_FN next;
-
-
-
+    LARGE_INTEGER q_enter; QueryPerformanceCounter(&q_enter);
     void (*callback)(IDXGISwapChain *);
     LONG count;
-
-
-
+    int gt_armed = 0;
     InterlockedIncrement(&g_active);
     if (g_active_event) ResetEvent(g_active_event);
     next = g_present;
@@ -445,44 +422,38 @@ static HRESULT STDMETHODCALLTYPE hook_present(IDXGISwapChain *sc,
         AcquireSRWLockShared(&g_lock);
         callback = g_callback;
         ReleaseSRWLockShared(&g_lock);
-
-
-
-
-
-
-
-
-
-
-
-
+        if (!(flags & DXGI_PRESENT_TEST) &&
+            InterlockedCompareExchange(&g_state_request,2,1)==1) {
+            ID3D11Device *probe_device=NULL;
+            int result=-2;
+            if(sc && SUCCEEDED(sc->lpVtbl->GetDevice(sc,&IID_ID3D11Device,(void**)&probe_device))) {
+                result=dg_state_roundtrip(probe_device);
+                probe_device->lpVtbl->Release(probe_device);
+            }
+            log_msg("state_roundtrip: result=%d thread=%lu boundary=pre_capture_present sampled_bindings_only=1 extra_draws=0\r\n",result,GetCurrentThreadId());
+        }
         if (!(flags & DXGI_PRESENT_TEST)) dg_draw_trial_present();
         if (callback) callback(sc);
-
-
-
+        if (!(flags & DXGI_PRESENT_TEST)) { gt_frame_end(sc); gt_armed = 1; }
         g_inside_present = 0;
     } else {
         InterlockedIncrement(&g_error_count);
     }
     if (next) {
-
-
-
+        LARGE_INTEGER q_call, q_ret; QueryPerformanceCounter(&q_call);
         HRESULT hr = next(sc, sync, flags);
 
-
-
-
-
-
-
-
-
-
-
-
+        if (!(flags & DXGI_PRESENT_TEST)) dg_draw_trial_after_present();
+        QueryPerformanceCounter(&q_ret);
+        if (gt_armed && g_gt.qpf) {
+            double block = (double)(q_ret.QuadPart - q_call.QuadPart) * 1000.0 / (double)g_gt.qpf;
+            double work = g_present_ret ? (double)(q_enter.QuadPart - g_present_ret) * 1000.0 / (double)g_gt.qpf : -1.0;
+            AcquireSRWLockExclusive(&g_gt_lock);
+            if (work >= 0 && work < 1000) { g_gt_cpu.nb++; g_gt_cpu.sum_block += block; g_gt_cpu.sum_work += work; if (block > g_gt_cpu.max_block) g_gt_cpu.max_block = block; }
+            ReleaseSRWLockExclusive(&g_gt_lock);
+            g_present_ret = q_ret.QuadPart;
+        }
+        if (gt_armed) gt_frame_start();
         if (InterlockedDecrement(&g_active) == 0 && g_active_event)
             SetEvent(g_active_event);
         return hr;

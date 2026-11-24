@@ -60,17 +60,13 @@ int dg_xr_observer_fill(void *swapchain,int mode) {
     ID3D11ShaderResourceView *srv[2]={NULL,NULL};ID3D11CommandList *list=NULL;
     D3D11_TEXTURE2D_DESC td,sd;D3D11_VIEWPORT vp;DG_OBSERVER_LAYOUT layout;
     ID3D11DeviceContext *c;uint64_t now,delta;int valid[2]={0,0},use[2],i,ok=0;
-
-
-
+    int requested_mode=mode,request=0,capture_started=0;
     if(!sc||!g_cap_cs_ready||mode<0||mode>2)return 0;
     if(FAILED(sc->lpVtbl->GetBuffer(sc,0,&IID_ID3D11Texture2D,(void**)&back))||!back)return 0;
     back->lpVtbl->GetDesc(back,&td);
     EnterCriticalSection(&g_cap_cs);
     if(!g_ctx||!g_dev||td.SampleDesc.Count!=1||!td.Width||!td.Height)goto done;
-
-
-
+    oc_poll();request=oc_request();
     now=GetTickCount64();
     for(i=0;i<2;i++)if(g_store[i].texture&&g_store[i].valid&&now-g_store[i].capture_ms<=DG_OBSERVER_MAX_AGE_MS) {
         g_store[i].texture->lpVtbl->GetDesc(g_store[i].texture,&sd);
@@ -106,17 +102,13 @@ int dg_xr_observer_fill(void *swapchain,int mode) {
     c->lpVtbl->VSSetShader(c,g_ob.vs,NULL,0);c->lpVtbl->PSSetShader(c,g_ob.ps,NULL,0);
     c->lpVtbl->PSSetConstantBuffers(c,0,1,&g_ob.cb);c->lpVtbl->PSSetShaderResources(c,0,2,srv);
     c->lpVtbl->PSSetSamplers(c,0,1,&g_ob.sampler);c->lpVtbl->Draw(c,3,0);
-
-
-
+    if(request)capture_started=oc_begin(&td,&layout,requested_mode,mode,valid,now);
     if(SUCCEEDED(c->lpVtbl->FinishCommandList(c,FALSE,&list))&&list) {
         g_ctx->lpVtbl->ExecuteCommandList(g_ctx,list,TRUE);ok=1;
     }else { observer_free();g_ob.failed=1; }
 done:
-
-
-
-
+    if(capture_started)oc_end(back,ok);
+    else if(request&&!ok&&g_log)g_log("  observer capture refused: observer could not render\r\n");
     OB_RELEASE(list);OB_RELEASE(rt);OB_RELEASE(srv[0]);OB_RELEASE(srv[1]);
     LeaveCriticalSection(&g_cap_cs);OB_RELEASE(back);return ok;
 }

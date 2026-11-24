@@ -13,6 +13,38 @@ struct DgMagwellGpu {
     ComPtr<ID3D11InputLayout> layout;ComPtr<ID3D11Buffer> vb;
     ComPtr<ID3D11RasterizerState> raster;ComPtr<ID3D11DepthStencilState> depth[2];
     ComPtr<ID3DDeviceContextState> scratch;
+    // At most 12 paired observations, one per second; never wait on the GPU.
+    ComPtr<ID3D11Query> visibility[4];
+    ComPtr<ID3D11DepthStencilState> noDepth;
+    ComPtr<ID3D11BlendState> noColour;
+    bool pending=false;unsigned submitted=0,measurements=0;
+    uint64_t probeNext=0;UINT64 lastMeasured[4]{};
+    void (*probeLog)(const char*,...)=nullptr;
+    bool poll(ID3D11DeviceContext*c) {
+        if(!pending)return false;
+        UINT64 counts[4]{};
+        for(int i=0;i<4;i++) {
+            HRESULT h=c->GetData(visibility[i].Get(),&counts[i],sizeof counts[i],D3D11_ASYNC_GETDATA_DONOTFLUSH);
+            if(h==S_FALSE)return false;
+            if(FAILED(h)){pending=false;if(probeLog)probeLog("magwell_visibility: id=%u query_error=0x%08X\r\n",submitted,(unsigned)h);return false;}
+        }
+        pending=false;++measurements;memcpy(lastMeasured,counts,sizeof counts);
+        if(probeLog)probeLog("magwell_visibility: id=%u depth_samples=%llu,%llu raster_samples=%llu,%llu samples_not_final_pixels=1\r\n",
+            submitted,counts[0],counts[1],counts[2],counts[3]);
+        return true;
+    }
+    using QueryFactory=HRESULT(STDMETHODCALLTYPE*)(ID3D11Device*,const D3D11_QUERY_DESC*,ID3D11Query**);
+    bool beginProbe(ID3D11Device*d,uint64_t now,void (*report)(const char*,...),QueryFactory factory) {
+        if(!report||!factory||pending||submitted>=12||now<probeNext)return false;
+        // Partial allocation failure only cancels diagnostics, never the normal contour.
+        D3D11_QUERY_DESC q{D3D11_QUERY_OCCLUSION,0};
+        for(auto&v:visibility)if(!v&&FAILED(factory(d,&q,&v)))return false;
+        if(!noDepth){D3D11_DEPTH_STENCIL_DESC dd{};dd.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ZERO;
+            if(FAILED(d->CreateDepthStencilState(&dd,&noDepth)))return false;}
+        if(!noColour){D3D11_BLEND_DESC bd{}; // all colour channels disabled, blending disabled
+            if(FAILED(d->CreateBlendState(&bd,&noColour)))return false;}
+        probeLog=report;probeNext=now+1000;++submitted;pending=true;return true;
+    }
     bool init(ID3D11Device*d) {
         if(owner.Get()==d)return ready;
         *this=DgMagwellGpu{};owner=d;
@@ -38,7 +70,7 @@ struct DgMagwellGpu {
     }
     bool renderPair(ID3D11Device*d,ID3D11DeviceContext*c,ID3D11RenderTargetView*rt0,ID3D11DepthStencilView*ds0,
                 ID3D11RenderTargetView*rt1,ID3D11DepthStencilView*ds1,const DG_MAGWELL&s,
-                const float camera0[16],const float camera1[16],unsigned width,unsigned height,bool reversed,uint64_t now) {
+                const float camera0[16],const float camera1[16],unsigned width,unsigned height,bool reversed,uint64_t now,void (*report)(const char*,...)=nullptr,QueryFactory factory=nullptr) {
         float world[DG_MAGWELL_VERTICES][3],clip[2][DG_MAGWELL_VERTICES][4];
         if(!rt0||!ds0||!rt1||!ds1||!width||!height||!dg_magwell_vertices(&s,now,world))return false;
         /* Validate and upload BOTH eyes before either draw. */
@@ -51,20 +83,36 @@ struct DgMagwellGpu {
             }
         }
         ComPtr<ID3D11DeviceContext1>c1;if(FAILED(c->QueryInterface(IID_PPV_ARGS(&c1)))||!init(d))return false;
-
+        poll(c);
         D3D11_MAPPED_SUBRESOURCE mapped{};
         if(FAILED(c->Map(vb.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mapped)))return false;
         memcpy(mapped.pData,clip,sizeof clip);c->Unmap(vb.Get(),0);
+        bool observe=beginProbe(d,now,report,factory);
+        if(observe) {
+            report("magwell_visibility: id=%u anchor=%.6g,%.6g,%.6g basis=%.6g,%.6g,%.6g|%.6g,%.6g,%.6g|%.6g,%.6g,%.6g size=%ux%u reversed=%d age_ms=%llu\r\n",
+                submitted,s.world[12],s.world[13],s.world[14],s.world[0],s.world[1],s.world[2],s.world[4],s.world[5],s.world[6],s.world[8],s.world[9],s.world[10],width,height,reversed,now-s.ms);
+            for(int eye=0;eye<2;eye++) {
+                float lo[3]={1e30f,1e30f,1e30f},hi[3]={-1e30f,-1e30f,-1e30f},minW=1e30f;
+                for(auto&v:clip[eye]) {if(v[3]<minW)minW=v[3];if(fabsf(v[3])<1e-9f)continue;
+                    for(int j=0;j<3;j++){float n=v[j]/v[3];if(n<lo[j])lo[j]=n;if(n>hi[j])hi[j]=n;}}
+                report("magwell_visibility: id=%u eye=%d ndc_min=%.6g,%.6g,%.6g ndc_max=%.6g,%.6g,%.6g min_w=%.6g\r\n",
+                    submitted,eye,lo[0],lo[1],lo[2],hi[0],hi[1],hi[2],minW);
+            }
+        }
         ComPtr<ID3DDeviceContextState>original,returned;c1->SwapDeviceContextState(scratch.Get(),&original);
         c->ClearState();c->OMSetDepthStencilState(depth[reversed?1:0].Get(),0);
         D3D11_VIEWPORT viewport={0,0,(float)width,(float)height,0,1};c->RSSetViewports(1,&viewport);c->RSSetState(raster.Get());
         UINT stride=16,offset=0;auto buffer=vb.Get();c->IASetVertexBuffers(0,1,&buffer,&stride,&offset);
         c->IASetInputLayout(layout.Get());c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         c->VSSetShader(vs.Get(),nullptr,0);c->PSSetShader(ps.Get(),nullptr,0);
-        c->OMSetRenderTargets(1,&rt0,ds0);c->Draw(DG_MAGWELL_VERTICES,0);
-        c->OMSetRenderTargets(1,&rt1,ds1);c->Draw(DG_MAGWELL_VERTICES,DG_MAGWELL_VERTICES);
-
+        c->OMSetRenderTargets(1,&rt0,ds0);if(observe)c->Begin(visibility[0].Get());c->Draw(DG_MAGWELL_VERTICES,0);if(observe)c->End(visibility[0].Get());
+        c->OMSetRenderTargets(1,&rt1,ds1);if(observe)c->Begin(visibility[1].Get());c->Draw(DG_MAGWELL_VERTICES,DG_MAGWELL_VERTICES);if(observe)c->End(visibility[1].Get());
+        if(observe) {
+            // Coverage control only: no colour/depth/stencil writes, same geometry and clipping.
+            c->OMSetBlendState(noColour.Get(),nullptr,~0u);c->OMSetDepthStencilState(noDepth.Get(),0);
+            c->OMSetRenderTargets(1,&rt0,ds0);c->Begin(visibility[2].Get());c->Draw(DG_MAGWELL_VERTICES,0);c->End(visibility[2].Get());
+            c->OMSetRenderTargets(1,&rt1,ds1);c->Begin(visibility[3].Get());c->Draw(DG_MAGWELL_VERTICES,DG_MAGWELL_VERTICES);c->End(visibility[3].Get());
+        }
         c1->SwapDeviceContextState(original.Get(),&returned);return true;
     }
 };
-

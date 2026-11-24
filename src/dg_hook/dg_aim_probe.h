@@ -49,10 +49,6 @@ typedef struct {
     double root_hand_basis_angle_deg, root_hand_minus_y_angle_deg;
 } DG_AIM_PROBE_SAMPLE;
 
-/* out is all-zero on ANY rejection; result is separate rejection evidence.
-   Successful output remains an observation proxy, never draw/aim-error proof.
-   Accepted near-unit quaternions are used as supplied, never silently fixed.
-   Directions are explicitly normalized for vector geometry after validation. */
 DG_AIM_PROBE_RESULT dg_aim_probe_build(const DG_AIM_PROBE_INPUT *in,
                                       DG_AIM_PROBE_SAMPLE *out);
 const char *dg_aim_probe_result_name(DG_AIM_PROBE_RESULT result);

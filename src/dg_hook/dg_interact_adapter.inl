@@ -1,5 +1,3 @@
-
-
 static unsigned ia_pad(unsigned levels, unsigned capture) {
     return ((levels&DG_IA_ACTION)?0x10u:0) |
            ((levels&DG_IA_POSTURE)?0x40u:0) |

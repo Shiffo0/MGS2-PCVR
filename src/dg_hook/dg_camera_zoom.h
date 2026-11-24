@@ -31,10 +31,10 @@ static int dg_camera_zoom_step(DG_CAMERA_ZOOM *s,uint64_t sample,uint64_t source
     s->source=source;s->manager=manager;s->seen=1;s->y=y;
     return s->direction;
 }
-
-
-
-
+/* PSG grip zoom: a held grip keeps zooming. A denied, stale or invalid frame
+ * only pauses that frame; it does not latch. Only a new identity (source,
+ * zoom manager) requires a neutral grip first, so a grip held across a
+ * weapon/context change never zooms by itself. grip is -1, 0 or +1. */
 static int dg_psg_zoom_step(DG_CAMERA_ZOOM *s,uint64_t sample,uint64_t source,
     uint64_t manager,uint64_t now,unsigned age,int allowed,float grip) {
     int identity=!s->seen || source!=s->source || manager!=s->manager;

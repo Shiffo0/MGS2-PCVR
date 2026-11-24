@@ -11,9 +11,7 @@ static void nikita_revoke(void) {
     ReleaseSRWLockExclusive(&g_nikita_mode_lock);
 }
 static int nikita_context(DG_NIKITA_BINDING *n) {
-
-
-
+    int dgw_w=dgw_weapon_now();
     uint64_t arm,now=GetTickCount64();int alive;
     if((!g_nikita_sight.live) || (g_nikita_sight.fault) || (!g_b.armed) || (g_b.owner) ||
        (g_b.script_menu_only) || (g_b.s_late_unsafe) || (g_b.fps.state!=DG_FPS_ACTIVE) ||

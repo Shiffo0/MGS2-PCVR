@@ -1,5 +1,3 @@
-
-
 #ifndef DG_FIRE_H
 #define DG_FIRE_H
 
@@ -12,49 +10,23 @@
    decision by this state machine and never an accident of how far the player
    happened to pull. */
 #define DG_FIRE_ABORT_PRESSURE  12
-/* The game needs two consecutive ready-stance ticks in the window (it compares
-   the current pressure against work->sv2.vx, which it stores each tick). Three
-   costs nothing and survives a tick where the stance did not run. */
+
 #define DG_FIRE_ABORT_TICKS     3
-/* Hard cap on the cancel window. A pistol draw becomes cancel-ready within
-   about 8 ticks; a weapon whose native handler never reports it (Nikita,
-   25 Sep 2026: state 4, pressure 12 held for minutes, radial blocked because
-   fire_idle stayed 0) must still let go of the button. 60 ticks = 1 s. */
+
 #define DG_FIRE_ABORT_MAX_TICKS 60
 
 /* Separate aim travel (XR click) from the deliberate firing detent. */
 #define DG_FIRE_TRIGGER_SHOOT   0.85
 #define DG_FIRE_TRIGGER_REARM   0.70
 
-
-
-
 #define DG_FIRE_WP_COOLANT      0x00008062u
 #define DG_FIRE_WP_PRESSURE     0x0080u
 #define DG_FIRE_WP_CONSECUTIVE  0x0010u
 
-
-
-
-
 #define DG_FIRE_WP_NIKITA       0x08084682u
 
-/* How old a controller sample may be, in game ticks, and still describe now.
- *
- * This is measured, not chosen: the 2026-08-19 dry run published 6142 trigger
- * samples across 7677 ticks - 0.8 per tick - because the camera seam and the
- * game tick are not locked to each other. Borrowing the hand command's bound of
- * 2 ticks called a quarter of all ticks stale.
- */
 #define DG_FIRE_FRESH_TICKS     4
 
-/* And how long an aim already in progress rides out a gap before the
- * controller counts as gone. A missing sample is not a missing hand: the first
- * costs nothing to wait out, the second has to lower the weapon without firing
- * it. At 60 ticks a second this is a third of a second, which is far longer
- * than any gap the dry run produced and far shorter than a player would take
- * to notice their aim had frozen.
- */
 #define DG_FIRE_GRACE_TICKS     20
 
 enum {
@@ -117,7 +89,7 @@ typedef struct {
     unsigned long long handled_press;   /* the pull this machine already took */
     int started;
     int full_pull;                     /* automatic firing detent latch */
-    unsigned int weapon_type;          /* abort if the live weapon changes type */
+    unsigned int weapon_type;
     int abort_ticks;                   /* ticks spent in ABORT, capped */
 } DG_FIRE;
 

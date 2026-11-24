@@ -42,11 +42,6 @@ static int hand_observe_step(ULONGLONG arm,unsigned long stream,unsigned long lo
     g_hand_observe.left--;g_hand_observe.total++;return 1;
 }
 
-
-
-
-
-
 static void hand_pose_solve(const double right[18][4],const double pose[17][4],
                             const double previous[17][4],const double wrist[4],double out[17][4])
 {
@@ -69,21 +64,114 @@ static void hand_pose_solve(const double right[18][4],const double pose[17][4],
     }
 }
 
-static int hand_pose_owner(void)
+static int hand_slots_owned(ULONGLONG arm,ULONGLONG objs,ULONGLONG mc,ULONGLONG adj)
 {
     return g_b.a.gm_player_arm_body &&
-        *(volatile ULONGLONG *)(ULONG_PTR)g_b.a.gm_player_arm_body==g_hand_pose.arm &&
-        plausible_ptr(g_hand_pose.arm) && region_end(g_hand_pose.arm)>=g_hand_pose.arm+16 &&
-        *(volatile ULONGLONG *)(ULONG_PTR)g_hand_pose.arm==g_hand_pose.objs &&
-        *(volatile ULONGLONG *)(ULONG_PTR)(g_hand_pose.arm+8)==g_hand_pose.mc &&
-        plausible_ptr(g_hand_pose.mc) && region_end(g_hand_pose.mc)>=g_hand_pose.mc+0x50 &&
-        RD32(g_hand_pose.mc+0x14)>=55 &&
-        *(volatile ULONGLONG *)(ULONG_PTR)(g_hand_pose.mc+0x48)==g_hand_pose.adj &&
-        plausible_ptr(g_hand_pose.adj) && region_end(g_hand_pose.adj)>=g_hand_pose.adj+55*16;
+        *(volatile ULONGLONG *)(ULONG_PTR)g_b.a.gm_player_arm_body==arm &&
+        plausible_ptr(arm) && region_end(arm)>=arm+16 &&
+        *(volatile ULONGLONG *)(ULONG_PTR)arm==objs &&
+        *(volatile ULONGLONG *)(ULONG_PTR)(arm+8)==mc &&
+        plausible_ptr(mc) && region_end(mc)>=mc+0x50 &&
+        RD32(mc+0x14)>=55 &&
+        *(volatile ULONGLONG *)(ULONG_PTR)(mc+0x48)==adj &&
+        plausible_ptr(adj) && region_end(adj)>=adj+55*16;
+}
+static int hand_pose_owner(void) {
+    return hand_slots_owned(g_hand_pose.arm,g_hand_pose.objs,g_hand_pose.mc,g_hand_pose.adj);
+}
+
+static const unsigned char blade_flex_joints[]={22,23,25,26,28,29,32,33,35,36};
+static struct {
+    ULONGLONG arm,objs,mc,adj,mask;
+    float before[20][4],cached[20][4];
+} blade_fingers;
+
+static void blade_fingers_release(void)
+{
+    if(blade_fingers.mask && hand_slots_owned(blade_fingers.arm,blade_fingers.objs,
+                                              blade_fingers.mc,blade_fingers.adj)) {
+        for(int i=0;i<20;i++) {
+            int j=blade_flex_joints[i%10]+(i>=10?17:0);
+            float *slot=(float *)(uintptr_t)(blade_fingers.adj+j*16);
+            uint64_t bit=1ULL<<j;
+            if((blade_fingers.mask & bit) && !memcmp(slot,blade_fingers.cached[i],16)) {
+                memcpy(slot,blade_fingers.before[i],16);
+                *(uint64_t *)(uintptr_t)(blade_fingers.mc+0x38)&=~bit;
+            }
+        }
+    }
+    memset(&blade_fingers,0,sizeof blade_fingers);
+}
+
+/* Curl the two proximal joints of each digit around the across-palm axis.
+   Knuckles are proximal to their own correction, so holding does not integrate
+   the angle. Wrist position and controller tracking remain independently driven. */
+static int grip_fingers_apply(ULONGLONG arm,ULONGLONG player,double weight,unsigned sides)
+{
+    ULONGLONG objs=*(ULONGLONG *)(uintptr_t)arm,mc=*(ULONGLONG *)(uintptr_t)(arm+8),adj;
+    DG_ADJ_FRAME frame=ADJ_FRAME_LEGACY;
+    int stride=g_b.skel_stride;
+    float slots[20][4];uint64_t mask=0;
+    if(!(weight>0 && weight<=1) || stride<64 || g_b.skel_parents_read<55 ||
+       !plausible_ptr(mc) || region_end(mc)<mc+0x50)return 0;
+    adj=*(ULONGLONG *)(uintptr_t)(mc+0x48);
+    if(!hand_slots_owned(arm,objs,mc,adj) || region_end(objs)<objs+DG_OBJS_ARRAY+54ULL*stride+64)return 0;
+    if(blade_fingers.mask && (blade_fingers.arm!=arm || blade_fingers.adj!=adj ||
+       blade_fingers.objs!=objs || blade_fingers.mc!=mc))blade_fingers_release();
+    if(blade_fingers.mask){
+        unsigned previous=(blade_fingers.mask&(1ull<<22)?1u:0u)|(blade_fingers.mask&(1ull<<39)?2u:0u);
+        if(previous!=sides)blade_fingers_release();
+    }
+    if(g_b.adjust_frame==1) {
+        frame.live=1;frame.valid=arm_frame_yaw(*(short *)(uintptr_t)(player+0x82),frame.q);
+        if(!frame.valid)return 0;
+    }
+    memset(slots,0,sizeof slots);
+    for(int side=0;side<2;side++) {
+        if(!(sides&(1u<<side)))continue;
+        int offset=side*17;
+        const float *index=(float *)(uintptr_t)(objs+DG_OBJS_ARRAY+(25+offset)*(ULONGLONG)stride);
+        const float *little=(float *)(uintptr_t)(objs+DG_OBJS_ARRAY+(35+offset)*(ULONGLONG)stride);
+        double axis[3],len=0;
+        for(int j=0;j<17;j++) {
+            int parent=hand_pose_parents[j];
+            if(g_b.skel_parents[21+offset+j]!=(side?(parent==6?10:parent+17):parent))return 0;
+        }
+        for(int k=0;k<3;k++){axis[k]=(index[12+k]-little[12+k])*(side?-1:1);len+=axis[k]*axis[k];}
+        len=sqrt(len);if(!(len>1 && len<250))return 0;
+        for(int i=0;i<10;i++) {
+            int n=side*10+i,j=blade_flex_joints[i]+offset;
+            uint64_t bit=1ULL<<j;double world[4],q[4];
+            double half=(i<2?20.0:(i%2?45.0:38.0))*weight*0.00872664626;
+            const float *slot=(float *)(uintptr_t)(adj+j*16);
+            if((*(uint64_t *)(uintptr_t)(mc+0x38)&bit)!=(blade_fingers.mask&bit) ||
+               ((blade_fingers.mask&bit) && memcmp(slot,blade_fingers.cached[n],16)))return 0;
+            for(int k=0;k<3;k++)world[k]=axis[k]*sin(half)/len;
+            world[3]=cos(half);
+            if(!world_quat_to_adjust(&frame,world,q))return 0;
+            for(int k=0;k<4;k++)slots[n][k]=(float)q[k];
+            mask|=bit;
+        }
+    }
+    for(int n=0;n<20;n++) {
+        int j=blade_flex_joints[n%10]+(n>=10?17:0);
+        float *slot=(float *)(uintptr_t)(adj+j*16);
+        if(!(mask&(1ull<<j)))continue;
+        if(!blade_fingers.mask)memcpy(blade_fingers.before[n],slot,16);
+        memcpy(slot,slots[n],16);
+    }
+    memcpy(blade_fingers.cached,slots,sizeof slots);
+    blade_fingers.arm=arm;blade_fingers.objs=objs;blade_fingers.mc=mc;blade_fingers.adj=adj;
+    blade_fingers.mask=mask;*(uint64_t *)(uintptr_t)(mc+0x38)|=mask;return 1;
+}
+static int blade_fingers_apply(ULONGLONG arm,ULONGLONG player,double weight)
+{
+    return grip_fingers_apply(arm,player,weight,3);
 }
 static void hand_pose_release(void)
 {
     int j;
+    blade_fingers_release();
     if(g_hand_pose.active && hand_pose_owner()) for(j=0;j<17;j++) {
         float *slot=(float *)(ULONG_PTR)(g_hand_pose.adj+(21+j)*16);
         if(!memcmp(slot,g_hand_pose.cached+j*4,16)) {
@@ -102,15 +190,7 @@ static int hand_pose_quat(ULONGLONG base,int id,int stride,const DG_ADJ_FRAME *f
         rows[r][c]=((volatile float *)(ULONG_PTR)address)[r*4+c];
     return dg_ik_basis_quat(rows,world) && world_quat_to_adjust(frame,world,q);
 }
-/* Left -> right mirror of a LOCAL rotation (negate y and z). Under the live
-   adjust frame every quaternion here is conjugated by the actor heading f, so
-   a local rotation reads f* L f and negating ITS y,z mirrors about a plane that
-   turns with the body: the stored rest came out rotated by twice the heading at
-   capture (fine at 0/180 degrees, fingers bent backwards at 90/270, curls
-   turned into long-axis twists in between - measured 2026-09-18 from the
-   existing `hand joint:` lines, 152.1 and -89.5 degrees in two sessions).
-   Mirror the heading-free rotation and express the result in the caller's
-   frame again. The legacy frame has no heading in it and is left as it was. */
+
 static int hand_pose_mirror_local(const DG_ADJ_FRAME *frame,const double local[4],double out[4])
 {
     double m[4];
@@ -128,6 +208,23 @@ static void hand_pose_now(ULONGLONG arm,const DG_BRIDGE_ARM_TARGET *t)
     DG_ADJ_FRAME frame=ADJ_FRAME_LEGACY;
     double right[18][4],left[18][4],previous[17][4],next[17][4],wrist[4],pose[17][4];
     float slots[68];int j,k;
+    if(t && t->optics.valid && g_left.active && optics_configured() &&
+       resolve_player(&current,&pw,&weapon)==DG_RESOLVE_OK && current==arm){
+        int parked=0;
+        if(optics_locomotion(pw,&parked) && parked){
+            if(g_hand_pose.active)hand_pose_release();
+            if(!grip_fingers_apply(arm,pw,.72,2))blade_fingers_release();
+            return;
+        }
+    }
+    if(t && t->aim_weapon_id==13 && t->aim_arm==arm && t->write && t->left_valid &&
+       g_b.ik_active && g_left.active && t->brace_weight>0 &&
+       resolve_player(&current,&pw,&weapon)==DG_RESOLVE_OK && current==arm && weapon==13) {
+        if(g_hand_pose.active)hand_pose_release();
+        if(!blade_fingers_apply(arm,pw,t->brace_weight))blade_fingers_release();
+        return;
+    }
+    if(blade_fingers.mask)blade_fingers_release();
     if(!t || !t->left_enabled || !t->left_valid || !t->write ||
         !g_b.ik_active || !g_left.active ||
         resolve_player(&current,&pw,&weapon)!=DG_RESOLVE_OK || current!=arm || weapon!=0 ||

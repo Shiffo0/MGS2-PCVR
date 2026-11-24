@@ -8,14 +8,12 @@
 #include "dg_favorites.h"
 static char g_favorites_path[MAX_PATH];
 static void controls_favorites_path(void) {
-#ifndef DG_HOOK_TEST
     DWORD n=GetModuleFileNameA(NULL,g_favorites_path,sizeof g_favorites_path);
     char *slash;
     if (!n || n>=sizeof g_favorites_path) {g_favorites_path[0]=0;return;}
     slash=strrchr(g_favorites_path,92);
     if (!slash || strcpy_s(slash+1,sizeof g_favorites_path-(size_t)(slash+1-g_favorites_path),"dg_favorites.dat"))
         g_favorites_path[0]=0;
-#endif
 }
 typedef struct {
     int available;
@@ -392,6 +390,10 @@ static void controls_route_frame(const DG_XR_FRAME *frame, int allowed,
             !owned.selection.intent && !owned.selection.quick && !owned.deny_new_fire &&
             !dg_bridge_radial_paused() && !dg_bridge_psg_scope_active() &&
             dg_radial_controls_equip_ready(&in,&owned);
+        /* An equipped optic reserves both grips even before the eye opens.
+           Keep feeding the edge detector so a held grip cannot become a
+           deferred thermal toggle upon switching or putting the item away. */
+        ready=ready && !dg_bridge_optics_grip_owned(g_controls.catalog.actor_item);
         if (thermal_input_step(&g_controls.thermal,frame,weapon_hand,ready,
                 now_ms,generation,g_controls.context,&g_controls.catalog,&intent))
             dg_bridge_radial_offer(&intent,g_controls.catalog.player,
@@ -403,6 +405,19 @@ static void controls_route_frame(const DG_XR_FRAME *frame, int allowed,
         frame->left_hand.menu_button || frame->right_hand.primary_button ||
         frame->right_hand.secondary_button || frame->right_hand.menu_button ||
         frame->left_hand.thumbstick_click || frame->right_hand.thumbstick_click)),&out->m9);
+    if (frame) {   /* m9_grab_probe: grip level and pose ages behind the m9 sample */
+        out->m9_diag.valid=1;
+        out->m9_diag.left_squeeze=frame->left_hand.squeeze_value;
+        out->m9_diag.left_age_ms=frame->left_hand.grip.pose_age_ms;
+        out->m9_diag.right_age_ms=frame->right_hand.grip.pose_age_ms;
+        out->m9_diag.aim_age_ms=frame->right_hand.aim.pose_age_ms;
+    }
+
+    if (frame && out->m9.valid && weapon_hand==1) {
+        out->reload_eject.valid=1;
+        out->reload_eject.squeeze=frame->right_hand.squeeze_value;
+        out->reload_eject.ear=controls_codec_at_ear(frame,1);
+    }
     blade_sample_from_frame(frame,native_allowed && generation &&
         !(radial && (owned.deny_new_fire || !owned.route_valid)) &&
         !(frame && (frame->left_hand.primary_button || frame->left_hand.secondary_button ||
@@ -425,6 +440,7 @@ static void controls_route_frame(const DG_XR_FRAME *frame, int allowed,
           frame->left_hand.menu_button || frame->right_hand.menu_button)),
         now_ms,g_controls.context,&out->nikita);
     out->fire_available=fire_from_frame(frame,&out->fire);
+    out->fire_fp_button=frame && frame->right_hand.primary_button;   /* psg_v8: same snapshot as the trigger */
     if (fire_idle && (!native_allowed || (radial && owned.deny_new_fire)))
         out->fire.valid=0;
     if (!allowed || special_allowed || allowed==DG_CONTROLS_RADIAL_ONLY) movement=NULL;
@@ -509,6 +525,7 @@ static void controls_provide(void *user, int allowed, int fire_idle,
         out->m9.allowed=0;out->blade.allowed=0;
     }
     dg_xr_m9_feedback(dg_bridge_m9_events());
+    dg_xr_blade_feedback(dg_bridge_blade_events());
     memset(&view,0,sizeof view);
     if ((allowed==DG_CONTROLS_GAMEPLAY || allowed==DG_CONTROLS_TURN_ONLY ||
          allowed==DG_CONTROLS_RADIAL_ONLY) && have && generation &&

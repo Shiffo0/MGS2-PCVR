@@ -1,10 +1,3 @@
-
-
-
-
-
-
-
 static int camera_standing_height_read(ULONGLONG base, ULONGLONG player,
                                        float *height)
 {
@@ -29,8 +22,6 @@ static int camera_standing_height_read(ULONGLONG base, ULONGLONG player,
         return 0;
     action = *(const ULONGLONG *)(ULONG_PTR)(player+0xC60);
     if (action != base+0x51A790 && action != base+0x53D620) {
-
-
 
         LONG weapon;
         static const unsigned char spray[] = {0x4c,0x8b,0xdc,0x57,0x41,0x54,0x41,0x55,

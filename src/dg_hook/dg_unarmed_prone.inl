@@ -1,5 +1,3 @@
-
-
 #include <intrin.h>
 static const DWORD unarmed_prone_standing[2]={0x9801f0,0x9802c0};
 static const DWORD unarmed_prone_ground[2]={0x980530,0x9805e0};

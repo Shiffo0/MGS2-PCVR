@@ -1,4 +1,3 @@
-// dg_radar.inl - wrist radar, draw-hook half (2026-09-18).
 //
 
 // composites the Soliton radar map onto the HUD with ONE non-indexed 4-vertex
@@ -59,13 +58,8 @@ volatile LONG radarWhy[radarWhyCount] = {};
 LONG radarFrameHits = 0;                                     // draw thread only
 UINT radarLastVp[4] = {}, radarLastTex[3] = {};              // x, y, w, h / w, h, format of the last hit
 
-
-
-
-
 extern "C" int dg_xr_radar_capture(void *d3d11_texture2d);
 int radarDeliver(ID3D11Texture2D *t) { return dg_xr_radar_capture(t); }
-
 
 // Reads the pipeline under MultiLock and lets go of it before returning.
 int radarInspect(ID3D11DeviceContext *c, UINT vertexCount, ID3D11Texture2D **out) {
@@ -100,7 +94,7 @@ int radarInspect(ID3D11DeviceContext *c, UINT vertexCount, ID3D11Texture2D **out
     }
     return why;
 }
-// true = do not forward this non-indexed draw. Runs after the per-draw observers, so their counts do not
+
 // depend on vr_radar_hud. Only the first composite of a frame is captured or withheld; a second draw that
 // fits the structure is counted (extra) and left alone - it is not known which of them would be the radar.
 bool radarOnDraw(ID3D11DeviceContext *c, UINT vertexCount) {

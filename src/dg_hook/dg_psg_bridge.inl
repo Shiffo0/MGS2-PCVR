@@ -1,4 +1,3 @@
-
 #include "dg_psg_aim.h"
 static DG_DETOUR g_psg_detour;
 static SRWLOCK g_psg_lock=SRWLOCK_INIT;
@@ -8,18 +7,13 @@ static struct {
     LONG tick,entry; float shot[4][4];
 } g_psg_camera;
 static volatile LONG g_psg_applied,g_psg_refused;
+
+#define PSG_SHOT_LOG_MAX 64
 static const unsigned char psg_seam[]={0x41,0x8b,0x86,0x24,1,0,0,0x48,0x8d,0x4d,0xe7};
-
-
-
-
-
 
 static int psg_context(uint64_t expected,uint64_t *actor_out,uint64_t *player_out,
                        uint64_t *scope_out,uint64_t *camera_out,int *weapon_out) {
-
-
-
+    int dgw_w=dgw_weapon_now();
     ULONGLONG player,arm; LONG weapon; DG_CAMERA_GATE gate;uint64_t actor,object,scope,now=GetTickCount64();
     if((!g_psg.live) || (g_psg.fault) || (!g_b.armed) || (g_b.owner) || (g_b.script_menu_only) ||
        (g_b.s_late_unsafe) || (!g_controls_allowed) || (now<g_controls_lease) || (now-g_controls_lease>100) ||
@@ -69,6 +63,17 @@ static void psg_shot(void *original_rsp) {
     if(!TryAcquireSRWLockShared(&g_psg_lock)){ReleaseSRWLockShared(&g_controls_lock);return;}
     __try {
         now=GetTickCount64();age=(LONG)((DWORD)g_b.c_ticks-(DWORD)g_psg_camera.tick);
+        /* vr_psg_rifle HIP (scope closed): the shot leaves the muzzle along
+           the barrel of the rifle in the hand. Never true with the key off. */
+
+        if(psg_rifle_hip_held()) {
+            if(psg_context(regs[1],&actor,&player,&scope,&camera,&weapon) && psg_rifle_hip_shot(actor,used)) {
+                dst=(float *)(uintptr_t)(regs[10]-0x19);
+                if((uintptr_t)dst==(uintptr_t)original_rsp+0x50) {
+                    memcpy(native,dst,sizeof native);memcpy(dst,used,sizeof used);applied=2;
+                }
+            }
+        } else
         if(g_psg_camera.valid && now>=g_psg_camera.ms && now-g_psg_camera.ms<=50 && age>=0 && age<=2 &&
            g_psg_camera.entry==g_b.c_explicit_entries &&
            psg_context(regs[1],&actor,&player,&scope,&camera,&weapon) &&
@@ -84,8 +89,20 @@ static void psg_shot(void *original_rsp) {
     } __except(EXCEPTION_EXECUTE_HANDLER){InterlockedExchange(&g_psg.fault,1);}
     if(applied)count=InterlockedIncrement(&g_psg_applied);else InterlockedIncrement(&g_psg_refused);
     ReleaseSRWLockShared(&g_psg_lock);ReleaseSRWLockShared(&g_controls_lock);
-    /* Bounded support evidence, no render-loop logging or player input data. */
-    if(applied && count<=8 && g_b.log)g_b.log(
+    if (applied == 1 && g_psg_probe_on && g_b.log) {
+        unsigned ordinal = InterlockedIncrement(&g_psg_capture_count[weapon == 19]);
+        unsigned id = ((unsigned)weapon << 16) | (ordinal & 0xffff);
+        DWORD stamp = GetTickCount();
+        if (ordinal <= 2) {
+            InterlockedExchange64(&g_psg_capture_request, ((LONG64)stamp << 32) | id);
+            g_b.log("  PSG sight: id=%u ms=%lu tick=%ld weapon=%d origin=%.2f,%.2f,%.2f dir=%.6f,%.6f,%.6f\r\n",
+                    id,stamp,g_b.c_ticks,weapon,used[3][0],used[3][1],used[3][2],
+                    -used[1][0],-used[1][1],-used[1][2]);
+        }
+    }
+
+    if(applied && count<=PSG_SHOT_LOG_MAX && g_b.log)g_b.log(
+        applied==2 ? "  PSG muzzle shot: weapon=%d actor=%llx age_ticks=%ld native_dir=%.5f,%.5f,%.5f barrel_dir=%.5f,%.5f,%.5f origin_delta=%.2f,%.2f,%.2f\r\n" :
         "  PSG head shot: weapon=%d actor=%llx age_ticks=%ld native_dir=%.5f,%.5f,%.5f head_dir=%.5f,%.5f,%.5f origin_delta=%.2f,%.2f,%.2f\r\n",
         weapon,(unsigned long long)actor,age,-native[1][0],-native[1][1],-native[1][2],
         -used[1][0],-used[1][1],-used[1][2],used[3][0]-native[3][0],used[3][1]-native[3][1],used[3][2]-native[3][2]);

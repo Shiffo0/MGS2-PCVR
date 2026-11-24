@@ -1,7 +1,7 @@
 // Replay only native HUD sprite shaders into an initially transparent target.
 // The game's own icon, bullet strip, font, colors and alpha remain authoritative.
 // Capture the complete lower-right HUD region through the screen edges.
-// The previous tight virtual-512x384 crop truncated live artwork.
+
 // Only sprite draws are replayed; no scene texture or backbuffer is copied.
 constexpr float ammoX=.75f,ammoY=.70f;
 constexpr float ammoW=.25f,ammoH=.30f;
@@ -16,13 +16,8 @@ unsigned ammoDraws=0;
 bool ammoCapturedDraw=false;
 ULONGLONG ammoReadyMs=0;
 void ammoReset(){ammoTexture.Reset();ammoRT.Reset();ammoCB.Reset();ammoDepth.Reset();ammoRaster.Reset();ammoBlend.Reset();ammoHeight=ammoCbBytes=ammoDraws=0;}
-
-
-
-
 extern "C" int dg_xr_ammo_capture(void*);
 int ammoDeliver(ID3D11Texture2D*t){return dg_xr_ammo_capture(t);}
-
 bool ammoShader(UINT64 h){return h==0x25506B36206636CAull||h==0x4E028ADD1EA96D0Bull;}
 // CPU register bank remains pristine even if stereo HUD placement changed the
 // bound GPU buffer. Transform that original bank directly into the crop.
@@ -120,7 +115,10 @@ bool ammoHideDraw(ID3D11DeviceContext*c,UINT n,UINT first){
                      {full.left,top,left,bottom},{right,top,full.right,bottom}};
  c->RSSetState(clip.Get());auto api=(Draw)(*(void***)c)[13];inside=true;
  for(auto&r:parts)if(r.left<r.right&&r.top<r.bottom){c->RSSetScissorRects(1,&r);api(c,n,first);}
- inside=false;c->RSSetScissorRects(ns,prior);c->RSSetState(old.Get());return true;
+ inside=false;c->RSSetScissorRects(ns,prior);c->RSSetState(old.Get());
+
+ if(secondEye.state==SecondEyeLive::BUILDING)InterlockedIncrement(&ammoHiddenWhileBuilding);
+ return true;
 }
 void ammoOnPresent(){
  // The caller holds lifetime, but MUST NOT hold MultiLock across delivery.

@@ -9,6 +9,9 @@ typedef struct {
     float zoom_y;
     int zoom_active;
     int psg_grip_zoom; /* +1 right/in, -1 left/out, both neutral */
+    /* vr_psg_rifle gesture (dg_psg_gesture.h): 0 invalid, 1 hip, 2 scope;
+       distance (mm) and barrel-to-view angle (0.1 deg) of this sample. */
+    int psg_gesture, psg_gesture_mm, psg_gesture_ddeg;
 } DG_ACTION_SAMPLE;
 typedef struct {
     DG_ACTION_SAMPLE physical;

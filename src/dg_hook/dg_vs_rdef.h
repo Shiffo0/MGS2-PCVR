@@ -1,13 +1,5 @@
 #pragma once
-/* Where does a vertex shader keep its camera? The game's world shaders name it
- * gVS_Pers; its offset in the constant buffer bound at b0 differs per shader
- * (c16, c20, c24 in the 18 Sep table). Read it from the shader's own reflection
- * data (DXBC chunk RDEF) instead of a hand-kept table, so shaders the table has
- * never seen are handled too. Pure parsing, bounds-checked, no allocation.
- *   >= 0  constant index of gVS_Pers in the b0 buffer
- *   -1    no gVS_Pers (screen-space shader: never retargeted)
- *   -2    gVS_Pers lives in a buffer not bound at b0
- *   -3    not a readable DXBC/RDEF */
+
 #include <stdint.h>
 #include <string.h>
 

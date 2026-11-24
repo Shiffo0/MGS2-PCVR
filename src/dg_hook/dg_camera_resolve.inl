@@ -11,8 +11,7 @@ static int camera_resolve_image(const LiveImage *im,uint64_t pad,uint64_t mask,D
         if((s->Characteristics&0xe0000000u)==0x60000000u &&
            !all_valid(im->valid,s->VirtualAddress,s->Misc.VirtualSize,im->size))return 0;
     }
-    /* Match the constructor chain, derive the callback and its pad consumer.
-     * No fixed RVA is used as a live write destination. */
+
     for(r=0;r+0x300<im->size;r++) {
         const unsigned char *p=im->bytes+r,*q;uint64_t cb,des,set,timer;DWORD c;
         if(p[0]!=0x48 || !da_code(im,r,0xc0) ||
@@ -41,7 +40,6 @@ static int camera_resolve_image(const LiveImage *im,uint64_t pad,uint64_t mask,D
         if(q[0x152]!=0xe8)continue;
         timer=da_rel(im,c+0x152,5,q+0x153);
         if(!timer || !da_code(im,(DWORD)(timer-im->base),0x37))continue;
-
 
         {const unsigned char *t=im->bytes+(DWORD)(timer-im->base);
          if(!da_eq(t,"\x40\x53\x48\x83\xec\x20\x8b\xd9\xe8",9) ||

@@ -4,8 +4,6 @@ static uint64_t g_reload_highlight_base;
 static int g_reload_highlight_resolved;
 static unsigned long g_reload_highlight_passes;
 
-
-
 static int reload_highlight_owned(uint64_t objs,uint64_t unit,uint64_t now) {
     int yes=0; uint64_t arm,mag;
     if(!objs || !g_b.armed || g_b.fps.state!=DG_FPS_ACTIVE ||
@@ -26,32 +24,34 @@ static int reload_highlight_owned(uint64_t objs,uint64_t unit,uint64_t now) {
     if(yes)return 1;
     if(TryAcquireSRWLockShared(&g_reload_lock)) {
         __try {
-            if(g_reload.weapon!=2 && reload_fresh() && g_reload.valid && g_reload.waiting && g_reload.empty &&
+            if(g_reload.weapon!=2 && reload_fresh() && g_reload.valid && g_reload.waiting && (g_reload.empty || g_reload.ejected) &&
                g_reload.reserve && !g_reload.anim && !g_reload.gesture.permit &&
                g_reload.arm==arm && reload_visual_ready() &&
                *(uint64_t *)(ULONG_PTR)(g_reload.actor+0x68)==arm &&
                *(int *)(ULONG_PTR)(g_reload.player+0xb90)==g_reload.weapon &&
                *(uint64_t *)(ULONG_PTR)(g_reload.player+0xba8)==arm) {
-                mag=*(uint64_t *)(ULONG_PTR)(g_reload.actor+0x70);
+                /* Rifles: the blue part is the ghost seated in the well (+0x78, see reload_second); the
+                   held magazine (+0x70) keeps its own colour. Pistols: the held magazine, green. */
+                int rifle=dg_reload_rifle(g_reload.weapon);
+                mag=*(uint64_t *)(ULONG_PTR)(g_reload.actor+(rifle ? 0x78 : 0x70));
                 yes=mag==objs && unit==objs+0x110 &&
                     *(short *)(ULONG_PTR)(objs+0x64)==1;
+                if(yes && rifle)
+                    yes=reload_ghost_owed() &&
+                        *(int *)(ULONG_PTR)(g_reload.actor+0x80)==dg_reload_pattern(g_reload.weapon)
+                        ? DG_HIGHLIGHT_BLUE : 0;
             }
         } __finally {ReleaseSRWLockShared(&g_reload_lock);}
     }
     return yes;
 }
 
-
-
-
-
-
 static void reload_highlight_native(void *rsp) {
     uint64_t *r=(uint64_t *)rsp-16;
     if(!g_reload_highlight_resolved)return;
     __try {
-        if(r[6]>=0x18 && reload_highlight_owned(r[9],r[11],GetTickCount64()) &&
-           dg_reload_highlight_colour((float *)(ULONG_PTR)(r[6]-0x18)))
+        int tint=r[6]>=0x18 ? reload_highlight_owned(r[9],r[11],GetTickCount64()) : 0;
+        if(tint && dg_reload_highlight_colour((float *)(ULONG_PTR)(r[6]-0x18),tint))
             g_reload_highlight_passes++;
     } __except(EXCEPTION_EXECUTE_HANDLER) { /* Refuse this sample. */ }
 }

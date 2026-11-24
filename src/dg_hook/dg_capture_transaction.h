@@ -1,8 +1,3 @@
-/* Shared by the runtime and the deterministic producer/consumer desk test.
- * Acquire/wait/release belong OUTSIDE this transaction. Callbacks must not
- * block on XR, and copy queues work on the same immediate context as capture.
- * This makes one coherent snapshot of AFR stores, not a same-time stereo pair.
- */
 #ifndef DG_CAPTURE_TRANSACTION_H
 #define DG_CAPTURE_TRANSACTION_H
 typedef struct {

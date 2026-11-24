@@ -1,5 +1,3 @@
-
-
 #ifndef DG_POSE_H
 #define DG_POSE_H
 
@@ -100,9 +98,7 @@ typedef struct {
     double        hold_pos[3];  /* last published target: the rate-limit anchor */
     double        hold_quat[4];
     double        weight;
-    /* Seconds banked by frames that only replayed the latch. The blend has to
-       run on wall-clock time, not on pairs, or its duration would depend on
-       whether stereo happens to be on. */
+
     double        pending_dt;
     unsigned long last_frame;
     int           have_frame;   /* last_frame means something */
@@ -114,13 +110,6 @@ typedef struct {
    3000 mm/s, 720 deg/s, 0.10 s max dt. */
 void dg_pose_cfg_default(DG_POSE_CFG *cfg);
 
-/* Zero-initialises s and adopts cfg. A NULL cfg means the defaults.
-   Non-finite or non-positive config entries are replaced by their default
-   rather than refused: init has no way to report, and a module that refused
-   every frame for the rest of the session because one marker line was mistyped
-   would be a worse failure than one that runs with a sane number. blend times
-   of exactly 0 ARE honoured - that means "no blend", which is a legitimate
-   thing to ask for. */
 void dg_pose_init(DG_POSE_STATE *s, const DG_POSE_CFG *cfg);
 
 /* One frame. Never fails, never refuses to produce an answer: on any input at

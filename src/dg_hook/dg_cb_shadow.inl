@@ -23,11 +23,27 @@ using MapFn = HRESULT (STDMETHODCALLTYPE *)(ID3D11DeviceContext *, ID3D11Resourc
 enum { FL_CAP, FL_WRAP, FL_FALLBACK, FL_SAMPLE, FL_MAP, FL_TARGETS, FL_WRITE, FL_CLEAR, FL_DISPATCH, FL_PRESENT, FL_FRAME, FL_KINDS };
 static const char *const flushNames[FL_KINDS] = { "cap", "wrap", "fallback", "sample", "map", "targets", "write", "clear", "dispatch", "present", "frame" };
 void batchHazard(ID3D11DeviceContext *c, int kind, ID3D11Resource *r);           // r null: always flush
+unsigned long long mapFlushCount(void);
+unsigned long long mapFlushByType[3];
 void batchTargets(ID3D11DeviceContext *c, UINT n, ID3D11RenderTargetView *const *rt, ID3D11DepthStencilView *ds, bool uavs);
 void batchMirrorClearRt(ID3D11DeviceContext *c, ID3D11RenderTargetView *v, const FLOAT col[4]);   /* stage A: the post target's clears for B3/B4 */
 void batchMirrorClearDs(ID3D11DeviceContext *c, ID3D11DepthStencilView *v, UINT f, FLOAT z, UINT8 s);
-enum { HZ_MAP, HZ_OMSET, HZ_OMSETUAV, HZ_DISPATCH, HZ_DISPATCHIND, HZ_UPDATE, HZ_CLEARRT, HZ_CLEARUAVU, HZ_CLEARUAVF, HZ_CLEARDS, HZ_MIPS, HZ_DIIN, HZ_DIN, HZ_COUNT };
-static const unsigned hzSlots[HZ_COUNT] = { 14, 33, 34, 41, 42, 48, 50, 51, 52, 53, 54, 20, 21 };
+void batchMirrorClearView(ID3D11DeviceContext *c, ID3D11View *v, const FLOAT col[4], const D3D11_RECT *rects, UINT n);
+
+enum { HZ_MAP, HZ_OMSET, HZ_OMSETUAV, HZ_DISPATCH, HZ_DISPATCHIND, HZ_UPDATE, HZ_CLEARRT, HZ_CLEARUAVU, HZ_CLEARUAVF, HZ_CLEARDS, HZ_MIPS, HZ_DIIN, HZ_DIN, HZ_CLEARVIEW, HZ_COUNT };
+static const unsigned hzSlots[HZ_COUNT] = { 14, 33, 34, 41, 42, 48, 50, 51, 52, 53, 54, 20, 21, 132 };
+/* Slot 132 exists only on an ID3D11DeviceContext1 vtable. It is armed only when
+   the immediate context answers ID3D11DeviceContext1 with the same object (so
+   the same vtable); else it is never read or written. */
+int hzCtx1 = -1;   /* -1 unknown, 0 no, 1 yes */
+bool hzSlotUsed(int k) {
+    if (k != HZ_CLEARVIEW) return true;
+    if (hzCtx1 < 0 && context.Get()) {
+        ComPtr<ID3D11DeviceContext1> c1;
+        hzCtx1 = SUCCEEDED(context.As(&c1)) && (void *)c1.Get() == (void *)context.Get() ? 1 : 0;
+    }
+    return hzCtx1 == 1;
+}
 void censusInstanced(ID3D11DeviceContext *c, UINT verts, bool indexed);   /* census only: instanced draws are never replayed */
 struct CbMapSet { void **vt; Hook h[HZ_COUNT]; };
 CbMapSet cbMapSets[4]; unsigned cbMapSetCount = 0;
@@ -41,7 +57,12 @@ CbShadowEntry *cbShadowFind(const void *b) { for (auto &e : cbShadow) if (e.buff
 HRESULT STDMETHODCALLTYPE cbMapObserved(ID3D11DeviceContext *c, ID3D11Resource *r, UINT sub, D3D11_MAP type, UINT flags, D3D11_MAPPED_SUBRESOURCE *m) {
     MapFn next = (MapFn)hzNext(c, HZ_MAP);
 
-    if (type != D3D11_MAP_READ) batchHazard(c, FL_MAP, r);          // before the contents change
+    if (type != D3D11_MAP_READ) {                                   // before the contents change
+        unsigned long long before = mapFlushCount();
+        batchHazard(c, FL_MAP, r);
+
+        if (mapFlushCount() != before) ++mapFlushByType[type == D3D11_MAP_WRITE_DISCARD ? 0 : type == D3D11_MAP_WRITE_NO_OVERWRITE ? 1 : 2];
+    }
     HRESULT hr = next(c, r, sub, type, flags, m);
     if (ownerThread && GetCurrentThreadId() == ownerThread) {
         if (CbShadowEntry *e = cbShadowFind(r)) { if (e->valid) InterlockedIncrement(&cbShadowInvalidated); e->valid = false; }
@@ -91,6 +112,7 @@ using ClearUavUFn = void (STDMETHODCALLTYPE *)(ID3D11DeviceContext *, ID3D11Unor
 using ClearUavFFn = void (STDMETHODCALLTYPE *)(ID3D11DeviceContext *, ID3D11UnorderedAccessView *, const FLOAT[4]);
 using ClearDsFn = void (STDMETHODCALLTYPE *)(ID3D11DeviceContext *, ID3D11DepthStencilView *, UINT, FLOAT, UINT8);
 using MipsFn = void (STDMETHODCALLTYPE *)(ID3D11DeviceContext *, ID3D11ShaderResourceView *);
+using ClearViewFn = void (STDMETHODCALLTYPE *)(ID3D11DeviceContext1 *, ID3D11View *, const FLOAT[4], const D3D11_RECT *, UINT);
 void STDMETHODCALLTYPE hzOmSet(ID3D11DeviceContext *c, UINT n, ID3D11RenderTargetView *const *rt, ID3D11DepthStencilView *ds) {
      batchTargets(c, n, rt, ds, false); ((OmSetFn)hzNext(c, HZ_OMSET))(c, n, rt, ds); }
 void STDMETHODCALLTYPE hzOmSetUav(ID3D11DeviceContext *c, UINT n, ID3D11RenderTargetView *const *rt, ID3D11DepthStencilView *ds, UINT us, UINT un, ID3D11UnorderedAccessView *const *u, const UINT *uc) {
@@ -102,31 +124,90 @@ void STDMETHODCALLTYPE hzDispatch(ID3D11DeviceContext *c, UINT x, UINT y, UINT z
 void STDMETHODCALLTYPE hzDispatchInd(ID3D11DeviceContext *c, ID3D11Buffer *b, UINT o) { batchHazard(c, FL_DISPATCH, nullptr); ((DispatchIndFn)hzNext(c, HZ_DISPATCHIND))(c, b, o); }
 void STDMETHODCALLTYPE hzUpdate(ID3D11DeviceContext *c, ID3D11Resource *r, UINT s, const D3D11_BOX *b, const void *p, UINT rp, UINT dp) {
     batchHazard(c, FL_WRITE, r); ((UpdateFn)hzNext(c, HZ_UPDATE))(c, r, s, b, p, rp, dp); }
-void STDMETHODCALLTYPE hzClearRt(ID3D11DeviceContext *c, ID3D11RenderTargetView *v, const FLOAT col[4]) { batchHazard(c, FL_CLEAR, nullptr); batchMirrorClearRt(c, v, col); ((ClearRtFn)hzNext(c, HZ_CLEARRT))(c, v, col); }
+void hzRearmAfterClear(ID3D11DeviceContext *c);
+void cbShadowDropAll();
+void STDMETHODCALLTYPE hzClearRt(ID3D11DeviceContext *c, ID3D11RenderTargetView *v, const FLOAT col[4]) { batchHazard(c, FL_CLEAR, nullptr); batchMirrorClearRt(c, v, col); ((ClearRtFn)hzNext(c, HZ_CLEARRT))(c, v, col); hzRearmAfterClear(c); }
 void STDMETHODCALLTYPE hzClearUavU(ID3D11DeviceContext *c, ID3D11UnorderedAccessView *v, const UINT x[4]) { batchHazard(c, FL_CLEAR, nullptr); ((ClearUavUFn)hzNext(c, HZ_CLEARUAVU))(c, v, x); }
 void STDMETHODCALLTYPE hzClearUavF(ID3D11DeviceContext *c, ID3D11UnorderedAccessView *v, const FLOAT x[4]) { batchHazard(c, FL_CLEAR, nullptr); ((ClearUavFFn)hzNext(c, HZ_CLEARUAVF))(c, v, x); }
 void STDMETHODCALLTYPE hzClearDs(ID3D11DeviceContext *c, ID3D11DepthStencilView *v, UINT f, FLOAT z, UINT8 s) { batchHazard(c, FL_CLEAR, nullptr); batchMirrorClearDs(c, v, f, z, s); ((ClearDsFn)hzNext(c, HZ_CLEARDS))(c, v, f, z, s); }
 void STDMETHODCALLTYPE hzMips(ID3D11DeviceContext *c, ID3D11ShaderResourceView *v) { batchHazard(c, FL_WRITE, nullptr); ((MipsFn)hzNext(c, HZ_MIPS))(c, v); }
+
+void STDMETHODCALLTYPE hzClearView(ID3D11DeviceContext1 *c, ID3D11View *v, const FLOAT col[4], const D3D11_RECT *r, UINT n) {
+    ID3D11DeviceContext *c0 = (ID3D11DeviceContext *)c;
+    batchHazard(c0, FL_CLEAR, nullptr); batchMirrorClearView(c0, v, col, r, n); ((ClearViewFn)hzNext(c0, HZ_CLEARVIEW))(c, v, col, r, n); }
 using DiinFn = void (STDMETHODCALLTYPE *)(ID3D11DeviceContext *, UINT, UINT, UINT, INT, UINT);
 using DinFn = void (STDMETHODCALLTYPE *)(ID3D11DeviceContext *, UINT, UINT, UINT, UINT);
-void STDMETHODCALLTYPE hzDiin(ID3D11DeviceContext *c, UINT n, UINT inst, UINT si, INT bv, UINT sinst) { ((DiinFn)hzNext(c, HZ_DIIN))(c, n, inst, si, bv, sinst);  }
-void STDMETHODCALLTYPE hzDin(ID3D11DeviceContext *c, UINT n, UINT inst, UINT sv, UINT sinst) { ((DinFn)hzNext(c, HZ_DIN))(c, n, inst, sv, sinst);  }
+void STDMETHODCALLTYPE hzDiin(ID3D11DeviceContext *c, UINT n, UINT inst, UINT si, INT bv, UINT sinst) { ((DiinFn)hzNext(c, HZ_DIIN))(c, n, inst, si, bv, sinst); censusInstanced(c, n, true); }
+void STDMETHODCALLTYPE hzDin(ID3D11DeviceContext *c, UINT n, UINT inst, UINT sv, UINT sinst) { ((DinFn)hzNext(c, HZ_DIN))(c, n, inst, sv, sinst); censusInstanced(c, n, false); }
 static void *const hzOurs[HZ_COUNT] = { (void *)cbMapObserved, (void *)hzOmSet, (void *)hzOmSetUav, (void *)hzDispatch, (void *)hzDispatchInd, (void *)hzUpdate,
-                                        (void *)hzClearRt, (void *)hzClearUavU, (void *)hzClearUavF, (void *)hzClearDs, (void *)hzMips, (void *)hzDiin, (void *)hzDin };
-/* All observers in the current vtable (cheap: 11 pointer compares). Live 27 Sep:
-   d3d11 itself rewrites slots 41-54 at least once a frame. */
+                                        (void *)hzClearRt, (void *)hzClearUavU, (void *)hzClearUavF, (void *)hzClearDs, (void *)hzMips, (void *)hzDiin, (void *)hzDin,
+                                        (void *)hzClearView };
+
+volatile LONG hzViewRearms = 0, hzClearRearms = 0, hzClearRearmCalls = 0;
+void hzRearmAfterClear(ID3D11DeviceContext *c) {
+    if (stopping || c != context.Get() || !ownerThread || GetCurrentThreadId() != ownerThread) return;
+    void **vt = *(void ***)c;
+    CbMapSet *set = nullptr;
+    for (unsigned i = 0; i < cbMapSetCount; i++) if (cbMapSets[i].vt == vt) set = &cbMapSets[i];
+    if (!set) return;
+    bool any = false;
+    for (int k = 0; k < HZ_COUNT; k++) {
+        if (!hzSlotUsed(k)) continue;
+        void *now = vt[hzSlots[k]];
+        if (now == hzOurs[k] || !now) continue;
+        Hook &h = set->h[k];
+        h = { vt + hzSlots[k], now, hzOurs[k] };
+        if (k == HZ_MAP) cbShadowDropAll();
+        if (writeSlot(h, now, h.ours)) { InterlockedIncrement(&hzClearRearms); any = true; if (k == HZ_CLEARVIEW) InterlockedIncrement(&hzViewRearms); }
+        else h.slot = nullptr;
+    }
+    if (any) InterlockedIncrement(&hzClearRearmCalls);
+}
+
 bool cbShadowArmed() {
     if (!context.Get()) return false;
     void **ct = *(void ***)context.Get();
-    for (int k = 0; k < HZ_COUNT; k++) if (ct[hzSlots[k]] != hzOurs[k]) return false;
+    for (int k = 0; k < HZ_COUNT; k++) if (hzSlotUsed(k) && ct[hzSlots[k]] != hzOurs[k]) return false;
     return true;
 }
+
+unsigned hzTakenMask() {
+    unsigned m = 0;
+    if (!context.Get()) return 0;
+    void **ct = *(void ***)context.Get();
+    for (int k = 0; k < HZ_COUNT; k++) if (hzSlotUsed(k) && ct[hzSlots[k]] != hzOurs[k]) m |= 1u << k;
+    return m;
+}
+enum { HZ_TAKEN_NONE, HZ_TAKEN_ALL14, HZ_TAKEN_GROUP132, HZ_TAKEN_GROUP, HZ_TAKEN_OTHER, HZ_TAKEN_KINDS };
+static int hzTakenKind(unsigned m) {
+    const unsigned group = ((1u << HZ_COUNT) - 1) & ~((1u << HZ_MAP) | (1u << HZ_OMSET) | (1u << HZ_OMSETUAV));
+    if (!m) return HZ_TAKEN_NONE;
+    if (m & (1u << HZ_MAP)) return HZ_TAKEN_ALL14;                       /* slot 14 back (not seen on WARP) */
+    if (!(m & ~group)) return (m & (1u << HZ_CLEARVIEW)) ? HZ_TAKEN_GROUP132 : HZ_TAKEN_GROUP;
+    return HZ_TAKEN_OTHER;
+}
+
+volatile LONG cbShadowStaleDrops = 0;
+void cbShadowDropAll() { for (auto &e : cbShadow) e.valid = false; InterlockedIncrement(&cbShadowStaleDrops); }
+
+volatile LONG cbBatchedWrites = 0, cbSlotWrites = 0;
+bool cbProtectRange(void **lo, void **hi, DWORD *old) {
+    MEMORY_BASIC_INFORMATION a{}, b{};
+    if (!lo || !hi || hi < lo) return false;
+    if (!VirtualQuery(lo, &a, sizeof a) || !VirtualQuery(hi, &b, sizeof b)) return false;
+    if (a.State != MEM_COMMIT || b.State != MEM_COMMIT || a.AllocationBase != b.AllocationBase || a.Protect != b.Protect) return false;
+    return VirtualProtect(lo, (SIZE_T)((char *)(hi + 1) - (char *)lo), PAGE_READWRITE, old) != FALSE;
+}
 // Draw thread, once per frame: the context's CURRENT vtable carries the observers.
-void cbShadowEnsure() {
+
+// periodic line reports as "observers re-armed" (the in-frame re-arms).
+void cbShadowEnsure(bool counted = true) {
     if (!context.Get() || stopping) return;
     void **ct = *(void ***)context.Get();
-    bool all = true; for (int k = 0; k < HZ_COUNT; k++) { cbSeen[k] = ct[hzSlots[k]]; if (cbSeen[k] != hzOurs[k]) all = false; }
+    bool all = true; for (int k = 0; k < HZ_COUNT; k++) { cbSeen[k] = hzSlotUsed(k) ? ct[hzSlots[k]] : nullptr; if (hzSlotUsed(k) && cbSeen[k] != hzOurs[k]) all = false; }
     if (all) return;
+
+    for (unsigned i = 0; i < cbMapSetCount; i++) if (cbMapSets[i].vt == ct && cbSeen[HZ_MAP] != hzOurs[HZ_MAP]) { cbShadowDropAll(); break; }
     CbMapSet *set = nullptr;
     for (unsigned i = 0; i < cbMapSetCount; i++) if (cbMapSets[i].vt == ct) set = &cbMapSets[i];
     bool fresh = !set;
@@ -134,6 +215,7 @@ void cbShadowEnsure() {
         if (cbMapSetCount >= 4) return;
         set = &cbMapSets[cbMapSetCount]; set->vt = ct;
         for (int k = 0; k < HZ_COUNT; k++) {
+            if (!hzSlotUsed(k)) { set->h[k] = { nullptr, nullptr, hzOurs[k] }; continue; }
             /* A vtable the runtime copied from one we patched already holds our
                observer: its next is the one recorded for that earlier vtable -
                never the observer itself (that would recurse). */
@@ -144,14 +226,35 @@ void cbShadowEnsure() {
         cbMapSetCount++;                                          // published before the slots change
     }
     unsigned ok = 0;
+    void **lo = nullptr, **hi = nullptr; DWORD old = 0;
+    for (int k = 0; k < HZ_COUNT; k++) if (hzSlotUsed(k) && ct[hzSlots[k]] != hzOurs[k]) {
+        void **s = ct + hzSlots[k]; if (!lo || s < lo) lo = s; if (!hi || s > hi) hi = s; }
+    bool batched = lo && hi > lo && cbProtectRange(lo, hi, &old);
+    bool wrote[HZ_COUNT] = {};
     for (int k = 0; k < HZ_COUNT; k++) {
+        if (!hzSlotUsed(k)) continue;
         if (ct[hzSlots[k]] == hzOurs[k]) { if (set->h[k].next) ok++; continue; }
         set->h[k] = { ct + hzSlots[k], ct[hzSlots[k]], hzOurs[k] };  // the runtime may have rewritten the slot
-        if (set->h[k].next && writeSlot(set->h[k], set->h[k].next, set->h[k].ours)) ok++; else set->h[k].slot = nullptr;
+        if (!set->h[k].next) { set->h[k].slot = nullptr; continue; }
+        if (batched) {
+            if (InterlockedCompareExchangePointer((void *volatile *)set->h[k].slot, set->h[k].ours, set->h[k].next) == set->h[k].next) { ok++; wrote[k] = true; }
+            else set->h[k].slot = nullptr;
+        } else if (writeSlot(set->h[k], set->h[k].next, set->h[k].ours)) { ok++; InterlockedIncrement(&cbSlotWrites); }
+        else set->h[k].slot = nullptr;
     }
-    if (!fresh && InterlockedIncrement(&cbRearms) > 3) return;     /* counted in the heartbeat */
-    if (logger) logger("second_eye: context observers (Map + batch hazards) %s %u of %u on vtable %p%s\r\n", fresh ? "attached" : "re-armed", ok, (unsigned)HZ_COUNT, (void *)ct, fresh ? "" : " - found in the slots:");
+    if (batched) {
+        DWORD ignored;
+        if (!VirtualProtect(lo, (SIZE_T)((char *)(hi + 1) - (char *)lo), old, &ignored)) {   /* as writeSlot: undo what we wrote */
+            for (int k = 0; k < HZ_COUNT; k++) if (wrote[k]) {
+                InterlockedCompareExchangePointer((void *volatile *)set->h[k].slot, set->h[k].next, set->h[k].ours); set->h[k].slot = nullptr; ok--; }
+        } else InterlockedIncrement(&cbBatchedWrites);
+    }
+    if (!counted) { if (!fresh) return; }
+    else if (!fresh && InterlockedIncrement(&cbRearms) > 3) return; /* counted in the heartbeat */
+    if (logger) logger("second_eye: context observers (Map + batch hazards + ClearView %s) %s %u of %u on vtable %p%s\r\n", hzSlotUsed(HZ_CLEARVIEW) ? "slot 132" : "unavailable: no ID3D11DeviceContext1",
+                       fresh ? "attached" : "re-armed", ok, (unsigned)(hzSlotUsed(HZ_CLEARVIEW) ? HZ_COUNT : HZ_COUNT - 1), (void *)ct, fresh ? "" : " - found in the slots:");
     if (!fresh && logger) for (int k = 0; k < HZ_COUNT; k++) {
+        if (!hzSlotUsed(k)) continue;
         void *was = cbSeen[k]; HMODULE m = nullptr; char path[MAX_PATH] = "?"; const char *name = path;
         if (was && GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)was, &m) && m &&
             GetModuleFileNameA(m, path, sizeof path)) { const char *b = strrchr(path, '\\'); name = b ? b + 1 : path; }
@@ -161,4 +264,5 @@ void cbShadowEnsure() {
 void cbShadowRemove() {
     for (unsigned i = 0; i < cbMapSetCount; i++) for (Hook &h : cbMapSets[i].h) if (h.slot && *h.slot == h.ours) writeSlot(h, h.ours, h.next);
     for (auto &e : cbShadow) e.valid = false;
+    hzCtx1 = -1;
 }

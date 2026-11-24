@@ -66,4 +66,27 @@ static int dg_position_target(const DG_POSITION_STATE *s,const DG_POSITION_INPUT
     for(i=0;i<3;i++){world[i]+=in->camera[12+i];if(!isfinite(world[i]))return 0;}
     memcpy(out,world,sizeof world);return 1;
 }
+
+static int dg_position_inverse(const DG_POSITION_STATE *s,const DG_POSITION_INPUT *in,const double world[3],double grip[3]) {
+    double q[4],inv[4],v[3],raw[3];int i;
+    if(!s || !s->ready || !world || !grip || !(s->scale>0) || !dg_position_frame(in,q) || in->units!=s->units) return 0;
+    for(i=0;i<3;i++){if(!isfinite(world[i]))return 0;v[i]=(world[i]-in->camera[12+i])/in->units;}
+    dg_ik_quat_conj(q,inv);dg_position_rotate(inv,v,raw);
+    for(i=0;i<3;i++){grip[i]=s->grip0[i]+(raw[i]+in->view[4+i]-s->virtual0[i])/s->scale;if(!isfinite(grip[i]))return 0;}
+    return 1;
+}
+
+static int dg_position_absolute_inverse(const DG_POSITION_INPUT *in,const double world[3],double grip[3]) {
+    double q[4],inv[4],v[3],raw[3];int i;
+    if(!in || !in->enabled || !world || !grip || !dg_position_frame(in,q)) return 0;
+    for(i=0;i<3;i++){if(!isfinite(world[i]))return 0;v[i]=(world[i]-in->camera[12+i])/in->units;}
+    dg_ik_quat_conj(q,inv);dg_position_rotate(inv,v,raw);
+    for(i=0;i<3;i++){grip[i]=in->view[4+i]+raw[i];if(!isfinite(grip[i]))return 0;}
+    return 1;
+}
+
+static int dg_support_grip_inverse(int persistent,const DG_POSITION_STATE *s,const DG_POSITION_INPUT *in,
+                                   const double world[3],double grip[3]) {
+    return persistent ? dg_position_absolute_inverse(in,world,grip) : dg_position_inverse(s,in,world,grip);
+}
 #endif

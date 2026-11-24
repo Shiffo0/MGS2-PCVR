@@ -1,6 +1,5 @@
 #include "dg_build_profile.h"
 
-
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <stdio.h>
@@ -14,31 +13,21 @@ static PVOID volatile g_capture_observer;
 void dg_xr_set_capture_observer(DG_XR_CAPTURE_OBSERVER observer) {
     InterlockedExchangePointer(&g_capture_observer,(PVOID)observer);
 }
-
-
-
-
-
-
 #include "dg_proj.h"
 /* Shared bridge types only. Physical button events go through the bounded
    context mailbox above; this runtime thread does not enqueue FPS directly. */
 #include "dg_bridge.h"
 #include "dg_model_arm.h"
 
-
 #include <d3d11.h>
 #include <d3d11_4.h>                    /* ID3D11Multithread - see g_mt */
 #include "dg_context_trace.h"
-
 #include "dg_draw_trial.h"
-
 #include <dxgi.h>
 #define XR_USE_PLATFORM_WIN32
 #define XR_USE_GRAPHICS_API_D3D11
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
-
 
 #define PI 3.14159265358979323846
 
@@ -177,11 +166,6 @@ static void qrot(const double *q, const double *v, double *o) {
     o[2] = v[2] + q[3]*t[2] + c[2];
 }
 
-/* Counted in capture_reference, the one place a seated origin is ever
-   decided. The runtime half owns the increment, so like every line in that
-   half it cannot be desk-tested; what makes it diagnosable anyway is that the
-   heartbeat prints both this count and the arm's own freeze count, and the two
-   are supposed to track each other. */
 static volatile LONG g_recenter_count;
 
 long dg_xr_recenter_count(void) {
@@ -282,28 +266,6 @@ static int controller_recenter_current(uint32_t now_ms)
            g_controller_recenter_context==controller_context_fresh(now_ms);
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 void dg_xr_quat_yaw_only(const double q[4], double out[4]) {
     /* The twist of a swing/twist split about +Y is the Y and W components on
        their own, renormalised. When both are ~0 the head is rotated a half
@@ -320,21 +282,6 @@ void dg_xr_quat_yaw_only(const double q[4], double out[4]) {
     out[3] = q[3] / n;
 }
 
-/* The theater quad's fixed pose. Yaw-only on purpose and by contract: the
-   current mono layer is HEAD-COUPLED (its pose is the live view pose) and the
-   theater needs the exact opposite - a screen that stands still in the world
-   while the compositor gives the head its freedom. So the head pose is used
-   once, at anchor time: its yaw says which way "ahead" is, its position says
-   where the eyes are, and pitch/roll are stripped so a player who entered a
-   cutscene mid-glance still gets an upright screen at eye height.
-
-   For a pure +Y yaw quaternion (0, s, 0, c): sin(a) = 2sc, cos(a) = 1-2s^2,
-   and rotating OpenXR's forward (0,0,-1) by it lands on (-sin a, 0, -cos a).
-   The quad's orientation IS the yaw quaternion, which leaves the quad's +Z
-   facing back along that heading - toward the viewer, which is the side
-   XrCompositionLayerQuad displays. Degenerate input follows
-   dg_xr_quat_yaw_only's contract: identity heading, screen at LOCAL -Z,
-   never an invented rotation. */
 void dg_xr_screen_pose(const DG_XR_RAW_POSE *head, double dist_m,
                        DG_XR_RAW_POSE *out) {
     double q[4], yaw[4], sin_a, cos_a;
@@ -348,11 +295,6 @@ void dg_xr_screen_pose(const DG_XR_RAW_POSE *head, double dist_m,
     out->pz = head->pz + dist_m * -cos_a;
 }
 
-/* One reference pose in, one relative pose out, and no modes: which FRAME the
-   arm wants is expressed by which reference it hands in - the live head, the
-   head's heading, or the seated origin's heading, all with the live head's
-   position. That kept the mode selection where the policy is and left this a
-   single transform. */
 void dg_xr_pose_relative(const DG_XR_RAW_POSE *reference,
                          const DG_XR_RAW_POSE *pose,
                          DG_XR_REL_POSE *out) {
@@ -520,15 +462,6 @@ int dg_xr_get_stereo(DG_XR_FRAME *out) {
     return 0;
 }
 
-
-
-
-
-
-
-
-
-
 int dg_xr_get_target_fov(DG_PROJ_FOV *out) {
     DG_XR_POSE pose;
     return (dg_xr_get_frame(&pose, out) & 2) != 0;
@@ -600,19 +533,6 @@ uint64_t dg_xr_menu_press_seq(void) {
     return (uint64_t)InterlockedCompareExchange64(&g_menu_press_seq, 0, 0);
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 void dg_xr_recenter(void) {
     InterlockedExchange(&g_recenter_cause, DG_XR_CAUSE_HOTKEY);
     InterlockedExchange(&g_recenter_req, 1);
@@ -629,10 +549,6 @@ void dg_xr_stats(long *frames, long *valid, long *invalid, long *errors) {
     if (errors)  *errors  = g_st_errors;
 }
 
-/* The capture stores live in the runtime half of this file, and this function
-   does not - it is shared, because the test build configures too. Declared here
-   and defined once on each side of the split rather than reaching forward into
-   state that only sometimes exists. */
 static void drop_capture_stores(void);
 void dg_xr_zoom_changed(void) {drop_capture_stores();}
 
@@ -666,13 +582,7 @@ void dg_xr_configure(const DG_XR_CONFIG *cfg) {
        that is not a legal thing to submit as an eye. Dropping them costs one
        frame; keeping them cost the whole session (XR_ERROR_POSE_INVALID). */
     if (mode_changed) drop_capture_stores();
-    /* The FIRST configure adopts the token instead of reacting to it. The
-       marker keeps whatever number the last manual recentre left behind, so on
-       the next launch a stale token is indistinguishable from a fresh request -
-       and an explicit request deliberately overrides the worn gate. That handed
-       the origin straight back to whichever way the headset happened to be
-       facing at startup: exactly the defect the gate exists to prevent, coming
-       in through the config file rather than through the first pose. */
+
     if (!first && cfg->recenter_token != prev) {
         InterlockedExchange(&g_recenter_cause, DG_XR_CAUSE_MARKER);
         InterlockedExchange(&g_recenter_req, 1);
@@ -741,47 +651,6 @@ void dg_xr_turn_step(double ref_q[2], double ref_p[2],
     ref_p[0] = head_px - (c1 * vx + s1 * vz);
     ref_p[1] = head_pz - (c1 * vz - s1 * vx);
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 /* ---- dynamically resolved entry points ---------------------------------
    The loader is loaded by name rather than linked, so a machine with no
@@ -914,13 +783,11 @@ static ID3D11DeviceContext *g_ctx;
    we borrow it, so we AddRef and Release but must never destroy it. */
 static ID3D11Device *g_adopted;
 
-/* Both swapchains exist for the session, even when stereo is off. Keeping
-   their lifetime independent of the live setting avoids runtime churn. */
 static XrSwapchain  g_swap[2] = { XR_NULL_HANDLE, XR_NULL_HANDLE };
 static XrSwapchainImageD3D11KHR *g_images[2];
 static uint32_t     g_image_count[2];
 static uint32_t     g_sw, g_sh;         /* back-buffer sized, per plan 2.20 */
-static uint32_t     g_swap_w, g_swap_h; /* size owned by the live XR swapchains */
+static uint32_t     g_swap_w, g_swap_h;
 
 /* Captured at Present on the game thread, consumed by the XR thread. Both
    touch the immediate context, so the device is put into multithread-protected
@@ -932,35 +799,24 @@ typedef struct {
     int valid;
     uint64_t capture_id, capture_ms;
     DG_MODEL_ARM model_arm, right_model_arm;
-
-
-
-
-
+    int observer_kind,observer_meta_valid;
+    unsigned observer_present;
+    uint64_t observer_meta_present,observer_meta_qpc;
 } DG_CAPTURE_STORE;
 static DG_CAPTURE_STORE g_store[2];
-
-
-
+static unsigned g_observer_present;
 static ID3D11Multithread *g_mt;
 static volatile LONG g_have_capture;
 static volatile LONG g_submitting;
 static CRITICAL_SECTION g_cap_cs;
 static volatile LONG g_cap_cs_ready;
+void dg_xr_observer_present(unsigned present) {
+    if(!g_cap_cs_ready)return;
+    EnterCriticalSection(&g_cap_cs);g_observer_present=present;LeaveCriticalSection(&g_cap_cs);
+}
 
-
-
-
-
-
-
-/* The theater screen. g_screen_req is Present's word (the bridge verdict,
-   one interlocked flag); everything else is the frame loop's own and touched
-   only on the XR thread. The anchor is captured ONCE per screen session -
-   that is the entire point: after capture the quad's pose never reads the
-   head again - and recaptured only on recentre ("this is forward" moves the
-   screen too) or a live vr_theater_dist change. */
-static volatile LONG g_screen_req;
+static volatile LONG g_screen_req, g_pointer_hand;
+void dg_xr_menu_pointer_hand(int hand) { InterlockedExchange(&g_pointer_hand,hand); }
 static int g_screen_shown;              /* frame loop's latched copy */
 static int g_screen_have_anchor;
 static DG_XR_RAW_POSE g_screen_anchor;
@@ -986,25 +842,43 @@ static double screen_clamp_m(double v, double dflt) {
     return v;
 }
 
-/* The FOV the game actually rendered with, recovered from the live projection
-   rather than assumed. Submitting the headset's FOV over an image drawn at the
-   game's would stretch the world; this keeps the layer honest, and widening it
-   to fill the headset is S4c's job, not S4b's. */
 static volatile LONG g_fov_mismatch_logged;
 
-/* Reference frame captured at recentre. Yaw only: the runtime's LOCAL space is
-   already gravity-aligned, so cancelling the user's pitch and roll as well
-   would lock the game's horizon to however their head happened to be tilted. */
 static int    g_have_ref;
 static int    g_waiting_logged;
-/* Set when xrGetSystem reports no headset. Distinguishes "there is no runtime,
-   stay flat" from "the runtime is fine, the headset is not on yet". */
+
 static int    g_no_hmd;
 static int    g_no_hmd_logged;
 static int    g_sep_logged;
 static volatile LONG g_bad_pose_logged;
 #include "dg_capture_format.h"
 #include "dg_capture_diag.inl"
+
+static int dg_xr_d3d_plain(void *p) {
+    HMODULE d3d=GetModuleHandleW(L"d3d11.dll");int depth;
+    for(depth=0;depth<4;depth++) {
+        HMODULE m=NULL;unsigned char b[16];SIZE_T got=0;INT32 rel;
+        if(!p||!d3d||!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,(LPCWSTR)p,&m)||m!=d3d)return 0;
+        if(!ReadProcessMemory(GetCurrentProcess(),p,b,sizeof(b),&got)||got!=sizeof(b))return 0;
+        if(b[0]==0xe9){memcpy(&rel,b+1,4);p=(char*)p+5+rel;continue;}
+        if(b[0]==0xeb){p=(char*)p+2+(signed char)b[1];continue;}
+        if(b[0]==0xff&&b[1]==0x25){void *next=NULL;memcpy(&rel,b+2,4);if(!ReadProcessMemory(GetCurrentProcess(),(char*)p+6+rel,&next,8,&got)||got!=8)return 0;p=next;continue;}
+        return 1;
+    }
+    return 0;
+}
+#ifdef DG_OBSERVER_CAPTURE_TEST
+static int g_test_map_check, g_test_map_hooked;   /* 0: the scripted fixtures see g_test_map_hooked; 1: the real check */
+#endif
+static int dg_xr_map_hooked(ID3D11DeviceContext *c) {
+    void **vt;
+#ifdef DG_OBSERVER_CAPTURE_TEST
+    if(!g_test_map_check)return g_test_map_hooked;
+#endif
+    if(!c)return 0;
+    vt=*(void***)c;
+    return !dg_xr_d3d_plain(vt[14])||!dg_xr_d3d_plain(vt[15]);   /* 14 Map, 15 Unmap */
+}
 #include "dg_pixel_probe.inl"
 #include "dg_near_probe.inl"
 #include "dg_stereo_measure.inl"
@@ -1396,13 +1270,7 @@ static int xr_init(void) {
     memset(&sgi, 0, sizeof(sgi));
     sgi.type = XR_TYPE_SYSTEM_GET_INFO;
     sgi.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
-    /* Not XRCHK, because one of this call's failures is not a failure of ours.
-       XR_ERROR_FORM_FACTOR_UNAVAILABLE means the runtime is present and
-       answering - it has just told us its name and version - but no headset is
-       powered on or in Link yet. The spec describes exactly this as transient.
-       Treating it like "no runtime" is what left the mod flat for an entire
-       run when the game was launched before the headset was awake, with a
-       restart of MGS2 as the only cure. */
+
     {
         XrResult r = pfn_GetSystem(g_inst, &sgi, &g_sys);
         if (r == XR_ERROR_FORM_FACTOR_UNAVAILABLE) { g_no_hmd = 1; return 0; }
@@ -1447,14 +1315,12 @@ static int xr_init(void) {
             /* Two threads will drive this context. Say so explicitly. */
             if (SUCCEEDED(g_ctx->lpVtbl->QueryInterface(g_ctx, &IID_ID3D11Multithread,
                                                         (void **)&g_mt)) && g_mt) {
-                dg_context_trace_emit(g_log,"xr_before_enable",g_dev,g_ctx,g_mt,DG_ENABLE_DIAGNOSTICS);
+                dg_context_trace_emit(g_log,"xr_before_enable",g_dev,g_ctx,g_mt,1);
                 g_mt->lpVtbl->SetMultithreadProtected(g_mt, TRUE);
-                dg_context_trace_emit(g_log,"xr_after_enable",g_dev,g_ctx,g_mt,DG_ENABLE_DIAGNOSTICS);
-
+                dg_context_trace_emit(g_log,"xr_after_enable",g_dev,g_ctx,g_mt,1);
                 dg_draw_trial_xr_ready(g_dev,g_ctx);
-
             } else {
-                dg_context_trace_emit(g_log,"xr_multithread_unavailable",g_dev,g_ctx,g_mt,DG_ENABLE_DIAGNOSTICS);
+                dg_context_trace_emit(g_log,"xr_multithread_unavailable",g_dev,g_ctx,g_mt,1);
                 g_log("  xr: ID3D11Multithread unavailable - context sharing is unsafe\r\n");
             }
             g_log("  xr: adopted the game's D3D11 device\r\n");
@@ -1496,10 +1362,23 @@ static int xr_init(void) {
 
 #include "dg_xr_observer.inl"
 
+static void cap_free_locked(void) {
+    observer_free();
+    near_probe_free();
+    if (g_store[0].texture) {
+        g_store[0].texture->lpVtbl->Release(g_store[0].texture);
+        g_store[0].texture = NULL;
+    }
+    if (g_store[1].texture) {
+        g_store[1].texture->lpVtbl->Release(g_store[1].texture);
+        g_store[1].texture = NULL;
+    }
+    g_store[0].valid = g_store[1].valid = 0;
+    InterlockedExchange(&g_have_capture, 0);
+}
+
 static void xr_teardown(void) {
-
     dg_draw_trial_xr_ready(NULL,NULL);
-
     int stopped=!g_session_running;
     sm_teardown();
     pixel_probe_teardown();
@@ -1512,17 +1391,7 @@ static void xr_teardown(void) {
     InterlockedExchange(&g_have_capture, 0);
     if (g_cap_cs_ready) {
         EnterCriticalSection(&g_cap_cs);
-        observer_free();
-        near_probe_free();
-        if (g_store[0].texture) {
-            g_store[0].texture->lpVtbl->Release(g_store[0].texture);
-            g_store[0].texture = NULL;
-        }
-        if (g_store[1].texture) {
-            g_store[1].texture->lpVtbl->Release(g_store[1].texture);
-            g_store[1].texture = NULL;
-        }
-        g_store[0].valid = g_store[1].valid = 0;
+        cap_free_locked();
         LeaveCriticalSection(&g_cap_cs);
     }
     if (pfn_DestroySwapchain) {
@@ -1535,12 +1404,7 @@ static void xr_teardown(void) {
     g_image_count[0] = g_image_count[1] = 0;
     g_swap_w = g_swap_h = 0;
     if (g_mt) { g_mt->lpVtbl->Release(g_mt); g_mt = NULL; }
-    /* g_adopted deliberately SURVIVES teardown. It is the game's device, we
-       hold a reference to it (see dg_xr_adopt_device), and a session restart
-       must re-bind that same device - clearing it here made a restart fall
-       back to a private device and silently become pose-only, which looks
-       exactly like the headset simply staying dark. It is released in
-       dg_xr_stop, not here. */
+
     if (pfn_DestroySpace) {
         int i;
         for (i = 0; i < 2; i++) {
@@ -1570,13 +1434,16 @@ static void xr_teardown(void) {
     g_haptic_action = XR_NULL_HANDLE;
     clear_action_samples();
     g_input_attached = 0;
+
+    if (g_cap_cs_ready) EnterCriticalSection(&g_cap_cs);
+    cap_free_locked();
     if (g_ctx) { g_ctx->lpVtbl->Release(g_ctx); g_ctx = NULL; }
     if (g_dev) { g_dev->lpVtbl->Release(g_dev); g_dev = NULL; }
+    if (g_cap_cs_ready) LeaveCriticalSection(&g_cap_cs);
     if (g_inst && pfn_DestroyInstance) pfn_DestroyInstance(g_inst);
     g_inst = XR_NULL_HANDLE;
     if (g_loader) { FreeLibrary(g_loader); g_loader = NULL; }
-    /* The seated origin is process-sticky. Session teardown must not turn a
-       resume or headset re-wear into an implicit recentre. */
+
 }
 
 /* Created lazily: the swapchain is back-buffer sized (plan 2.20), and that size
@@ -1730,6 +1597,12 @@ void dg_xr_capture_measured(void *swapchain, int eye, const DG_XR_RAW_POSE *raw,
     back->lpVtbl->GetDesc(back, &td);
 
     EnterCriticalSection(&g_cap_cs);
+
+    if (!g_dev || !g_ctx) {
+        LeaveCriticalSection(&g_cap_cs);
+        back->lpVtbl->Release(back);
+        capture_diag_producer_fail(CD_INPUT, E_POINTER); return;
+    }
     if (store->texture) {
         D3D11_TEXTURE2D_DESC cd;
         store->texture->lpVtbl->GetDesc(store->texture, &cd);
@@ -1767,12 +1640,10 @@ void dg_xr_capture_measured(void *swapchain, int eye, const DG_XR_RAW_POSE *raw,
         store->valid = 1;
         store->capture_id = (uint64_t)InterlockedIncrement64(&g_cd_count[CD_STORED]);
         store->capture_ms = GetTickCount64();
-
-
-
-
-
-
+        store->observer_kind=1;store->observer_present=g_observer_present;
+        store->observer_meta_valid=meta?meta->valid:0;
+        store->observer_meta_present=meta?meta->present_id:0;
+        store->observer_meta_qpc=meta?meta->camera_qpc:0;
         sp_capture(back,store->texture,mono?DG_EYE_MONO:eye,store->capture_id);
         sm_producer(3,mono?DG_EYE_MONO:eye,raw,fov,meta,store->capture_id);
         dg_bridge_model_arm_snapshot(&store->model_arm);
@@ -1799,16 +1670,14 @@ void dg_xr_capture(void *sc, int eye, const DG_XR_RAW_POSE *raw, const DG_PROJ_F
    exist with the same size (the native capture of that eye created it); the
    texture's format family must match the store (B8G8R8A8). Same context and
    lock as the native capture. */
-/* Diagnostics (second eye, 29 Sep): private copies of the two eye stores - exactly what the headset
-   is given - for a look at the desk. Same lock as the captures; the caller releases them and must
-   not hold the D3D multithread lock (lock order, see dg_second_eye_publish). */
+
 int dg_xr_snapshot_stores(void *out[2]) {
     int eye, n = 0;
     if (!out) return 0;
     out[0] = out[1] = NULL;
     if (!g_dev || !g_ctx || !g_cap_cs_ready) return 0;
     EnterCriticalSection(&g_cap_cs);
-    for (eye = 0; eye < 2; eye++) {
+    for (eye = 0; g_dev && g_ctx && eye < 2; eye++) {
         DG_CAPTURE_STORE *st = &g_store[eye];
         D3D11_TEXTURE2D_DESC dsc;
         ID3D11Texture2D *copy = NULL;
@@ -1833,7 +1702,7 @@ int dg_xr_capture_texture(void *texture, int eye, const DG_XR_RAW_POSE *raw, con
     src->lpVtbl->GetDesc(src, &sd);
     store = &g_store[eye];
     EnterCriticalSection(&g_cap_cs);
-    if (store->texture) {
+    if (store->texture && g_ctx) {
         store->texture->lpVtbl->GetDesc(store->texture, &cd);
         if (cd.Width == sd.Width && cd.Height == sd.Height && cd.SampleDesc.Count == 1 &&
             (cd.Format == DXGI_FORMAT_B8G8R8A8_UNORM || cd.Format == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB)) {
@@ -1847,10 +1716,8 @@ int dg_xr_capture_texture(void *texture, int eye, const DG_XR_RAW_POSE *raw, con
             store->valid = 1;
             store->capture_id = (uint64_t)InterlockedIncrement64(&g_cd_count[CD_STORED]);
             store->capture_ms = GetTickCount64();
-
-
-
-
+            store->observer_kind=2;store->observer_present=g_observer_present;
+            store->observer_meta_valid=0;store->observer_meta_present=0;store->observer_meta_qpc=0;
             dg_bridge_model_arm_snapshot(&store->model_arm);
             dg_bridge_right_model_arm_snapshot(&store->right_model_arm);
             {
@@ -1866,12 +1733,6 @@ int dg_xr_capture_texture(void *texture, int eye, const DG_XR_RAW_POSE *raw, con
     return ok;
 }
 
-/* Session-state names for the log. Run 15 (2026-09-05) ended with the
-   headset dark: the runtime sent STOPPING and never READY again, and the
-   log could not say whether it had parked us in IDLE, whether a later
-   state came that we mishandled, or whether this thread was even alive.
-   Every transition is now named and stamped (GetTickCount64, the clock the
-   heartbeat prints too). */
 static const char *xr_state_name(XrSessionState st) {
     switch (st) {
     case XR_SESSION_STATE_UNKNOWN:      return "UNKNOWN";
@@ -1892,6 +1753,27 @@ static const char *xr_state_name(XrSessionState st) {
 static ULONGLONG g_not_running_since;
 static unsigned  g_not_running_bucket;
 
+static volatile LONG g_xr_sim_mode, g_xr_exit_requested;
+void dg_xr_set_sim_mode(int on) { InterlockedExchange(&g_xr_sim_mode, on ? 1 : 0); }
+
+static int xr_exit_note(const char *why, int phase) {
+    if (!why || !InterlockedCompareExchange(&g_xr_exit_requested, 0, 0) || !g_log) return 0;
+    if (phase == 0) g_log("  xr: %s - not restarting: the runtime asked the app to exit (simulator); session teardown next\r\n", why);
+    else g_log("  xr: session teardown done after the exit request (simulator)\r\n");
+    return 1;
+}
+
+static void xr_tracking_lost_note(XrSpaceLocationFlags flags, int not_running, int state) {
+    if (!g_log) return;
+    if (not_running) g_log("  xr: tracking lost (session state %d, not visible or focused; no frame published)\r\n", state);
+    else g_log("  xr: tracking lost (location flags 0x%llx: orientation valid %d tracked %d, position valid %d tracked %d;"
+               " 0x0 also when xrLocateSpace failed; no frame published)\r\n", (unsigned long long)flags,
+               !!(flags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT), !!(flags & XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT),
+               !!(flags & XR_SPACE_LOCATION_POSITION_VALID_BIT), !!(flags & XR_SPACE_LOCATION_POSITION_TRACKED_BIT));
+}
+static int xr_may_restart(void) {
+    return InterlockedCompareExchange(&g_run, 0, 0) && !InterlockedCompareExchange(&g_xr_exit_requested, 0, 0);
+}
 /* Returns 0 if the session is gone for good. */
 static int pump_events(void) {
     XrEventDataBuffer ev;
@@ -1936,6 +1818,12 @@ static int pump_events(void) {
                 g_log("  xr: session stopping\r\n");
             } else if (g_state == XR_SESSION_STATE_EXITING ||
                        g_state == XR_SESSION_STATE_LOSS_PENDING) {
+                if (g_state == XR_SESSION_STATE_EXITING &&
+                    InterlockedCompareExchange(&g_xr_sim_mode, 0, 0)) {
+                    InterlockedExchange(&g_xr_exit_requested, 1);
+                    g_log("  xr: session exiting (simulator: the runtime asked the app to exit; no new session in this process)\r\n");
+                    return 0;
+                }
                 g_log("  xr: session exiting\r\n");
                 return 0;
             }
@@ -2028,8 +1916,10 @@ static void load_trigger_thresholds(float *deadzone, float *fire) {
 }
 
 #include "dg_xr_m9.inl"
+#include "dg_xr_blade.inl"
 static void poll_controller(void) {
     xr_m9_haptic_drain();
+    xr_blade_haptic_drain();
     XrActiveActionSet active;
     XrActionsSyncInfo si;
     XrActionStateGetInfo gi;
@@ -2049,7 +1939,7 @@ static void poll_controller(void) {
     si.type = XR_TYPE_ACTIONS_SYNC_INFO;
     si.countActiveActionSets = 1; si.activeActionSets = &active;
     r = pfn_SyncActions(g_sess, &si);
-    /* Losing focus is expected while the user is in another app. */
+
     if (r == XR_SESSION_NOT_FOCUSED) {
         clear_action_samples();
         return;
@@ -2312,7 +2202,7 @@ static void sample_pose(XrTime when, const XrView *views, int views_valid) {
     if (XR_FAILED(pfn_LocateSpace(g_view_space, g_local_space, when, &loc)) ||
         (loc.locationFlags & need) != need) {
         if (g_tracking_was_valid && !g_tracking_lost_logged) {
-            g_log("  xr: tracking lost\r\n");
+            xr_tracking_lost_note(loc.locationFlags, 0, 0);
             g_tracking_lost_logged = 1;
         }
         g_tracking_was_valid = 0;
@@ -2347,13 +2237,6 @@ static void sample_pose(XrTime when, const XrView *views, int views_valid) {
         }
     }
 
-    /* Gating the capture creates a state that could not exist before: valid
-       tracking with no reference yet. Falling through would subtract a zero
-       reference, i.e. hand the camera the headset's ABSOLUTE position in the
-       runtime's LOCAL space - metres, scaled by 1000 - and rotate by a zero
-       quaternion. The no-pose path is the well-worn one (2.19) and leaves the
-       camera alone, so take it, and say why once so "head tracking is dead"
-       is diagnosable from the log alone. */
     if (!g_have_ref) {
         if (!g_waiting_logged) {
             g_log("  xr: waiting to capture the seated origin - %s\r\n",
@@ -2375,9 +2258,7 @@ static void sample_pose(XrTime when, const XrView *views, int views_valid) {
     memset(&frame, 0, sizeof(frame));
     g_hand_sample_seq++;
     relative_pose(&loc.pose, &frame.head);
-    /* The head's LOCAL pose as well as its origin-relative one: the stereo
-       bisect can render both eyes from the head, and an image rendered from
-       the head must be submitted with the head's pose or it smears. */
+
     raw_pose(&loc.pose, &frame.head_raw);
     if (views_valid) {
         relative_pose(&views[0].pose, &frame.eye[0].pose);
@@ -2431,11 +2312,6 @@ static void log_xr_fail(const char *call, XrResult r) {
     g_log("  xr: %s failed (%d)\r\n", call, (int)r);
 }
 
-/* A pose whose quaternion is not unit-length is rejected by xrEndFrame with
-   XR_ERROR_POSE_INVALID, and that error kills the WHOLE frame, not the one bad
-   view. Observed live: toggling stereo on reused a store captured in mono,
-   where the pose is deliberately zeroed - and an all-zero quaternion is
-   exactly this failure. Never hand the runtime a pose we have not checked. */
 static int raw_pose_usable(const DG_XR_RAW_POSE *p) {
     double n = p->qx * p->qx + p->qy * p->qy + p->qz * p->qz + p->qw * p->qw;
     return n > 0.98 && n < 1.02;
@@ -2444,6 +2320,8 @@ static int raw_pose_usable(const DG_XR_RAW_POSE *p) {
 #include "dg_capture_transaction.h"
 typedef struct {
     uint32_t idx[2];
+    const DG_XR_HAND_POSE *pointer;
+    int pointer_hand;
     int stereo;
     uint32_t width, height;
     DG_XR_RAW_POSE raw[2];
@@ -2462,9 +2340,7 @@ static int submit_capture_valid(void *ctx, int eye) {
     D3D11_TEXTURE2D_DESC src, dst;
     unsigned reason = 0;
     g_cd.checked[eye] = 1;
-
-
-
+    if(g_sm.active)g_sm.checked_mask|=1<<eye;
     g_cd.store_valid[eye] = g_store[eye].valid;
     g_cd.capture_id[eye] = g_store[eye].capture_id;
     g_cd.capture_ms[eye] = g_store[eye].capture_ms;
@@ -2497,8 +2373,33 @@ static int submit_capture_valid(void *ctx, int eye) {
     g_cd.reason[eye] = reason;
     return reason == 0;
 }
+
+static volatile LONG g_xr_ctx_work;
+long dg_xr_ctx_work_seq(void) { return InterlockedCompareExchange(&g_xr_ctx_work, 0, 0); }
+#include "dg_menu_pointer.h"
+#include "dg_laser_ui.h"
+#include "dg_laser_panel.inl"
+#include "dg_menu_beam.inl"
+static void submit_menu_pointer(const DG_SUBMIT_CAPTURE *cap, ID3D11Texture2D *texture) {
+    double u, v, width = screen_clamp_m(g_cfg.theater_width, 2.0);
+    unsigned pixels[9*9], x, y;
+    D3D11_BOX box;
+    int hit;
+    if (!cap->pointer || cap->width < 9 || cap->height < 9)return;
+    u=v=0;
+    hit=dg_menu_hit(cap->pointer,&g_screen_anchor,width,width*cap->height/cap->width,&u,&v);
+    laser_panel_draw(cap,texture,cap->pointer_hand,u,v,hit);
+    if(!hit)return;
+    for (y=0; y<9; ++y) for (x=0; x<9; ++x)
+        pixels[9*y+x] = x && y && x<8 && y<8 ? 0xff38eaffu : 0xff111111u;
+    box.left = (UINT)fmax(0, fmin(cap->width-9, u*cap->width-4));
+    box.top = (UINT)fmax(0, fmin(cap->height-9, v*cap->height-4));
+    box.front=0; box.back=1; box.right=box.left+9; box.bottom=box.top+9;
+    g_ctx->lpVtbl->UpdateSubresource(g_ctx,(ID3D11Resource *)texture,0,&box,pixels,9*sizeof(unsigned),0);
+}
 static void submit_capture_copy(void *ctx, int eye) {
     DG_SUBMIT_CAPTURE *cap = (DG_SUBMIT_CAPTURE *)ctx;
+    InterlockedIncrement(&g_xr_ctx_work);
     cap->raw[eye] = g_store[eye].raw;
     cap->fov[eye] = g_store[eye].fov;
     cap->model_arm[eye] = g_store[eye].model_arm;
@@ -2506,6 +2407,7 @@ static void submit_capture_copy(void *ctx, int eye) {
     g_ctx->lpVtbl->CopyResource(g_ctx,
         (ID3D11Resource *)g_images[eye][cap->idx[eye]].texture,
         (ID3D11Resource *)g_store[eye].texture);
+    if (cap->pointer && !eye) submit_menu_pointer(cap,g_images[eye][cap->idx[eye]].texture);
     if (!cap->stereo) pixel_probe_destination(g_images[eye][cap->idx[eye]].texture, eye);
     sm_copy(eye,cap->stereo,g_images[eye][cap->idx[eye]].texture);
 }
@@ -2573,6 +2475,7 @@ static const char *xr_frame_loop(void) {
         XrFrameEndInfo fei;
         XrCompositionLayerProjectionView pview[2];
         XrCompositionLayerProjection proj;
+        XrCompositionLayerQuad beam_quad; int beam_ready=0;
         XrCompositionLayerQuad quad, radial_quad, radar_quad, health_quad, ammo_quad;
         const XrCompositionLayerBaseHeader *layers[10];
         XrCompositionLayerQuad grip_quads[6];
@@ -2590,11 +2493,7 @@ static const char *xr_frame_loop(void) {
         if (!pump_events()) return "session lost or exiting";
 
         if (!g_session_running) {
-            /* Parked by the runtime (STOPPING without a READY yet). Say so
-               after 5 s and then every 30 s, with the state we are in, so a
-               dark headset can be read from the log: this thread alive and
-               waiting, versus a runtime that never handed the session
-               back. Logging only - the wait itself is unchanged. */
+
             ULONGLONG now = GetTickCount64();
             if (!g_not_running_since) {
                 g_not_running_since = now;
@@ -2668,7 +2567,7 @@ static const char *xr_frame_loop(void) {
             sample_pose(fs.predictedDisplayTime, view, views_valid);
         } else {
             if (g_tracking_was_valid && !g_tracking_lost_logged) {
-                g_log("  xr: tracking lost\r\n");
+                xr_tracking_lost_note(0, 1, (int)g_state);
                 g_tracking_lost_logged = 1;
             }
             g_tracking_was_valid = 0;
@@ -2698,7 +2597,7 @@ static const char *xr_frame_loop(void) {
              g_screen_recenter_seen != dg_xr_recenter_count() ||
              g_screen_anchor_dist !=
                  screen_clamp_m(g_cfg.theater_dist, 2.0)))
-            g_screen_have_anchor = 0;   /* re-anchor: recentre or live dist */
+            g_screen_have_anchor = 0;
         if (screen_on && !g_screen_have_anchor && views_valid) {
             XrSpaceLocation loc;
             const XrSpaceLocationFlags need =
@@ -2750,6 +2649,10 @@ static const char *xr_frame_loop(void) {
             memset(&capture, 0, sizeof(capture));
             capture.stereo = stereo;
             {
+                LONG hand = InterlockedCompareExchange(&g_pointer_hand,0,0);
+                capture.pointer_hand=hand;
+                if (hand && screen_on && g_screen_have_anchor)
+                    capture.pointer = hand == 2 ? &published.right_hand.aim : &published.left_hand.aim;
                 copied = submit_capture_images(&capture, &fatal);
                 if (fatal) { sm_submit(NULL); capture_diag_emit(); return fatal; }
                 if (copied && screen_on &&
@@ -2784,6 +2687,34 @@ static const char *xr_frame_loop(void) {
                     quad.size.height = (float)(capture.height && capture.width
                         ? w * (double)capture.height / (double)capture.width : w * 0.5625);
                     layers[0] = (XrCompositionLayerBaseHeader *)&quad;
+                    if(capture.pointer && capture.width>=9 && capture.height>=9){
+                        const DG_XR_RAW_POSE *origin=&capture.pointer->raw_local;
+                        double u,v;
+                        if(dg_menu_hit(capture.pointer,&g_screen_anchor,quad.size.width,quad.size.height,&u,&v)){
+                            double across=(u-.5)*quad.size.width;
+                            double sin_yaw=2*g_screen_anchor.qy*g_screen_anchor.qw;
+                            double cos_yaw=1-2*g_screen_anchor.qy*g_screen_anchor.qy;
+                            double x=g_screen_anchor.px+across*cos_yaw-origin->px;
+                            double y=g_screen_anchor.py+(.5-v)*quad.size.height-origin->py;
+                            double z=g_screen_anchor.pz-across*sin_yaw-origin->pz;
+                            float len=(float)sqrt(x*x+y*y+z*z)-.04f;
+                            float ro[3]={(float)origin->px,(float)origin->py,(float)origin->pz};
+                            float rq[4]={(float)origin->qx,(float)origin->qy,(float)origin->qz,(float)origin->qw};
+                            float head[3]={(float)published.head_raw.px,(float)published.head_raw.py,(float)published.head_raw.pz};
+                            float q[4],p[3];
+                            if(dg_menu_beam_pose(ro,rq,.04f,len,head,q,p)){
+                                beam_quad=quad;
+                                memcpy(&beam_quad.pose.orientation,q,sizeof q);
+                                memcpy(&beam_quad.pose.position,p,sizeof p);
+                                beam_quad.size.width=.004f;beam_quad.size.height=len;
+                                beam_quad.subImage.imageRect.offset.x=(int)fmax(0,fmin(capture.width-9,u*capture.width-4))+4;
+                                beam_quad.subImage.imageRect.offset.y=(int)fmax(0,fmin(capture.height-9,v*capture.height-4))+4;
+                                beam_quad.subImage.imageRect.extent.width=1;
+                                beam_quad.subImage.imageRect.extent.height=1;
+                                beam_ready=1;
+                            }
+                        }
+                    }
                     pixel_probe_quad(&quad);
                     fei.layerCount = 1; fei.layers = layers;
                     InterlockedExchange(&g_submitting, 1);
@@ -2875,9 +2806,12 @@ static const char *xr_frame_loop(void) {
             ammo_insert(&fei,layers,5,&ammo_quad);
         gripdbg_append(&fei,layers,10,grip_quads,fs.shouldRender,screen_on,views_valid,
                        fs.predictedDisplayTime,GetTickCount64());
+        if(beam_ready && fei.layerCount<10 && fei.layerCount<g_radial_max_layers)
+            layers[fei.layerCount++]=(const XrCompositionLayerBaseHeader *)&beam_quad;
         if (!fei.layerCount) capture_diag_inc(CD_ZERO);
         g_cd.end_attempted = 1;
         r = pfn_EndFrame(g_sess, &fei);
+        InterlockedIncrement(&g_xr_ctx_work);
         g_cd.end = r;
         sm_submit(&fei);
         pixel_probe_tick(XR_SUCCEEDED(r) && g_state == XR_SESSION_STATE_FOCUSED &&
@@ -2902,10 +2836,7 @@ static DWORD WINAPI xr_thread(LPVOID unused) {
         if (!xr_init()) {
             int no_hmd = g_no_hmd;
             xr_teardown();
-            /* Waiting for a headset is not a restart and must not spend one:
-               the user may be minutes away from putting it on, and 20 tries at
-               2 s would give up after forty seconds. Logged once, so a long
-               wait costs one line rather than a screenful. */
+
             if (no_hmd) {
                 if (!g_no_hmd_logged) {
                     g_log("  xr: no headset available yet - waiting for one "
@@ -2927,16 +2858,13 @@ static DWORD WINAPI xr_thread(LPVOID unused) {
                 g_no_hmd_logged = 0;
             }
             why = xr_frame_loop();
-            xr_teardown();
+            {   int noted = xr_exit_note(why, 0);
+                xr_teardown();
+                if (noted) xr_exit_note(why, 1); }
         }
 
-        if (!g_run || !why) break;
+        if (!why || !xr_may_restart()) break;
 
-        /* The runtime dropping a session must not cost the rest of the run.
-           The game, its device and the Present hook are all still healthy, and
-           the seated origin is process-sticky by design, so rebuilding the
-           session puts the picture back where it was instead of leaving the
-           headset dark until the next launch. */
         if (++restarts > XR_MAX_RESTARTS) {
             g_log("  xr: %s - giving up after %d restarts\r\n", why, restarts - 1);
             break;
@@ -2960,6 +2888,10 @@ int dg_xr_start(void (*log)(const char *fmt, ...)) {
     if (!InterlockedCompareExchange(&g_cap_cs_ready, 0, 0)) {
         InitializeCriticalSection(&g_cap_cs);
         InterlockedExchange(&g_cap_cs_ready, 1);
+    }
+    if (InterlockedCompareExchange(&g_xr_exit_requested, 0, 0)) {
+        if (log) log("  xr: start refused - the runtime asked the app to exit earlier in this process (simulator)\r\n");
+        return 0;
     }
     if (InterlockedCompareExchange(&g_started, 1, 0) != 0) return 1;  /* already up */
     InterlockedExchange(&g_submitting, 0);
@@ -2988,5 +2920,3 @@ void dg_xr_stop(void) {
         g_thread = NULL;
     }
 }
-
-

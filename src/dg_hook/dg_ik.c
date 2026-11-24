@@ -515,21 +515,6 @@ static void orient_nearest_on_circle(const double q[4], const double bone[3],
     dg_ik_quat_mul(tw, q, out);
 }
 
-/* The roll about `axis` that brings v as near to target as a roll can, as a
-   quaternion. Both vectors are projected onto the plane across the axis and
-   the angle between the projections is the answer; 0 is returned when either
-   projection vanishes - then the roll genuinely changes nothing about their
-   relationship and the caller must decide the free parameter some other way.
-
-   This is what gives the upper arm's roll a REFERENCE. Without one, the roll
-   was pinned only to the previous pair, and continuity has no restoring
-   force: a hand walked around a closed loop returns to its direction but not
-   to its roll, and the difference accumulates every lap - 52.8 degrees per
-   circle in front of the shoulder, measured 2026-08-21 on the desk, smooth
-   at under 1 degree per step so every jump-hunting instrument called it
-   calm. That is the arm slowly winding up, which is what the headset sees as
-   tumbling. Anchored to the pose instead, the same arm pose always yields
-   the same roll and accumulation is not merely small but impossible. */
 static int roll_to_align(const double axis[3], const double v[3],
                          const double target[3], double q[4])
 {
@@ -617,32 +602,7 @@ int dg_ik_orient(const DG_IK_ORIENT_IN *in, DG_IK_ORIENT_OUT *out)
     if (v_normalize(upper_dir, bone)) {
         double p0[3], carried[3], normal[3], rest_normal[3], rollq[4];
         double anchored_q[4];
-        /* The reference pair, both perpendicular to the bone by
-           construction so the roll can align them EXACTLY and the
-           conditioning is that of the arm plane itself:
-             - carried: a fixed rest-space perpendicular of the upper bone
-               (perp_of is a pure function of its input, no memory), turned
-               by the swing we just solved, so it lands perpendicular to
-               the live bone;
-             - normal: the plane the real arm bends in.
-           Aligning them says "the shoulder rolls so the elbow points where
-           it actually points", which is the anatomical statement and, more
-           to the point, a function of THIS pose alone.
 
-           Both normals, deliberately, and nothing else. Two earlier
-           references were tried and are recorded here because each failed
-           in a way the other would not have shown:
-             - the child REST direction: on a rig whose rest arm is
-               straight it lies along the bone, so its projection is
-               rounding noise and the anchor jumped half a turn between
-               neighbouring poses;
-             - perp_of(rest_upper): perp_of is a pure function but a
-               DISCONTINUOUS one by construction (it jumps where two
-               components of its input match in magnitude), and rest_upper
-               is read from the live skeleton, so a yawing body walks its
-               input straight through that jump - three ~90 degree steps in
-               a 60-pair turn probe, 2026-08-21. A reference must be
-               continuous in the pose, not merely deterministic. */
         v_cross(upper_dir, fore_dir, normal);
         v_cross(in->rest_upper, in->rest_fore, rest_normal);
         /* Both planes must be genuinely OPEN, and the bar is the sine of
@@ -774,10 +734,6 @@ int dg_ik_basis_quat(const double basis[3][3], double q[4])
     for (r = 0; r < 3; r++)
         if (!v_finite(basis[r])) return 0;
 
-    /* Gram-Schmidt first. The live matrices are orthonormal only to float
-       precision, and the trace formula below turns a slightly skewed basis
-       into something that is not quite a rotation - which then compounds every
-       pair it is multiplied through. */
     if (!v_normalize(basis[0], e[0])) return 0;
     v_scale(e[0], v_dot(e[0], basis[1]), proj);
     v_sub(basis[1], proj, t);
@@ -890,37 +846,8 @@ static double unwrap_toward(double angle, double ref)
     return angle;
 }
 
-/* How much longer than the short arc a walked branch may grow before the
-   fold renames it. A branch is bookkeeping: b and b - 360 are the same
-   rotation, and the clamps render whichever name they are handed. Without
-   a margin a demand hovering on the 180 seam would be renamed every pair
-   and, under caps below 180, the applied would snap by two caps at 22 Hz
-   (the 2026-08-21 evening tumble: cmd-drift worst 145.9, desk sweep
-   sweep_seam.c). Live noise is a few degrees; a genuine crossing walks
-   straight through. Thirty is far above the one, far below the other. */
 #define DG_IK_UNWRAP_HYST_RAD (30.0 * DG_IK_PI / 180.0)
 
-/* The branch choice: keep walking the branch the caller was on (raw_ref,
-   the unwrapped angle it last reported; the applied reference when there
-   is none). Inside the cap the walked name is rendered exactly, whichever
-   name it is, so nothing is renamed there. Once the walked name is
-   outside the cap AND longer than the short arc by the margin, it is
-   renamed to the short arc: the short arc is never further outside the
-   caps than any other name of the same rotation, so with caps summing
-   past 180 (the live 170 + 55) the hand renders the rotation it was
-   asked for on both sides of the rename (the forearm's share of the twist
-   does move - the split is not a function of the rotation - by 2 x 170 -
-   360 at least, once per crossing). What this replaces was the
-   nearest-to-APPLIED rule, and that rule latched: in run 11 (2026-09-03)
-   a body turn walked the raw branch to -346, the applied sat pinned on
-   the -225 cap, and against that cap the nearest name of a neutral hand
-   (0) is -360, not 0 - the hand stayed 135 degrees wrong until the player
-   turned 45 the other way, which the video shows as the gun lying flat
-   across the forearm. The bound here is |branch| <= max(cap, 180 +
-   margin), so the reference fed back cannot wind up and a garbage wound
-   reference is abandoned on the first read. (Under that bound the applied
-   reference alone would name the same branch for any cap above the
-   margin; the raw reference is kept as the plain continuity memory.) */
 static double unwrap_branch(double angle, double app_ref,
                             int have_raw, double raw_ref, double cap)
 {
@@ -1080,11 +1007,6 @@ int dg_ik_hand_stabilize(const DG_IK_HAND_STABILIZE_IN *in,
 /* One PS2 angle unit in radians. See the header for where 4096 comes from. */
 #define DG_IK_PS_UNIT_RAD (2.0 * DG_IK_PI / (double)DG_IK_PS_UNITS_PER_TURN)
 
-/* How far a quaternion's norm may sit from 1 before it stops being treated as
-   a rotation. Live float matrices and repeated products drift by a few ulps,
-   which is six orders of magnitude inside this; anything looser than 1e-6 and
-   a genuinely unnormalised input - the shape a half-initialised struct has -
-   would sail through. */
 #define DG_IK_PS_UNIT_TOL 1e-6
 
 /* |sin(pitch)| past which the roll/yaw pair is solved by the degenerate split
@@ -1200,12 +1122,6 @@ int dg_ik_quat_to_ps_angles(const double q[4], short out[3], unsigned *flags)
     vy = ps_round_units(pitch);
     vz = ps_wrap_units(ps_round_units(yaw));
 
-
-
-
-
-
-
     if (vy == 0) {
         vy = (sin_p < 0.0) ? -1 : 1;
         f |= DG_IK_PS_VY_CLAMPED;
@@ -1253,10 +1169,6 @@ int dg_ik_ps_precompensate(const short want[3], int pull_divisor, short out[3])
         return 0;
     }
 
-    /* Not "a divisor of 1", which the recurrence turns into a hard zero, but
-       "the pull has not been measured, so do not pretend to compensate for
-       it". Baking 4 in here instead would make every result silently wrong the
-       day the live measurement says something else. */
     if (pull_divisor <= 1) {
         out[0] = want[0];
         out[1] = want[1];
@@ -1284,10 +1196,7 @@ int dg_ik_ps_precompensate(const short want[3], int pull_divisor, short out[3])
 
         for (x = lo; x <= hi; x++) {
             if (ps_pull_once(x, pull_divisor) != w) continue;
-            /* Writing a literal 0 for a non-zero target is legal arithmetic and
-               a trap in the vy slot, where 0 changes which conversion the
-               engine runs at all. There is always another preimage: at any
-               divisor, -2 pulls to -1 just as 0 does. */
+
             if (w != 0 && x == 0) continue;
             if (!have || ps_abs(x) < ps_abs(best) ||
                 (ps_abs(x) == ps_abs(best) && x > best)) {
@@ -1309,8 +1218,6 @@ int dg_ik_ps_precompensate(const short want[3], int pull_divisor, short out[3])
     }
     return exact;
 }
-
-/* ========================================== the channel's reach (run 13) === */
 
 int dg_ik_ps_reach_units(int pull_divisor)
 {

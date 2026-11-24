@@ -1,12 +1,6 @@
-
-
 #include "dg_policy.h"
 
-
-
-
 #define DG_POLICY_STAMP_VERSION DG_POLICY_ABI_VERSION
-
 
 const DG_POLICY_TABLE dg_policy_builtin = {
     DG_POLICY_MAGIC,
@@ -49,10 +43,3 @@ const DG_POLICY_TABLE dg_policy_builtin = {
 
     dg_move_step,
 };
-
-
-
-
-
-
-

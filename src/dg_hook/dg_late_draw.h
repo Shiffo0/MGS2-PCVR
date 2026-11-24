@@ -28,11 +28,11 @@ static const char* lateTarget(ID3D11DeviceContext* c, UINT count, bool indexed, 
 }
 
 // Called only for the first occurrence of a selection refusal (bounded by reason buckets).
-
-
-
-
-
-
-
-
+static void lateDescribeViews(ID3D11DeviceContext*c,void(*out)(const char*,...)){
+ if(!out)return;
+ ComPtr<ID3D11RenderTargetView> rt;ComPtr<ID3D11DepthStencilView> ds;c->OMGetRenderTargets(1,&rt,&ds);
+ if(rt){D3D11_RENDER_TARGET_VIEW_DESC v{};rt->GetDesc(&v);ComPtr<ID3D11Resource> r;ComPtr<ID3D11Texture2D> t;rt->GetResource(&r);D3D11_TEXTURE2D_DESC d{};if(SUCCEEDED(r.As(&t)))t->GetDesc(&d);
+  out("draw_trial: late RTV dim=%u format=%u mip=%u first_slice=%u array_size=%u texture=%ux%u mips=%u array=%u samples=%u quality=%u\r\n",(unsigned)v.ViewDimension,(unsigned)v.Format,v.ViewDimension==D3D11_RTV_DIMENSION_TEXTURE2D?v.Texture2D.MipSlice:v.ViewDimension==D3D11_RTV_DIMENSION_TEXTURE2DARRAY?v.Texture2DArray.MipSlice:~0u,v.ViewDimension==D3D11_RTV_DIMENSION_TEXTURE2DARRAY?v.Texture2DArray.FirstArraySlice:~0u,v.ViewDimension==D3D11_RTV_DIMENSION_TEXTURE2DARRAY?v.Texture2DArray.ArraySize:~0u,d.Width,d.Height,d.MipLevels,d.ArraySize,d.SampleDesc.Count,d.SampleDesc.Quality);}
+ if(ds){D3D11_DEPTH_STENCIL_VIEW_DESC v{};ds->GetDesc(&v);ComPtr<ID3D11Resource> r;ComPtr<ID3D11Texture2D> t;ds->GetResource(&r);D3D11_TEXTURE2D_DESC d{};if(SUCCEEDED(r.As(&t)))t->GetDesc(&d);
+  out("draw_trial: late DSV dim=%u format=%u flags=%u mip=%u first_slice=%u array_size=%u texture=%ux%u mips=%u array=%u samples=%u quality=%u\r\n",(unsigned)v.ViewDimension,(unsigned)v.Format,v.Flags,v.ViewDimension==D3D11_DSV_DIMENSION_TEXTURE2D?v.Texture2D.MipSlice:v.ViewDimension==D3D11_DSV_DIMENSION_TEXTURE2DARRAY?v.Texture2DArray.MipSlice:~0u,v.ViewDimension==D3D11_DSV_DIMENSION_TEXTURE2DARRAY?v.Texture2DArray.FirstArraySlice:~0u,v.ViewDimension==D3D11_DSV_DIMENSION_TEXTURE2DARRAY?v.Texture2DArray.ArraySize:~0u,d.Width,d.Height,d.MipLevels,d.ArraySize,d.SampleDesc.Count,d.SampleDesc.Quality);}
+}

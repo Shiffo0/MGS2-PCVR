@@ -1,10 +1,7 @@
-/* Inside SecondEyeLive. Measured 2 Oct: 465E downsample, B356 ping-pong,
-   A460 back to full size. Native half colour leaking through A460 is visible
-   across live event15. Own only this scene-derived, depthless BGRA8 chain. */
 struct PostHalf {ComPtr<ID3D11Resource>game;ComPtr<ID3D11Texture2D>colour;ComPtr<ID3D11RenderTargetView>rt;unsigned long long written=~0ull;} half[2];
 bool postHalfFailed=false;unsigned long long halfDraws=0,halfLearned=0,halfRefused=0;
 // postSwap returns borrowed views; recordEx AddRefs them immediately on return.
-// Keep an uncached view alive until that handoff, even when all 16 slots are full.
+
 ComPtr<ID3D11ShaderResourceView> swapOverflow;
 void clearPostSwaps(){swapN=0;for(auto&s:swaps)s.mine.Reset();swapOverflow.Reset();}
 int halfFind(void*r){if(!r)return -1;for(int k=0;k<2;k++)if(half[k].game.Get()==r)return k;return -1;}

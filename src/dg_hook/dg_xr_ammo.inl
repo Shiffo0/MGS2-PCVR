@@ -1,5 +1,3 @@
-
-
 #include "dg_radar_gaze.h"
 #include "dg_weapon_watch_pose.h"
 
@@ -287,8 +285,7 @@ static int ammo_prepare(const XrFrameEndInfo *end, XrCompositionLayerQuad *quad,
     quad->layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;    /* premultiplied */
     quad->eyeVisibility = XR_EYE_VISIBILITY_BOTH;
     if (mode == 1) {
-        /* First live check: head-locked like the radial menu (VIEW space),
-           always in view, no gate. */
+
         if (!g_view_space) return ammo_skip(AMMO_SESSION);
         quad->space = g_view_space;
         quad->pose.orientation.w = 1.0f;
@@ -347,4 +344,3 @@ static void ammo_insert(XrFrameEndInfo *end, const XrCompositionLayerBaseHeader 
     InterlockedIncrement(&g_ammo_st_submitted);
     InterlockedExchange(&g_ammo_st_why, AMMO_SHOWN);
 }
-

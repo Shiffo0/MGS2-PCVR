@@ -1,10 +1,3 @@
-/* Measured 2026-09-25: 189 native Nikita samples; subject and normal models
- * share geometry but not skeleton ownership. Normal is visible, subject is
- * hidden. Admit the existing subject-to-arm attachment separately from the
- * selected native body. Never fake player.BA8 or route Nikita through RGB6.
- * Native Act refreshes normal.root before its trigger dispatch; its Nikita
- * launch branch constructs a camera matrix independently of the model root.
- */
 typedef struct {
     DG_NIKITA_BINDING binding;
     uint64_t body_slot, unit_slot, trigger, control, action, player_body;
@@ -46,13 +39,6 @@ static int nikita_matrix(const MAT *m) {
     return fabs(m->m[3][3]-1)<.002 && dg_ik_basis_quat(basis,q);
 }
 
-
-
-
-
-
-
-
 static int nikita_snapshot(uint64_t base,uint64_t expected,NIKITA_SNAPSHOT *s) {
     DG_NIKITA_BINDING *b=&s->binding;
     uint64_t sg,ag,arm_trigger,objects[2],obj,i;
@@ -78,12 +64,6 @@ static int nikita_snapshot(uint64_t base,uint64_t expected,NIKITA_SNAPSHOT *s) {
        ((b->body!=s->player_body && b->body!=b->arm)) || (!ptr_at(b->body,&b->body_objs)) ||
        (!read_at(b->body_objs+0x64,&s->body_count,2)) || ((s->body_count!=21 && !(b->body==b->arm && s->body_count==55))) ||
        (!read_at(b->arm_objs+0x64,&s->arm_count,2)) || ((s->arm_count!=21 && s->arm_count!=55)))return 0;
-
-
-
-
-
-
     b->native_root=b->body_objs+0x110+6*0x180;
     b->hand=b->arm_objs+0x110+6*0x180;
     if((!read_at(b->hand,&s->hand,sizeof(MAT))) || (!nikita_matrix(&s->hand)) ||

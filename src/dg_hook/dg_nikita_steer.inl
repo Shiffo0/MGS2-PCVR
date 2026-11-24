@@ -1,6 +1,3 @@
-
-
-
 static struct {uint64_t base;int resolved,live;DG_DETOUR detour;} g_nikita_steer;
 static SRWLOCK g_nikita_steer_lock=SRWLOCK_INIT;
 static struct {DG_NIKITA_STEER_INPUT input;uint64_t actor,stamp;int valid;} g_nikita_command;
@@ -10,9 +7,7 @@ static void nikita_steer_revoke(void) {
     ReleaseSRWLockExclusive(&g_nikita_steer_lock);
 }
 static int nikita_steer_actor(uint64_t expected,uint64_t *actor_out,uint64_t *pad_out) {
-
-
-
+    int dgw_w=dgw_weapon_now();
     uint64_t b=g_nikita_steer.base,a,fn,pad,ctrl,player,now=GetTickCount64();
     int alive,channel,state,weapon;unsigned flags;
     if((!g_nikita_steer.live) || (!g_b.armed) || (g_b.owner) || (g_b.script_menu_only) ||
@@ -37,13 +32,8 @@ static void nikita_steer_tick(int safe) {
         in.age_ms<=100 && in.now_ms>=in.age_ms && _finite(in.x) && fabs(in.x)<=1.01 &&
         nikita_steer_actor(0,&actor,&pad);
     if(valid)stamp=in.now_ms-in.age_ms;
-
-
-
-
-
-
-
+    if(!valid && dgw_weapon_now()==6)
+        ;
     AcquireSRWLockExclusive(&g_nikita_steer_lock);
     if(!valid)memset(&g_nikita_command,0,sizeof g_nikita_command);
     else if(g_nikita_command.valid && g_nikita_command.actor==actor &&
@@ -89,9 +79,6 @@ static void nikita_operation(void *actor) {
     uint64_t pad,a=(uint64_t)(uintptr_t)actor;int supplied;
     if(!original)return;
     supplied=nikita_steer_pad(a,local.bytes,&pad);
-
-
-
     if(!supplied){original(actor);return;}
     *(uint64_t *)(uintptr_t)(a+0x598)=(uint64_t)(uintptr_t)local.bytes;
     __try {original(actor);}

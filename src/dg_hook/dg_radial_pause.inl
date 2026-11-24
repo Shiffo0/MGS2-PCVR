@@ -1,5 +1,3 @@
-
-
 #include "dg_radial_pause_retail.h"
 static struct {
     volatile LONG owned;
