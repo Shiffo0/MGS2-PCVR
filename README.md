@@ -107,7 +107,7 @@ Keep this file when updating. To restore defaults, close the game, rename `dg_ha
 - **Camera tanker:** the photo camera does not yet take its picture from the correct position in first person.
 - **Security-camera sections:** use **Third Person** to get past cameras, then switch back to VR with **A**.
 - **Hanging and moving while hanging:** still experimental; use **Third Person** for these actions.
-- **Plant / Raiden:** incomplete. A full VR campaign is not supported yet.
+- **Plant / Raiden:** incomplete. A full VR campaign is not supported yet (Still need to verify swimming / Emma's sections).
 
 ## AER, Two Eye rendering and performance
 
