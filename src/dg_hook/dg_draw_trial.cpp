@@ -256,6 +256,7 @@ void lateRouteReport();
 void lateSkipReport(){lateRouteReport();if(logger)logger("draw_trial: late routes native_indexed=%ld forwarded_indexed=%ld scope_miss=%ld return_miss=%ld\r\n",lateNativeIndexed,lateForwardIndexed,lateForwardScopeMiss,lateForwardReturnMiss);for(auto &v:lateReasons)if(v.name&&logger)logger("draw_trial: late skip_total reason=%s count=%u\r\n",v.name,v.count);}
  const char* lateLastSkip="await_xr_protection";
 bool ui2dSceneAllowed();
+bool ammoSceneAllowed();
 
 #include "dg_frame_capture.h"
 #include "dg_vs_rdef.h"
@@ -1836,6 +1837,9 @@ extern "C" void dg_ui2d_gameplay(int allowed){
  AcquireSRWLockExclusive(&lateReadyLock);
  lateReady.step(now,now,(DWORD)InterlockedCompareExchange(&ui2dSceneEpoch,0,0),allowed!=0);
  ReleaseSRWLockExclusive(&lateReadyLock);
+}
+extern "C" void dg_ammo_gameplay(int allowed){
+ InterlockedExchange64(&ammoSceneSample,((LONG64)GetTickCount()<<1)|(allowed?1:0));
 }
 extern "C" int dg_ui2d_last_frame_sign(void){return (int)InterlockedCompareExchange(&ui2dLastFrameSign,0,0);}
 

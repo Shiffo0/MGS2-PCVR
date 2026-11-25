@@ -43,6 +43,13 @@ bool ui2dSceneAllowed() {
     LONG64 s = InterlockedCompareExchange64(&ui2dSceneSample,0,0);
     return (s & 1) && (DWORD)(GetTickCount()-(DWORD)(s>>1)) <= 500;
 }
+// The weapon ammo panel needs first-person gameplay, not stereo HUD placement: its own verdict,
+// with the same 500 ms freshness. In stereo both verdicts are fed the same value.
+volatile LONG64 ammoSceneSample = 0;
+bool ammoSceneAllowed() {
+    LONG64 s = InterlockedCompareExchange64(&ammoSceneSample,0,0);
+    return (s & 1) && (DWORD)(GetTickCount()-(DWORD)(s>>1)) <= 500;
+}
 
 // ---------------------------------------------------------------- shader registry
 struct VsEntry { void *ptr; UINT64 hash; UINT32 size; BYTE *bytes; };

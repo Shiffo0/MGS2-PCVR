@@ -35,6 +35,8 @@ void dg_ui2d_backbuffer(unsigned width,unsigned height);
 void dg_ui2d_hold(int mode);
 /* Camera/Present publish raw stereo-gameplay eligibility; silence closes it. */
 void dg_ui2d_gameplay(int allowed);
+/* First-person gameplay verdict for the weapon ammo panel; independent of stereo. */
+void dg_ammo_gameplay(int allowed);
 void dg_ui2d_feedback(int on);
 void dg_ui2d_feedback_stats(long*skipped,long*checked);
 void *dg_ui2d_measure_source(void);

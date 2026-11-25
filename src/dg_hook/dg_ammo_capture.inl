@@ -38,7 +38,7 @@ bool ammoResources(UINT height,UINT cbBytes){
 }
 void ammoOnDraw(ID3D11DeviceContext*c,UINT n,UINT first){
  ammoCapturedDraw=false;
- if(!radarOn||!radarFirstPerson||n!=4||c!=context.Get()||stopping||inside||requested==1||!ui2dSceneAllowed())return;
+ if(!radarOn||!radarFirstPerson||n!=4||c!=context.Get()||stopping||inside||requested==1||!ammoSceneAllowed())return;
  const float*f=(const float*)ui2dBank;
  if(!f||ui2dBankLen<0x240||ui2dBankLen>65536||!ui2dSignature(f))return;
  MultiLock lock;
@@ -93,7 +93,7 @@ void ammoOnDraw(ID3D11DeviceContext*c,UINT n,UINT first){
 }
 bool ammoHideDraw(ID3D11DeviceContext*c,UINT n,UINT first){
  // Capture precedes suppression, including while the inspection gate is shut.
- if(!ammoCapturedDraw||!radarFirstPerson||!ui2dSceneAllowed())return false;
+ if(!ammoCapturedDraw||!radarFirstPerson||!ammoSceneAllowed())return false;
  MultiLock lock;
  D3D11_VIEWPORT vp;UINT nv=1;c->RSGetViewports(&nv,&vp);if(nv!=1)return false;
  ComPtr<ID3D11RasterizerState>old;c->RSGetState(&old);
@@ -123,6 +123,6 @@ bool ammoHideDraw(ID3D11DeviceContext*c,UINT n,UINT first){
 void ammoOnPresent(){
  // The caller holds lifetime, but MUST NOT hold MultiLock across delivery.
  ammoReadyMs=0;
- if(ammoDraws&&radarOn&&radarFirstPerson&&ui2dSceneAllowed()&&ammoTexture&&ammoDeliver(ammoTexture.Get())>0)ammoReadyMs=GetTickCount64();
+ if(ammoDraws&&radarOn&&radarFirstPerson&&ammoSceneAllowed()&&ammoTexture&&ammoDeliver(ammoTexture.Get())>0)ammoReadyMs=GetTickCount64();
  ammoDraws=0;
 }

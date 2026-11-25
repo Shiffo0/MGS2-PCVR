@@ -729,6 +729,10 @@ static void apply_transform(void) {
     dg_ui2d_gameplay(g_armed && g_source==SRC_XR && g_stereo &&
         !script_menu_blocked() && !dg_bridge_theater_verdict() &&
         dg_bridge_controller_gameplay_now());
+    /* The weapon ammo panel shows in mono as well (issue 11): same verdict without the stereo term. */
+    dg_ammo_gameplay(g_armed && g_source==SRC_XR &&
+        !script_menu_blocked() && !dg_bridge_theater_verdict() &&
+        dg_bridge_controller_gameplay_now());
     MAT d, d_inv, n_eye_inv, n_eye, base_eye_inv, base_eye;
     MAT *pers2 = M(O_PERS2), *raise_pers = M(O_RAISE_PERS);
     MAT *raise_pers2 = M(O_RAISE_PERS2), *pers_no_offset = M(O_PERS_NO_OFFSET);
@@ -2543,7 +2547,7 @@ static LONG CALLBACK veh(EXCEPTION_POINTERS *ep) {
     InterlockedIncrement(&g_traps);
     if (InterlockedCompareExchange(&g_script_menu_active, 0, 0)) {
         /* Detector only: never enter camera/policy/gameplay callbacks. */
-        dg_ui2d_gameplay(0);
+        dg_ui2d_gameplay(0);dg_ammo_gameplay(0);
         script_menu_sample_context();
         c->EFlags |= 0x10000;
         c->Dr6 = 0;
@@ -5564,7 +5568,7 @@ static void menu_seam(int front_end)
 
     if (script_menu_blocked()) {
         DG_BRIDGE_MENU empty;
-        dg_ui2d_gameplay(0);
+        dg_ui2d_gameplay(0);dg_ammo_gameplay(0);
         memset(&empty, 0, sizeof empty);
         dg_bridge_menu_now(&empty);
         return;
@@ -5870,7 +5874,7 @@ static void on_present_body(IDXGISwapChain *sc) {
     if (script_menu_blocked()) {
         DG_BRIDGE_MENU empty;
         controller_context_publish(0);
-        dg_ui2d_gameplay(0);
+        dg_ui2d_gameplay(0);dg_ammo_gameplay(0);
         memset(&empty, 0, sizeof empty);
         dg_bridge_menu_now(&empty);
         InterlockedIncrement(&g_present_frame);
@@ -5900,13 +5904,14 @@ static void on_present_body(IDXGISwapChain *sc) {
     }
     if (have || dg_bridge_radial_context_held() || (screen & DG_THEATER_V_FAKE)) {
         InterlockedExchange(&g_flat_silent, 0);
-    } else if (armed && (stereo || g_source == SRC_SCRIPT)) {
+    } else if (armed && (stereo || g_source == SRC_SCRIPT || g_source == SRC_XR)) {
         if (InterlockedCompareExchange(&g_flat_silent, 0, 0) <
             DG_FLAT_SILENT_FRAMES * 4)
             InterlockedIncrement(&g_flat_silent);
     }
     if (InterlockedCompareExchange(&g_flat_mode, 0, 0) &&
-        (stereo || g_source == SRC_SCRIPT) && armed &&
+
+        (stereo || g_source == SRC_SCRIPT || g_source == SRC_XR) && armed &&
         InterlockedCompareExchange(&g_flat_silent, 0, 0) >=
             DG_FLAT_SILENT_FRAMES) {
         flat = 1;
@@ -5952,6 +5957,7 @@ static void on_present_body(IDXGISwapChain *sc) {
             !InterlockedCompareExchange(&g_script_menu_active,0,0) &&
             dg_bridge_controller_gameplay_now();
         dg_ui2d_gameplay(raw_gameplay && have && stereo && g_source==SRC_XR);
+        dg_ammo_gameplay(raw_gameplay && have && g_source==SRC_XR);
         int raw_special=(armed && !flat && !ctl_screen &&
             !InterlockedCompareExchange(&g_script_menu_active,0,0)) ?
             dg_bridge_controller_special_now():0;

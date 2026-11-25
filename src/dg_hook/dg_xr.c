@@ -698,6 +698,9 @@ static PFN_xrGetActionStateFloat    pfn_GetActionStateFloat;
 static PFN_xrGetActionStateVector2f pfn_GetActionStateVector2f;
 static PFN_xrGetActionStatePose     pfn_GetActionStatePose;
 static PFN_xrStringToPath           pfn_StringToPath;
+/* Optional, log only: which controller profile the runtime made active. */
+static PFN_xrGetCurrentInteractionProfile pfn_GetCurrentProfile;
+static PFN_xrPathToString           pfn_PathToString;
 
 static XrInstance g_inst = XR_NULL_HANDLE;
 static XrSystemId g_sys  = XR_NULL_SYSTEM_ID;
@@ -1257,6 +1260,10 @@ static int xr_init(void) {
         g_input_ready = 1;
     else
         g_log("  xr: controller input unavailable; continuing without it\r\n");
+    if (!resolve("xrGetCurrentInteractionProfile", &pfn_GetCurrentProfile) ||
+        !resolve("xrPathToString", &pfn_PathToString)) {
+        pfn_GetCurrentProfile = NULL; pfn_PathToString = NULL;
+    }
 
     setup_controller_input();
 
@@ -1774,6 +1781,32 @@ static void xr_tracking_lost_note(XrSpaceLocationFlags flags, int not_running, i
 static int xr_may_restart(void) {
     return InterlockedCompareExchange(&g_run, 0, 0) && !InterlockedCompareExchange(&g_xr_exit_requested, 0, 0);
 }
+/* Support line: the interaction profile the runtime bound per hand ("none" until it binds one).
+   Read-only; a failure only leaves the line out. */
+static void log_interaction_profiles(void) {
+    static const char *const hands[2] = { "/user/hand/left", "/user/hand/right" };
+    char text[2][XR_MAX_PATH_LENGTH];
+    static int lines;
+    int i;
+    if (lines >= 12) return;
+    lines++;
+    if (!pfn_GetCurrentProfile || !pfn_PathToString || !pfn_StringToPath || !g_sess ||
+        !g_input_ready || !g_input_attached) return;
+    for (i = 0; i < 2; i++) {
+        XrPath user = XR_NULL_PATH;
+        XrInteractionProfileState st;
+        uint32_t n = 0;
+        strcpy_s(text[i], sizeof text[i], "unknown");
+        memset(&st, 0, sizeof st); st.type = XR_TYPE_INTERACTION_PROFILE_STATE;
+        if (XR_FAILED(pfn_StringToPath(g_inst, hands[i], &user)) ||
+            XR_FAILED(pfn_GetCurrentProfile(g_sess, user, &st))) continue;
+        if (st.interactionProfile == XR_NULL_PATH) { strcpy_s(text[i], sizeof text[i], "none"); continue; }
+        if (XR_FAILED(pfn_PathToString(g_inst, st.interactionProfile, (uint32_t)sizeof text[i], &n, text[i])))
+            strcpy_s(text[i], sizeof text[i], "unknown");
+    }
+    g_log("  xr: controller profile left %s, right %s\r\n", text[0], text[1]);
+}
+
 /* Returns 0 if the session is gone for good. */
 static int pump_events(void) {
     XrEventDataBuffer ev;
@@ -1792,7 +1825,18 @@ static int pump_events(void) {
                   xr_state_name(s->state),
                   (unsigned long long)GetTickCount64());
             if (s->state!=g_state) dg_xr_radial_invalidate();
+
+            if (g_state == XR_SESSION_STATE_FOCUSED && s->state == XR_SESSION_STATE_VISIBLE) {
+                static int focus_lost_lines;
+                if (focus_lost_lines < 6) {
+                    focus_lost_lines++;
+                    g_log("  xr: input focus lost (session VISIBLE) - the VR runtime holds input: its dashboard or an overlay"
+                          " is open, the headset was taken off, or the game is closing; controller input is paused until"
+                          " the session is FOCUSED again\r\n");
+                }
+            }
             g_state = s->state;
+            if (g_state == XR_SESSION_STATE_FOCUSED) log_interaction_profiles();
             if (g_state == XR_SESSION_STATE_READY) {
                 XrSessionBeginInfo bi;
                 memset(&bi, 0, sizeof(bi));
@@ -1827,6 +1871,8 @@ static int pump_events(void) {
                 g_log("  xr: session exiting\r\n");
                 return 0;
             }
+        } else if (ev.type == XR_TYPE_EVENT_DATA_INTERACTION_PROFILE_CHANGED) {
+            log_interaction_profiles();
         } else if (g_presence_enabled &&
                    ev.type == XR_TYPE_EVENT_DATA_USER_PRESENCE_CHANGED_EXT) {
             const XrEventDataUserPresenceChangedEXT *p =
@@ -2184,6 +2230,43 @@ static void sample_hand(unsigned int hand, int index, XrTime when,
 }
 
 static void union_fov(const XrView *views, DG_PROJ_FOV *out);
+
+static void log_eye_geometry(const XrPosef *head, const XrView *views) {
+    static double last[2][10];
+    static int have, lines;
+    double cur[2][10], qh[4], qe[4], qr[4], dp[3], rel[3];
+    int i, k, changed = !have;
+    if (lines >= 8) return;
+    qh[0] = -(double)head->orientation.x; qh[1] = -(double)head->orientation.y;
+    qh[2] = -(double)head->orientation.z; qh[3] = (double)head->orientation.w;
+    for (i = 0; i < 2; i++) {
+        qe[0] = views[i].pose.orientation.x; qe[1] = views[i].pose.orientation.y;
+        qe[2] = views[i].pose.orientation.z; qe[3] = views[i].pose.orientation.w;
+        qmul(qh, qe, qr);
+        if (qr[3] < 0.0) { qr[0] = -qr[0]; qr[1] = -qr[1]; qr[2] = -qr[2]; qr[3] = -qr[3]; }
+        dp[0] = (double)views[i].pose.position.x - (double)head->position.x;
+        dp[1] = (double)views[i].pose.position.y - (double)head->position.y;
+        dp[2] = (double)views[i].pose.position.z - (double)head->position.z;
+        qrot(qh, dp, rel);
+        cur[i][0] = (double)views[i].fov.angleLeft * 180.0 / PI;
+        cur[i][1] = (double)views[i].fov.angleRight * 180.0 / PI;
+        cur[i][2] = (double)views[i].fov.angleUp * 180.0 / PI;
+        cur[i][3] = (double)views[i].fov.angleDown * 180.0 / PI;
+        for (k = 0; k < 3; k++) cur[i][4 + k] = 2.0 * atan2(qr[k], qr[3]) * 180.0 / PI;
+        for (k = 0; k < 3; k++) cur[i][7 + k] = rel[k] * 1000.0;
+        for (k = 0; k < 10; k++) {
+            if (!_finite(cur[i][k])) return;
+            if (have && fabs(cur[i][k] - last[i][k]) > (k < 7 ? 0.25 : 1.0)) changed = 1;
+        }
+    }
+    if (!changed) return;
+    memcpy(last, cur, sizeof last); have = 1; lines++;
+    for (i = 0; i < 2; i++)
+        g_log("  xr: eye %d view: fov L%.2f R%.2f U%.2f D%.2f deg; rotation vs head pitch %.2f yaw %.2f roll %.2f deg;"
+              " position vs head x %.1f y %.1f z %.1f mm%s\r\n", i,
+              cur[i][0], cur[i][1], cur[i][2], cur[i][3], cur[i][4], cur[i][5], cur[i][6],
+              cur[i][7], cur[i][8], cur[i][9], lines > 1 ? " (changed)" : "");
+}
 #include "dg_xr_subrect.h"
 static XrFovf g_eye_fov_seen[2]; static int g_eye_fov_have[2];   /* the runtime's own per-eye FOV, last seen */
 static volatile LONG g_subrect_used, g_subrect_logged;
@@ -2268,6 +2351,7 @@ static void sample_pose(XrTime when, const XrView *views, int views_valid) {
         raw_pose(&views[0].pose, &frame.eye[0].raw);
         raw_pose(&views[1].pose, &frame.eye[1].raw);
         union_fov(views, &frame.union_fov);
+        log_eye_geometry(&loc.pose, views);
     }
     sample_hand(DG_XR_HAND_LEFT, HAND_LEFT, when, g_hand_sample_seq,
                 &frame.left_hand);

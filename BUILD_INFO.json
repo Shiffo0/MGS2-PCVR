@@ -1,7 +1,7 @@
 {
-  "version": "v0.6.0",
-  "build": "1E89F34D",
-  "binary_sha256": "1E89F34D02C5F3ADE32AB392D5D5DC59E603FA412A1B0A73A858B14BF1BADDCA",
+  "version": "v0.6.1",
+  "build": "58C801B3",
+  "binary_sha256": "58C801B39136A863DDC97C13E92553B0E7F037AE54500B9577D61C8452823CAB",
   "development_tools": false,
   "defaults": {
     "stereo": "1",
