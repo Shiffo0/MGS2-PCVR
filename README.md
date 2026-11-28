@@ -1,10 +1,10 @@
-# MGS2 PCVR — v0.6.1
+# MGS2 PCVR — v0.6.2
 
 Play **METAL GEAR SOLID 2: Sons of Liberty — Master Collection Version** in PC VR, with headset tracking and motion-controller controls.
 
 **Supports PS VR2 / SteamVR and Meta Quest 3 PC VR.** This unofficial mod uses **OpenXR** and renders both eyes from every game frame (**Two Eye rendering**, the default since v0.6.0). The older **AER (Alternate Eye Rendering)** is still available. It runs on a Windows gaming PC; it is not a standalone Quest app.
 
-**[Download v0.6.1](https://github.com/Shiffo0/MGS2-PCVR/releases/tag/v0.6.1)** · [Installation](#installation) · [Controls](#controls) · [Known limitations](#known-limitations) · [Report a problem](https://github.com/Shiffo0/MGS2-PCVR/issues)
+**[Download v0.6.2](https://github.com/Shiffo0/MGS2-PCVR/releases/tag/v0.6.2)** · [Installation](#installation) · [Controls](#controls) · [Known limitations](#known-limitations) · [Report a problem](https://github.com/Shiffo0/MGS2-PCVR/issues)
 
 The **Tanker chapter with Snake** is the main focus. Switch between VR and Third Person as needed, and check your wrist for radar and LIFE information. **Plant / Raiden support is still in development**: many weapons and items now work in VR, but a complete VR playthrough is not supported yet.
 
@@ -40,7 +40,7 @@ Other headsets and game versions have not been validated.
 1. Launch the unmodified game once, then close it.
 2. Install [MGSHDFix](https://github.com/ShizCalev/MGSHDFix#installation) (needed for the default Two Eye rendering).
 3. Connect your headset and start your PC VR software. For **PS VR2**, use **SteamVR** and select it under **SteamVR Settings → OpenXR**. For **Quest Link / Air Link**, select Meta as active under **Meta Quest Link → Settings → General → OpenXR Runtime**. Close the game before switching runtimes.
-4. Download **`MGS2-PCVR-v0.6.1.zip`** from the [release page](https://github.com/Shiffo0/MGS2-PCVR/releases/tag/v0.6.1). Choose the mod ZIP under **Assets**, not GitHub's automatic **Source code** downloads.
+4. Download **`MGS2-PCVR-v0.6.2.zip`** from the [release page](https://github.com/Shiffo0/MGS2-PCVR/releases/tag/v0.6.2). Choose the mod ZIP under **Assets**, not GitHub's automatic **Source code** downloads.
 5. In Steam, right-click the game → **Manage → Browse local files**. Extract the ZIP into the folder containing **`METAL GEAR SOLID2.exe`**, keeping its folder structure.
 6. Back up any existing files before replacing them. MGSHDFix and this mod both use the Ultimate ASI Loader (`winmm.dll`), so one copy serves both. If other mods provide `openxr_loader.dll`, start with a clean mod setup.
 7. Launch the game through Steam with your headset connected. The control table below uses **Quest button names**; for PS VR2, check the corresponding actions in SteamVR controller bindings.
@@ -130,6 +130,8 @@ Future work focuses on **Raiden and the Plant chapter**: throwing grenades with 
 - **Stuck at a camera or hanging section:** press **A** to switch to Third Person.
 - **Two Eye rendering looks wrong (colours differ between the eyes, low resolution, surfaces missing in one eye):** check that MGSHDFix is installed (`plugins\MGSHDFix.asi`), or switch to AER with **Home → VR Rendering**.
 - **VR stops after about an hour:** close the game and check that `dg_hook.on` contains `seconds=0`.
+- **The world seems to zoom or swim when you turn your head (seen with SteamVR on the Steam Frame):** close the game, add the line `vr_fov_symmetric=1` to `dg_hook.on` and start again. This renders the same amount above and below the centre of each eye. It is off by default.
+- **VR Rendering stays on WAITING:** Two Eye rendering could not start and the headset shows AER. `logs\dg_hook.log` now says why, in lines starting with `second_eye: a frame could not start` or `second_eye: no frame started`.
 - **Controllers do nothing but you can look around (SteamVR):** close the SteamVR dashboard and any overlay. While they have input focus, SteamVR sends no controller input to the game. The log line `xr: input focus lost` confirms it.
 - **Problems with other mods:** keep MGSHDFix installed for Two Eye / 4K; disable other optional mods while diagnosing compatibility.
 

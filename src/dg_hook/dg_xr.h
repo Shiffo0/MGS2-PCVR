@@ -71,6 +71,7 @@ typedef struct {
     int    recenter_token;      /* any change to this re-captures the origin */
     int    stereo;              /* S4d: 1 = alternate the eye per game frame */
     int    stereo_test;         /* 1 = projection only, 2 = position only */
+    int    fov_symmetric;       /* vr_fov_symmetric: 0 as the runtime reports, 1 up = down */
     int    stereo_proj_x_sign;  /* retail default -1; +1 restores unmirrored probe */
     double trigger_deadzone;    /* release threshold; default 0.10 */
     double trigger_fire;        /* press threshold; default 0.55 */

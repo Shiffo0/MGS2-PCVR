@@ -67,7 +67,7 @@ enum { DG_BLADE_REFUSE_NONE=0, DG_BLADE_REFUSE_GATE, DG_BLADE_REFUSE_PAD,
 static const char *blade_refuse_name(int r) {
     static const char *n[DG_BLADE_REFUSE_COUNT]={"native attack check did not run",
         "gate closed (lease/admitted/tick/weapon/pad)","a real button in the pad",
-        "StickPress hold did not clear"};
+        "stick press hold did not clear"};
     return r>=0 && r<DG_BLADE_REFUSE_COUNT ? n[r] : "?";
 }
 static struct {
@@ -640,7 +640,7 @@ static void __fastcall blade_attack(void *work) {
                             *(uint16_t *)(shadow+DG_PAD_ANALOG_OFFSET)&=(uint16_t)~DG_MOVE_ANALOG_R_USE;
                             g_blade.refuse=DG_BLADE_REFUSE_HOLD;
                             g_blade.diag.holds++;
-                            if(blade_probe_line())g_b.log("  blade: delivery held one tick (StickPress %ld StickDir %ld) intent=%d tick=%llu\r\n",
+                            if(blade_probe_line())g_b.log("  blade: delivery held one tick (stick press %ld stick direction %ld) intent=%d tick=%llu\r\n",
                                 stick_press,stick_dir,g_blade.queued.attack,g_blade.tick);
                         } else {
                             if(g_blade.queued.attack==DG_BLADE_STAB)
@@ -670,12 +670,12 @@ static void __fastcall blade_attack(void *work) {
             uint64_t mode_after=*(volatile uint64_t *)(uintptr_t)(player+DG_BLADE_MODE);
             if(delivered) {
                 /* What the game made of it, read straight back from SetMode. */
-                const char *what=mode_after==g_blade.base+DG_BLADE_RVA_SLASH_MODE?"BladeSlash":
-                    mode_after==g_blade.base+DG_BLADE_RVA_THRUST_MODE?"BladeThrust":"native refused";
+                const char *what=mode_after==g_blade.base+DG_BLADE_RVA_SLASH_MODE?"blade slash":
+                    mode_after==g_blade.base+DG_BLADE_RVA_THRUST_MODE?"blade thrust":"native refused";
                 if(what[0]=='n')g_blade.diag.native_refused++;
-                else if(what[5]=='S')g_blade.diag.native_slash++;
+                else if(mode_after==g_blade.base+DG_BLADE_RVA_SLASH_MODE)g_blade.diag.native_slash++;
                 else g_blade.diag.native_thrust++;
-                if(blade_probe_line())g_b.log("  blade: native result intent=%d -> %s (StickPress %ld StickDir %ld squat/ground/caution 0x%llx mode %+lld) tick=%llu\r\n",
+                if(blade_probe_line())g_b.log("  blade: native result intent=%d -> %s (stick press %ld stick direction %ld squat/ground/caution 0x%llx mode %+lld) tick=%llu\r\n",
                     delivered,what,stick_press,stick_dir,posture,
                     (long long)(mode_after-g_blade.base),g_blade.tick);
             }

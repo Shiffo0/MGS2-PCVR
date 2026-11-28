@@ -666,6 +666,8 @@ struct SecondEyeLive{
  bool disabled=false;const char*disableReason=nullptr;
  unsigned frames=0,published=0,refused=0,eyeMismatch=0,empty=0,verifyChecks=0,otherTarget=0,sideWrites=0,listDiffers=0,guardSkipped=0,projectiveSkips=0;
  unsigned long long draws=0,drawsSinceVerify=0;LONGLONG qpc=0;unsigned statFrames=0;
+ /* Support (issue 10): why no second-eye frame starts. Unsynchronised counters, like guardSkipped. */
+ unsigned long long idleCat[16]{},beginRefused=0;const char*beginWhy=nullptr;unsigned framesAtStat=0,beginLines=0;
  const char*disable(const char*why){if(!disabled){disabled=true;disableReason=why;if(logger)logger("second_eye: disabled reason=%s after %u frames\r\n",why,frames);}return why;}
  /* Targets follow the game's main pass; rebuilt only when its descriptors change. */
  const char*prepare(ID3D11Device*d,ID3D11DeviceContext*c){
@@ -1081,6 +1083,7 @@ template<class F>void secondEyeDraw(ID3D11DeviceContext*c,F next,void*api,UINT d
  auto&e=secondEye;unsigned long long ot=e.otherTarget,sw=e.sideWrites;const char*why=nullptr;
  bool cov=covActive(c);CovSnap covS{};if(cov)covS=covTake();
  int cat=secondEyeDrawBody(c,timed,api,drawCount,indexedDraw,initialized,forwarded,firstIndex,baseVertex,&why);
+ if(cat>=0&&cat<16&&e.state!=SecondEyeLive::BUILDING)++e.idleCat[cat];   /* where a draw ended while no frame was being built */
  if(cat==CE_REPLAYED&&e.otherTarget!=ot)cat=CE_OTHERTARGET;else if(cat==CE_REPLAYED&&e.sideWrites!=sw)cat=CE_SIDEWRITES;
  if(cov)covRecord(c,covS,cat);
  if(cat>=0)censusDraw(c,cat,why,drawCount,indexedDraw,e.gameRT.Get());
@@ -1133,7 +1136,12 @@ template<class F>int secondEyeDrawBody(ID3D11DeviceContext*c,F next,void*api,UIN
  else if(!ownerThread||ownerThread!=GetCurrentThreadId())reason="not_present_thread";
  if(reason){++e.guardSkipped;*why=reason;next();return CE_GUARD;}
  if(e.state!=SecondEyeLive::BUILDING){
-  if(e.beginFrame(device.Get(),c,S,T,dg_render_second_camera_eye(),seq)){next();return CE_BEGIN;}
+  if(const char*bw=e.beginFrame(device.Get(),c,S,T,dg_render_second_camera_eye(),seq)){
+   ++e.beginRefused;
+   if(bw!=e.beginWhy){e.beginWhy=bw;
+    if(logger&&e.beginLines<12){++e.beginLines;logger("second_eye: a frame could not start: %s - Two Eye rendering waits and the headset keeps showing AER\r\n",bw);}}
+   next();return CE_BEGIN;}
+  e.beginWhy=nullptr;
   dropProbe.factory=replayExecutionQuery;dropProbe.dev=device.Get();
   dropProbe.beginFrame(e.frames,e.delta,e.cpu.Sc,e.cpu.Tc,e.sourceEye);
  } else if(pair&&seq!=e.sequence){
@@ -1265,6 +1273,14 @@ void secondEyePresent(){
    missTaken[HZ_TAKEN_GROUP132],missTaken[HZ_TAKEN_GROUP],missTaken[HZ_TAKEN_ALL14],missTaken[HZ_TAKEN_OTHER],missTaken[HZ_TAKEN_NONE],missTakenLastMask,(long)cbShadowStaleDrops);
   logger("second_eye: observers after Present: %ld Presents, slots found taken back %ld, re-armed %ld; after ClearRenderTargetView: %ld slots re-armed in %ld calls (ClearView slot %ld); trace fallback notes %llu\r\n",
    (long)afterPresentCalls,(long)afterPresentTaken,(long)afterPresentRearmed,(long)hzClearRearms,(long)hzClearRearmCalls,(long)hzViewRearms,traceFallbackNotes);
+  /* A whole window without a second-eye frame while camera draws were seen (gameplay, not a title or menu): say where they ended. */
+  unsigned long long idleCamera=0;for(int k=0;k<CE_KINDS&&k<16;k++)if(k!=CE_NONINDEXED&&k!=CE_NOROUTE&&k!=CE_NOCAMERA&&k!=CE_INSTANCED)idleCamera+=e.idleCat[k];
+  if(e.frames==e.framesAtStat&&idleCamera&&secondEyeLive()){
+   char line[640];size_t n=0;line[0]=0;
+   for(int k=0;k<CE_KINDS&&k<16;k++)if(e.idleCat[k]&&n<560){int w=sprintf_s(line+n,sizeof line-n," %s=%llu",ceNames[k],e.idleCat[k]);if(w>0)n+=(size_t)w;}
+   logger("second_eye: no frame started in this window; draws ended at:%s; frame start refused %llu times since launch (last reason %s)\r\n",
+    n?line:" none seen",e.beginRefused,e.beginWhy?e.beginWhy:"none");}
+  memset(e.idleCat,0,sizeof e.idleCat);e.framesAtStat=e.frames;
   e.statFrames=0;}
 }
 void framePresent(){

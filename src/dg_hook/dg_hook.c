@@ -2729,6 +2729,7 @@ static int parse_config(char *buf, POSE *p, double *seconds,
     xc->stereo_test = 2;
     xc->second_eye = 1;
     xc->scene_blur_fix = 1;
+    xc->fov_symmetric = 0;
     xc->stereo_phase_fix = 0;
     xc->stereo_eye_x_sign = -1;
     xc->ui2d = 0; xc->ui2d_scale_mils = 750; xc->ui2d_conv_e5 = 1200; xc->ui2d_sign = 1; xc->ui2d_hold = 0; xc->feedback_skip = 1; xc->observer = 1; xc->observer_mode = 1;
@@ -3757,6 +3758,7 @@ static int parse_config(char *buf, POSE *p, double *seconds,
         else if (_stricmp(key, "xr_recenter")   == 0) xc->recenter_token = (int)v;
         else if (_stricmp(key, "stereo")        == 0) xc->stereo = (v != 0.0);
         else if (_stricmp(key, "stereo_test")   == 0) xc->stereo_test = (int)v;
+        else if (_stricmp(key, "vr_fov_symmetric") == 0) { if (v == 0.0 || v == 1.0) xc->fov_symmetric = (int)v; }
         else if (_stricmp(key, "vr_scene_blur_fix") == 0) xc->scene_blur_fix = v == 1.0;
         else if (_stricmp(key, "stereo_proj_x_sign") == 0)
             xc->stereo_proj_x_sign = (v < 0.0) ? -1 : 1;
@@ -4189,7 +4191,7 @@ static void log_bridge_summary(const char *when) {
           InterlockedCompareExchange(&g_thea_mono_frames, 0, 0),
           dg_xr_screen_frames(),
           bs.hud_hide ? "HIDDEN" : "native", bs.hud_writes, bs.hud_cleared);
-    logf_("  bridge hand: ArmCamRotateShift 0x%016llX  = [%d %d %d]"
+    logf_("  bridge hand: arm camera rotation 0x%016llX  = [%d %d %d]"
           " = [%.2f %.2f %.2f] deg%s" DG_EOL,
           bs.arm_cam_rotate_shift,
           bs.arm_cam_rot[0], bs.arm_cam_rot[1], bs.arm_cam_rot[2],
@@ -4247,7 +4249,7 @@ static void log_bridge_summary(const char *when) {
               bs.arm_work, bs.arm_camera_on, bs.arm_camera_on_ticks, bs.ticks,
               bs.arm_trigger, (bs.arm_trigger & 1) ? "SET" : "clear",
               bs.seen_arm_trigger);
-        logf_("  bridge armwork: PlayerWork 0x%016llX (derived, trigger-0xCF4)"
+        logf_("  bridge armwork: player work area 0x%016llX (derived, trigger-0xCF4)"
               "  pbody 0x%016llX  objs 0x%016llX\r\n",
               bs.player_work, bs.body_cand, bs.body_objs);
         if (bs.body_objs)
@@ -4694,7 +4696,7 @@ static void log_bridge_summary(const char *when) {
                   bs.mp_c_wp_status, bs.mp_c_wp_dir,
                   (bs.mp_c_wp_bytes >> 8) & 0xFF, bs.mp_c_wp_bytes & 0xFF);
         if (bs.mp_w_tick)
-            logf_("  bridge move probe: workL 0x%llX  PadTo %ld  WallTo %ld  Liable %ld  PadForce %ld  |  work->data %ld  data2 %ld\r\n",
+            logf_("  bridge move probe: workL 0x%llX  pad target %ld  wall target %ld  Liable %ld  pad force %ld  |  work->data %ld  data2 %ld\r\n",
                   bs.mp_c_workl, bs.mp_c_padto, bs.mp_c_wallto, bs.mp_c_liable,
                   bs.mp_c_padforce, bs.mp_c_data, bs.mp_c_data2);
     }

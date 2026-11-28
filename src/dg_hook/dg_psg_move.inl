@@ -224,7 +224,7 @@ static void psg_walk_install(uintptr_t base)
                                  image+0x53e180,image+0x53e900,&why,4)) {
             if (g_b.log) g_b.log("  psg hip: isolated movement axes from subjective look\r\n");
         } else if (g_b.log) g_b.log("  psg hip: native look sample retained (%s)\r\n",why);
-        if (g_b.log) g_b.log("  psg walk: StandStill, StandRun and CheckStep WATCH queries ready\r\n");
+        if (g_b.log) g_b.log("  psg walk: stand still, stand run and step check WATCH queries ready\r\n");
     } else {
         dg_detour_remove(&g_psg_walk_query[1]);
         dg_detour_remove(&g_psg_walk_query[0]);

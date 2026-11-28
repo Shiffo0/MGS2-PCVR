@@ -2858,12 +2858,12 @@ int dg_bridge_start(void (*log)(const char *fmt, ...),
             g_b.a.gbp_override, g_b.a.gbp_toggle, g_b.a.gbp_active,
             g_b.a.gbp_move);
         log("  bridge: tick seam = %s (copy seam %s rva 0x%08lX, publication rva 0x%08lX)\r\n",
-            g_b.seam_is_copy ? "COPY (before CheckDirection)" : "publication",
+            g_b.seam_is_copy ? "COPY (before direction check)" : "publication",
             g_b.a.copy_seam ? "resolved" : "not found",
             (unsigned long)g_b.a.copy_seam, (unsigned long)g_b.a.merge_seam);
         log("    fps move flag 0x%llX  fps toggle flag 0x%llX\r\n"
             "    subject pad bit 0x%llX  stop-aim pad bit 0x%llX\r\n"
-            "    PlayerPad.pad 0x%llX\r\n",
+            "    player pad.pad 0x%llX\r\n",
             g_b.a.pl_subject_move, g_b.a.pl_subject_toggle,
             g_b.a.pad_subject, g_b.a.pad_stop_aim, g_b.a.player_pad);
 

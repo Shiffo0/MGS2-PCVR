@@ -559,6 +559,7 @@ void dg_xr_configure(const DG_XR_CONFIG *cfg) {
     int first = !g_cfg_seen;
     int mode_changed = !first && (cfg->stereo != g_cfg.stereo ||
                                   cfg->stereo_test != g_cfg.stereo_test ||
+                                  cfg->fov_symmetric != g_cfg.fov_symmetric ||
                                   cfg->stereo_proj_x_sign != g_cfg.stereo_proj_x_sign ||
                                   cfg->stereo_eye_x_sign != g_cfg.stereo_eye_x_sign);
     if (!(next.trigger_deadzone >= 0.0 && next.trigger_deadzone < 1.0 &&
@@ -2230,6 +2231,40 @@ static void sample_hand(unsigned int hand, int index, XrTime when,
 }
 
 static void union_fov(const XrView *views, DG_PROJ_FOV *out);
+/* vr_fov_symmetric=1 (issue 10): replace each eye's vertical FOV by a symmetric one that contains it
+   (up and down both become the larger of the two). Every consumer downstream (camera, stored FOV,
+   layer FOV, sub-image) reads these views, so the picture is drawn and submitted with one frustum.
+   A taller frustum than the display shows is legal; it costs the pixels outside the visible part.
+   Left/right is not touched: the per-eye HUD placement tells the eyes apart by that offset.
+   g_fov_runtime keeps what the runtime reported, for the support line. XR thread only. */
+static XrFovf g_fov_runtime[2];
+static int g_fov_runtime_have;
+static void fov_symmetric_apply(XrView *v) {
+    static int logged = -1;
+    const float limit = 89.0f * (float)PI / 180.0f;
+    int i, ok = 1;
+    g_fov_runtime[0] = v[0].fov; g_fov_runtime[1] = v[1].fov; g_fov_runtime_have = 1;
+    if (g_cfg.fov_symmetric != 1) { logged = -1; return; }
+    for (i = 0; i < 2; i++) {
+        float up = (float)fabs((double)v[i].fov.angleUp), down = (float)fabs((double)v[i].fov.angleDown);
+        if (!_finite(up) || !_finite(down) || !(up > 0.0f && up < limit && down > 0.0f && down < limit)) ok = 0;
+    }
+    if (!ok) {
+        if (logged != 2) { logged = 2; g_log("  xr: vr_fov_symmetric=1 not applied - the runtime reported a vertical FOV outside 0..89 degrees\r\n"); }
+        return;
+    }
+    for (i = 0; i < 2; i++) {
+        float a = (float)fmax(fabs((double)v[i].fov.angleUp), fabs((double)v[i].fov.angleDown));
+        v[i].fov.angleUp = a; v[i].fov.angleDown = -a;
+    }
+    if (logged != 1) {
+        logged = 1;
+        for (i = 0; i < 2; i++)
+            g_log("  xr: vr_fov_symmetric=1 eye %d: runtime fov U%.2f D%.2f -> used U%.2f D%.2f deg (left/right unchanged)\r\n",
+                  i, g_fov_runtime[i].angleUp * 180.0 / PI, g_fov_runtime[i].angleDown * 180.0 / PI,
+                  v[i].fov.angleUp * 180.0 / PI, v[i].fov.angleDown * 180.0 / PI);
+    }
+}
 
 static void log_eye_geometry(const XrPosef *head, const XrView *views) {
     static double last[2][10];
@@ -2248,10 +2283,11 @@ static void log_eye_geometry(const XrPosef *head, const XrView *views) {
         dp[1] = (double)views[i].pose.position.y - (double)head->position.y;
         dp[2] = (double)views[i].pose.position.z - (double)head->position.z;
         qrot(qh, dp, rel);
-        cur[i][0] = (double)views[i].fov.angleLeft * 180.0 / PI;
-        cur[i][1] = (double)views[i].fov.angleRight * 180.0 / PI;
-        cur[i][2] = (double)views[i].fov.angleUp * 180.0 / PI;
-        cur[i][3] = (double)views[i].fov.angleDown * 180.0 / PI;
+        {   const XrFovf *f = g_fov_runtime_have ? &g_fov_runtime[i] : &views[i].fov;
+            cur[i][0] = (double)f->angleLeft * 180.0 / PI;
+            cur[i][1] = (double)f->angleRight * 180.0 / PI;
+            cur[i][2] = (double)f->angleUp * 180.0 / PI;
+            cur[i][3] = (double)f->angleDown * 180.0 / PI; }
         for (k = 0; k < 3; k++) cur[i][4 + k] = 2.0 * atan2(qr[k], qr[3]) * 180.0 / PI;
         for (k = 0; k < 3; k++) cur[i][7 + k] = rel[k] * 1000.0;
         for (k = 0; k < 10; k++) {
@@ -2641,6 +2677,7 @@ static const char *xr_frame_loop(void) {
             if (XR_SUCCEEDED(pfn_LocateViews(g_sess, &vli, &vs, 2, &got, view)) &&
                 got == 2 && (vs.viewStateFlags & need_v) == need_v) {
                 views_valid = 1;
+                fov_symmetric_apply(view);
             }
         }
 

@@ -1,4 +1,4 @@
-# MGS2 PCVR v0.6.1 — mod source
+# MGS2 PCVR v0.6.2 — mod source
 
 This folder contains the source of the mod itself. It contains no Metal Gear Solid 2 source code and no game assets.
 

@@ -236,12 +236,12 @@ static const PatternDef g_patterns[] = {
         2, { 2, 8 }, { 6, 12 }, 1
     },
     {
-        "NewDivingGoggles act branch",
+        "diving goggles act branch",
         "0F 84 ?? ?? ?? ?? 33 C9 E8 ?? ?? ?? ?? 39 6F",
         0, { 0, 0 }, { 0, 0 }, 0
     },
     {
-        "CheckSubjectMoveCamera aim height",
+        "subject camera check aim height",
         "F3 0F 11 2D ?? ?? ?? ?? F7 83",
         1, { 4, 0 }, { 8, 0 }, 1
     },
@@ -284,7 +284,7 @@ static const PatternDef g_patterns[] = {
     },
     {
 
-        "SetPos ArmCamRotateShift branch",
+        "SetPos arm camera rotation branch",
         "66 83 3D ?? ?? ?? ?? 00 48 8D 54 24 ?? 48 8D 0D ?? ?? ?? ?? 74",
         2, { 3, 16 }, { 8, 20 }, 1
     }
@@ -2078,14 +2078,14 @@ static int extension_relationships(const ExtensionResult *extension,
     if (patterns) {
         if (!patterns[12].ok) {
             if (print)
-                printf("  FAIL relation: ArmCamRotateShift anchor did not "
+                printf("  FAIL relation: arm camera rotation anchor did not "
                        "pass\n");
             return 0;
         }
         if (patterns[12].hits[0] < extension->wrist.function_begin ||
             patterns[12].hits[0] >= extension->wrist.adjust_or) {
             if (print)
-                printf("  FAIL relation: ArmCamRotateShift branch is not "
+                printf("  FAIL relation: arm camera rotation branch is not "
                        "inside SetPos ahead of the adjust[6] store "
                        "(0x%lX, 0x%lX..0x%lX)\n",
                        (unsigned long)patterns[12].hits[0],
@@ -2093,18 +2093,18 @@ static int extension_relationships(const ExtensionResult *extension,
                        (unsigned long)extension->wrist.adjust_or);
             ok = 0;
         } else if (print) {
-            printf("  PASS relation: ArmCamRotateShift is read in SetPos, "
+            printf("  PASS relation: arm camera rotation is read in SetPos, "
                    "ahead of the joint 6 adjustment it becomes\n");
         }
     }
     if (extension->player_pad.function_begin ==
         extension->wrist.function_begin) {
         if (print)
-            printf("  FAIL relation: PlayerPad merge and wrist share "
+            printf("  FAIL relation: player pad merge and wrist share "
                    "one unwind function\n");
         ok = 0;
     } else if (print) {
-        printf("  PASS relation: PlayerPad merge and wrist are in distinct "
+        printf("  PASS relation: player pad merge and wrist are in distinct "
                "unwind functions\n");
     }
     if (extension->masks.pad_subject ==
@@ -2310,17 +2310,17 @@ static int check_relationships(const PatternResult results[PATTERN_COUNT],
 
     if (!results[12].ok) {
         if (print)
-            printf("  FAIL relation: ArmCamRotateShift anchor did not pass\n");
+            printf("  FAIL relation: arm camera rotation anchor did not pass\n");
         return 0;
     }
     if (results[12].targets[1] + 2 != results[12].targets[0]) {
         if (print)
-            printf("  FAIL relation: ArmCamRotateShift .vy is not 2 bytes into "
+            printf("  FAIL relation: arm camera rotation .vy is not 2 bytes into "
                    "the struct the lea takes (0x%llX, 0x%llX)\n",
                    results[12].targets[1], results[12].targets[0]);
         ok = 0;
     } else if (print) {
-        printf("  PASS relation: ArmCamRotateShift address and .vy describe "
+        printf("  PASS relation: arm camera rotation address and .vy describe "
                "one SVECTOR\n");
     }
     {
@@ -2338,14 +2338,14 @@ static int check_relationships(const PatternResult results[PATTERN_COUNT],
             if (others[j] == results[12].targets[0] ||
                 others[j] == results[12].targets[1]) {
                 if (print)
-                    printf("  FAIL relation: ArmCamRotateShift aliases an "
+                    printf("  FAIL relation: arm camera rotation aliases an "
                            "existing anchor\n");
                 ok = 0;
                 break;
             }
         }
         if (print && j == 12)
-            printf("  PASS relation: ArmCamRotateShift is distinct from every "
+            printf("  PASS relation: arm camera rotation is distinct from every "
                    "other anchor\n");
     }
     return ok;
